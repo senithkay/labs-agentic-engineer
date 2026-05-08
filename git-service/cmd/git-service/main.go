@@ -235,7 +235,7 @@ func main() {
 	// service. Routes through credService.Connect — the same code path
 	// the console UI uses — so there is no parallel PAT-validation logic.
 	defaultSeedCtx, cancelDefaultSeed := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := seed.DefaultOrgPATFromEnv(defaultSeedCtx, db, cfg, credService); err != nil {
+	if err := seed.DefaultOrgPATFromEnv(defaultSeedCtx, db, cfg, credService, openBaoStore); err != nil {
 		slog.Warn("default-org seed unexpected error", "error", err)
 	}
 	cancelDefaultSeed()

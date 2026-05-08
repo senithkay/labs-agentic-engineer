@@ -175,7 +175,7 @@ export default function AsdlcLayout() {
       return 'architecture';
     }
     if (
-      matchPath('/organizations/:orgId/projects/:projectId/tasks', location.pathname)
+      matchPath('/organizations/:orgId/projects/:projectId/tasks/*', location.pathname)
     ) {
       return 'tasks';
     }

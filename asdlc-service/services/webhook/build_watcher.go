@@ -137,6 +137,7 @@ func (w *BuildWatcher) sweep(ctx context.Context) {
 			} else {
 				slog.WarnContext(ctx, "build watcher: auth retry budget exhausted",
 					"task", t.ID, "attempts", t.BuildAuthRetryCount, "budget", w.authBudget)
+				w.flipStateLabel(ctx, t.OrgID, t.LastBuildRunName, "failed")
 			}
 			continue
 		}
@@ -146,7 +147,27 @@ func (w *BuildWatcher) sweep(ctx context.Context) {
 		if err := w.projector.ApplyBuildResult(ctx, t.ID, event, errMsg); err != nil {
 			slog.ErrorContext(ctx, "build watcher: apply result failed",
 				"task", t.ID, "event", event, "error", err)
+			continue
 		}
+		labelValue := "failed"
+		if event == services.TaskEventBuildSucceeded {
+			labelValue = "succeeded"
+		}
+		w.flipStateLabel(ctx, t.OrgID, t.LastBuildRunName, labelValue)
+	}
+}
+
+// flipStateLabel patches `app-factory.openchoreo.dev/state` on the
+// WorkflowRun. Best-effort — log on failure but don't gate the projector
+// on it. The label is read by the future §6.3 list-call filter; the BFF DB
+// remains the authoritative source for task state.
+func (w *BuildWatcher) flipStateLabel(ctx context.Context, orgID, runName, value string) {
+	if runName == "" {
+		return
+	}
+	if err := w.ocClient.PatchWorkflowRunLabel(ctx, orgID, runName, "app-factory.openchoreo.dev/state", value); err != nil {
+		slog.WarnContext(ctx, "build watcher: state label patch failed",
+			"run", runName, "value", value, "error", err)
 	}
 }
 
@@ -197,47 +218,57 @@ var authFailureMarkers = []string{
 	"the requested URL returned error: 403",
 }
 
-// classifyRun maps an OC WorkflowRun status to a TaskEvent. Mirrors the
-// agent-manager precedence (Completed > Succeeded/Failed > Running). The
-// OC normalize layer reduces the conditions list to a Status string —
-// for completed runs that's the WorkflowCompleted condition's Reason
-// (e.g. "WorkflowSucceeded", "WorkflowFailed"), for in-progress runs
-// it's "Running", and on a fresh run with no conditions yet it's
-// "Pending". Match all three families.
+// classifyRun maps an OC WorkflowRun status to a TaskEvent. Terminal-state
+// decision is gated on `run.Completed` — the canonical
+// Status.Conditions[type=WorkflowCompleted, status=True] signal from the OC
+// controller (controller_conditions.go:151-152). Once terminal, the Status
+// string's Reason ("WorkflowSucceeded", "WorkflowFailed", etc.) drives the
+// success-vs-failure split.
 //
 // Phase 2 PR D §9.3 — when the run failed AND the checkout-source task's
-// outputs match an authFailureMarker, returns event="" + authFailure=true
-// so the watcher routes through the retry path instead of the terminal
-// failed path.
+// Phase ∈ {Failed, Error} with a Message matching an auth marker, returns
+// event="" + authFailure=true so the watcher routes through the retry path
+// instead of the terminal failed path.
 func classifyRun(run *models.WorkflowRun) (event services.TaskEvent, errMsg string, authFailure bool) {
-	if run == nil {
+	if run == nil || !run.Completed {
 		return "", "", false
 	}
 	s := strings.ToLower(run.Status)
 	if strings.Contains(s, "succeeded") || strings.Contains(s, "completed") {
 		return services.TaskEventBuildSucceeded, "", false
 	}
-	if strings.Contains(s, "failed") || strings.Contains(s, "error") {
-		if isGitCloneAuthFailure(run) {
-			return "", "", true
-		}
-		return services.TaskEventBuildFailed, "build failed: " + run.Status, false
+	// Treat anything else as failure once Completed=True. Failed/Error
+	// reasons surface here; legacy substring matching is kept defensive.
+	if isGitCloneAuthFailure(run) {
+		return "", "", true
 	}
-	return "", "", false
+	return services.TaskEventBuildFailed, "build failed: " + run.Status, false
 }
 
-// isGitCloneAuthFailure returns true when the failed run's checkout-source
-// task output (or any task output, as a fallback) carries one of the
-// well-known git-clone auth failure substrings.
+// isGitCloneAuthFailure returns true when the failing checkout-source task
+// matches a well-known git-clone auth marker. Drop-in replacement for the
+// previous Outputs-iterating version per
+// docs/design/auth-failure-classification.md §3 — OC's CRD does not expose
+// per-task outputs, so the previous implementation was always false. We
+// match on Tasks[].Phase ∈ {Failed, Error} on the `checkout-source` step
+// AND a substring of Tasks[].Message. Fallback to OC `/logs?task=` for
+// empty Messages is not yet wired (deferred — see §3.1 of the doc); when
+// Message is empty we return false conservatively (a non-auth failure is
+// safer than a runaway retry budget).
 func isGitCloneAuthFailure(run *models.WorkflowRun) bool {
 	for _, task := range run.Tasks {
-		for _, val := range task.Outputs {
-			for _, marker := range authFailureMarkers {
-				if strings.Contains(val, marker) {
-					return true
-				}
+		if task.Name != "checkout-source" {
+			continue
+		}
+		if task.Phase != "Failed" && task.Phase != "Error" {
+			continue
+		}
+		for _, marker := range authFailureMarkers {
+			if strings.Contains(task.Message, marker) {
+				return true
 			}
 		}
+		return false
 	}
 	return false
 }

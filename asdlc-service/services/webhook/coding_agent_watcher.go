@@ -104,28 +104,57 @@ func (w *CodingAgentWatcher) sweep(ctx context.Context) {
 		}
 		event, errMsg := classifyCodingAgentRun(run)
 		if event == "" {
-			continue // still pending/running, or succeeded — wait for webhook
+			// Still in-flight, or succeeded (success rides the GitHub
+			// pr.ready_for_review webhook). If the controller reported
+			// completion successfully, flip the state label so the §6.3
+			// list-call filter excludes it; otherwise leave it pending.
+			if run.Completed && !isCodingAgentFailure(run) {
+				w.flipStateLabel(ctx, t.OrgID, t.LastCodingAgentRunName, "succeeded")
+			}
+			continue
 		}
 		if err := w.projector.ApplyBuildResult(ctx, t.ID, event, errMsg); err != nil {
 			slog.ErrorContext(ctx, "coding-agent watcher: apply result failed",
 				"task", t.ID, "event", event, "error", err)
-		} else {
-			slog.WarnContext(ctx, "coding-agent watcher: applied terminal failure",
-				"task", t.ID, "run", t.LastCodingAgentRunName, "status", run.Status)
+			continue
 		}
+		slog.WarnContext(ctx, "coding-agent watcher: applied terminal failure",
+			"task", t.ID, "run", t.LastCodingAgentRunName, "status", run.Status)
+		w.flipStateLabel(ctx, t.OrgID, t.LastCodingAgentRunName, "failed")
 	}
 }
 
-// classifyCodingAgentRun maps OC WorkflowRun status to a TaskEvent. Returns
+// flipStateLabel patches `app-factory.openchoreo.dev/state` on the run.
+// Best-effort — failure to patch does not gate the projector update.
+func (w *CodingAgentWatcher) flipStateLabel(ctx context.Context, orgID, runName, value string) {
+	if runName == "" {
+		return
+	}
+	if err := w.ocClient.PatchWorkflowRunLabel(ctx, orgID, runName, "app-factory.openchoreo.dev/state", value); err != nil {
+		slog.WarnContext(ctx, "coding-agent watcher: state label patch failed",
+			"run", runName, "value", value, "error", err)
+	}
+}
+
+// classifyCodingAgentRun maps OC WorkflowRun status to a TaskEvent. Terminal
+// state is gated on `run.Completed` — the
+// Status.Conditions[type=WorkflowCompleted, status=True] signal. Returns
 // empty event for in-flight runs and for succeeded runs (success transitions
 // via the GitHub webhook). Only terminal-failed maps to a transition.
 func classifyCodingAgentRun(run *models.WorkflowRun) (event services.TaskEvent, errMsg string) {
-	if run == nil {
+	if run == nil || !run.Completed {
 		return "", ""
 	}
-	s := strings.ToLower(run.Status)
-	if strings.Contains(s, "failed") || strings.Contains(s, "error") {
+	if isCodingAgentFailure(run) {
 		return services.TaskEventCodingAgentFailed, "coding-agent failed: " + run.Status
 	}
 	return "", ""
+}
+
+func isCodingAgentFailure(run *models.WorkflowRun) bool {
+	if run == nil {
+		return false
+	}
+	s := strings.ToLower(run.Status)
+	return strings.Contains(s, "failed") || strings.Contains(s, "error")
 }

@@ -74,9 +74,20 @@ the end of `setup.sh` and printed in the login banner.
 | `thunder` | WSO2 Thunder IDP | 8080/8090 | Identity provider; user auth (PKCE) + service-to-service `client_credentials`. Browser URL: `http://thunder.openchoreo.localhost:8080` |
 | `openbao` | HashiCorp Vault fork | 8200 | Secret store. Holds `ANTHROPIC_API_KEY`, `GITHUB_PLATFORM_PAT`, GitHub webhook secret, BFF task-signing PEM. |
 
-Smee-client and collab-server are **deferred** — webhook delivery requires a
-public URL or manual smee tunnel; collaborative editing in the console is
-non-functional until collab-server lands.
+**GitHub webhook delivery (local dev)**: the BFF `/webhooks/github` endpoint
+has no public ingress. A host-side bridge — `deployments-v2/scripts/webhook-relay.sh`
+— runs `kubectl port-forward` + `npx smee-client` together, forwarding the
+`smee.io` channel in `.env` (`GITHUB_WEBHOOK_DELIVERY_URL`) to the BFF service.
+**Run it in a terminal that stays open**; the script's supervisor only
+restarts the two child processes, so a closed shell or long laptop sleep
+takes the whole relay down and webhook-driven task transitions
+(`pull_request.ready_for_review` / `merged`, `push`) silently stop landing.
+The cluster-health pre-flight in `docs/operations/cluster-health.md`
+covers relay liveness — see Detect step (4) and Recover step (4).
+
+Collab-server (collaborative editing in the console) is **deferred**; an
+in-cluster `smee-client` Workload to replace the host-side relay is also
+deferred.
 
 ### Running Locally
 
@@ -192,6 +203,11 @@ When the user clicks "Start Implementation" in the console:
    - `pull_request.closed merged=true` → task `* → merged`, records merge SHA
    - `pull_request.closed merged=false` → task `* → rejected`
    - `push` to default branch → BFF creates an OC `WorkflowRun` with `params.repository.revision.commit` pinned to the merge SHA. Filters components by changed paths.
+
+   There is **no polling fallback** — if the relay is down (see "GitHub
+   webhook delivery (local dev)" above), the projector never fires and
+   the task is stuck until the missed event is redelivered from the
+   smee.io channel or the GitHub Recent Deliveries panel.
 7. The build watcher (10s sweep) polls OC `WorkflowRun` status and applies `build.{succeeded,failed}` via the projector → task `building → deployed | failed`. A parallel coding-agent watcher (also 10s) polls coding-agent WorkflowRuns and applies `coding_agent.failed` on terminal pod failure → task `in_progress → failed` (success transitions ride the GitHub `pr.ready_for_review` webhook instead).
 
 **Task lifecycle**: `pending → in_progress → ready_for_review → merged → building → deployed | rejected | failed`.
@@ -298,7 +314,37 @@ bash deployments-v2/scripts/teardown.sh # remove asdlc workloads (cluster stays)
 - **Infrastructure**: k3d (local) + OpenChoreo + Thunder + OpenBao + ESO + kgateway, brought up by `deployments-v2/`
 
 
+## Design Review (OpenChoreo + WSO2 Cloud compliance)
+
+This repo ships two specialised reviewer subagents under `.claude/agents/`. They are pure subject-matter experts — not aware of App Factory's specifics — and you query them with the relevant design context:
+
+- **`oc-design-expert`** — answers questions and reviews designs strictly from the OpenChoreo perspective. Verifies against the OC sources at `/Users/wso2/openchoreo-sources/openchoreo` and docs at `/Users/wso2/openchoreo-sources/openchoreo.github.io`.
+- **`wso2cloud-expert`** — answers questions and reviews designs strictly from the WSO2 Cloud hosting perspective (GUIDELINES.md compliance, controlplane/dataplane layout, GitOps promotion, secrets, auth, gateway). Verifies against `/Users/wso2/repos/wso2cloud-deployment` (all branches) and the `agent-manager` reference at `/Users/wso2/repos/agent-manager`.
+
+**When to invoke them (do this proactively, in parallel):**
+
+Any task that meaningfully touches one of the following must be reviewed by **both agents in parallel** (single message, multiple Agent tool calls) before the change is considered complete:
+
+- New / changed OC primitives: Project, Component, Workload, ComponentType, Trait, Workflow, ReleaseBinding, SecretReference, ClusterWorkflow.
+- Changes to `asdlc-service/clients/openchoreo/` or `services/workflowrun_service.go`.
+- New env vars, secrets, or credential flows on any of the 5 long-lived services or the coding-agent runner.
+- New ingress / HTTPRoute / gateway exposure, new auth flow, new service-to-service call.
+- Changes to `deployments-v2/manifests/env-overlays/*.yaml` or the `deployments-v2/wso2cloud-deployment/` submodule.
+- Architectural / design docs in `docs/design/*.md`.
+- Anything described as "extending the platform", "new component pattern", "promotion / hosting / multi-tenancy".
+
+**How to run the review:**
+
+1. Read the design / change locally and identify the OC and cloud surfaces it touches.
+2. Send a single message with two `Agent` tool calls — one to `oc-design-expert`, one to `wso2cloud-expert`. Each prompt should describe the design in self-contained terms (do not assume the agents know App Factory) and point at the relevant App Factory files for the agents to read.
+3. Reconcile their feedback: hard violations must be fixed; soft concerns should be discussed; conflicts between the two reviewers should be surfaced explicitly to the user.
+4. Compare against `agent-manager` (the reference implementation) for any choice the reviewers flag as ambiguous.
+
+Skip the dual review only for purely local code-quality changes that have no OC or WSO2 Cloud surface (e.g. lint-only refactors inside a single function, frontend cosmetic tweaks).
+
 ## Practices
 - **Important**: Always do the proper fix, stick to patterns used by agent manager and integration platform. No hacks.
 - **Important**: If you come across a bug, fix it even if its not releted to your current task.
+- **Important**: Any change touching OpenChoreo primitives, the OC client, or WSO2 Cloud hosting (deployments, secrets, ingress, auth, env overlays, the `deployments-v2/wso2cloud-deployment` submodule) MUST go through the parallel `oc-design-expert` + `wso2cloud-expert` review described above. See the **Design Review** section.
+- **Important**: Cluster health pre-flight (local dev). Before any operation that talks to the local k3d cluster — `kubectl`, `dev-cycle.sh`, BFF / OC API calls, dispatching a task, running tests — **delegate the check to an isolated subagent** (e.g. `general-purpose`) with a prompt that says: "Read [`docs/operations/cluster-health.md`](docs/operations/cluster-health.md), run the **Detect** block, and if anything trips run **Recover** until the cluster is clean. Report back in under 100 words: healthy / what was wrong / what you did." Run it in a subagent (not in the main context) so the kubectl/event output doesn't pollute the parent. Only proceed with the requested action after the subagent reports healthy. The laptop's sleep/wake cycle frequently leaves pods transiently unhealthy and OC's mutating webhook serving 502s; without this check the agent will surface those as confusing `INTERNAL_ERROR`s instead of waiting them out.
 

@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
+	"github.com/wso2/asdlc/asdlc-service/models"
 	"github.com/wso2/asdlc/asdlc-service/repositories"
 	"github.com/wso2/asdlc/asdlc-service/services"
 	"github.com/wso2/asdlc/asdlc-service/utils"
@@ -17,20 +20,37 @@ type TaskController interface {
 	ListTasks(w http.ResponseWriter, r *http.Request)
 	ListOrgTasks(w http.ResponseWriter, r *http.Request)
 	GetTask(w http.ResponseWriter, r *http.Request)
+	GetTaskStatus(w http.ResponseWriter, r *http.Request)
 	GetTasks(w http.ResponseWriter, r *http.Request)
 	DispatchTasks(w http.ResponseWriter, r *http.Request)
 	GenerateTasks(w http.ResponseWriter, r *http.Request)
 	RegenerateTaskBody(w http.ResponseWriter, r *http.Request)
 	ExecTask(w http.ResponseWriter, r *http.Request)
+
+	// Progress endpoints — task-execution-progress.md §5.2.
+	GetTaskAgentProgress(w http.ResponseWriter, r *http.Request)
+	GetTaskBuildProgress(w http.ResponseWriter, r *http.Request)
 }
 
 type taskController struct {
 	service     services.TaskService
 	dispatchSvc services.DispatchService
+	progressSvc services.ProgressService
+	ocClient    openchoreo.ComponentClient
 }
 
-func NewTaskController(service services.TaskService, dispatchSvc services.DispatchService) TaskController {
-	return &taskController{service: service, dispatchSvc: dispatchSvc}
+func NewTaskController(
+	service services.TaskService,
+	dispatchSvc services.DispatchService,
+	progressSvc services.ProgressService,
+	ocClient openchoreo.ComponentClient,
+) TaskController {
+	return &taskController{
+		service:     service,
+		dispatchSvc: dispatchSvc,
+		progressSvc: progressSvc,
+		ocClient:    ocClient,
+	}
 }
 
 func (c *taskController) ListTasks(w http.ResponseWriter, r *http.Request) {
@@ -208,6 +228,107 @@ func (c *taskController) RegenerateTaskBody(w http.ResponseWriter, r *http.Reque
 		fmt.Fprintf(w, "data: %s\n\n", errFrame)
 		flusher.Flush()
 	}
+}
+
+// TaskStatusResponse extends the per-task GET payload with the build
+// run's per-step task list, so the console's pipeline strip can render
+// without an extra round-trip. The task fields are inlined alongside a
+// separate buildSteps slice — design §5.2.
+type TaskStatusResponse struct {
+	Task       *models.ComponentTask    `json:"task"`
+	BuildSteps []models.WorkflowRunTask `json:"buildSteps,omitempty"`
+}
+
+// GetTaskStatus combines ComponentTask + WorkflowRun.Status.Tasks[] for
+// the build run (when present). No new persisted state.
+func (c *taskController) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskId")
+	if !requireTaskID(w, taskID) {
+		return
+	}
+
+	task, err := c.service.GetTask(r.Context(), taskID)
+	if err != nil {
+		if errors.Is(err, services.ErrTaskNotFound) {
+			utils.WriteErrorResponse(w, http.StatusNotFound, "task not found")
+			return
+		}
+		slog.ErrorContext(r.Context(), "get task status: load task failed", "error", err, "taskId", taskID)
+		utils.WriteErrorResponse(w, http.StatusInternalServerError, "failed to get task")
+		return
+	}
+
+	resp := TaskStatusResponse{Task: task}
+	if task.LastBuildRunName != "" && c.ocClient != nil {
+		run, err := c.ocClient.GetWorkflowRun(r.Context(), task.OrgID, task.LastBuildRunName)
+		if err != nil {
+			// Don't fail the whole status call — surface the task without
+			// build steps. The watcher will eventually retry on its tick.
+			slog.WarnContext(r.Context(), "get task status: load build run failed",
+				"error", err, "run", task.LastBuildRunName)
+		} else if run != nil {
+			resp.BuildSteps = run.Tasks
+		}
+	}
+	utils.WriteSuccessResponse(w, http.StatusOK, resp)
+}
+
+// GetTaskAgentProgress returns coding-agent NDJSON lines pulled from
+// Observer for the per-task WorkflowRun's pod stdout. Cursor-driven —
+// pass ?sinceMillis=N (0 ⇒ initial load anchored to task.DispatchedAt).
+func (c *taskController) GetTaskAgentProgress(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskId")
+	if !requireTaskID(w, taskID) {
+		return
+	}
+	if c.progressSvc == nil {
+		utils.WriteErrorResponse(w, http.StatusServiceUnavailable, "progress_unavailable")
+		return
+	}
+	sinceMillis, _ := strconv.ParseInt(r.URL.Query().Get("sinceMillis"), 10, 64)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	resp, err := c.progressSvc.GetAgentProgress(r.Context(), taskID, sinceMillis, limit)
+	if err != nil {
+		writeProgressError(w, r, err, "get agent progress")
+		return
+	}
+	utils.WriteSuccessResponse(w, http.StatusOK, resp)
+}
+
+// GetTaskBuildProgress returns synthetic build_step lines derived from
+// the build WorkflowRun's per-step Phase/Message/timestamps. Cursor
+// driven — same shape as /progress/agent.
+func (c *taskController) GetTaskBuildProgress(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskId")
+	if !requireTaskID(w, taskID) {
+		return
+	}
+	if c.progressSvc == nil {
+		utils.WriteErrorResponse(w, http.StatusServiceUnavailable, "progress_unavailable")
+		return
+	}
+	sinceMillis, _ := strconv.ParseInt(r.URL.Query().Get("sinceMillis"), 10, 64)
+
+	resp, err := c.progressSvc.GetBuildProgress(r.Context(), taskID, sinceMillis)
+	if err != nil {
+		writeProgressError(w, r, err, "get build progress")
+		return
+	}
+	utils.WriteSuccessResponse(w, http.StatusOK, resp)
+}
+
+func writeProgressError(w http.ResponseWriter, r *http.Request, err error, op string) {
+	if errors.Is(err, services.ErrTaskNotFound) {
+		utils.WriteErrorResponse(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if errors.Is(err, services.ErrProgressUnavailable) {
+		utils.WriteErrorResponse(w, http.StatusServiceUnavailable, "progress_unavailable")
+		return
+	}
+	slog.ErrorContext(r.Context(), op+" failed", "error", err)
+	utils.WriteErrorResponse(w, http.StatusInternalServerError, op+" failed")
 }
 
 func (c *taskController) ExecTask(w http.ResponseWriter, r *http.Request) {

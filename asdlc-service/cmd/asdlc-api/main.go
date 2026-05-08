@@ -17,6 +17,7 @@ import (
 	"github.com/wso2/asdlc/asdlc-service/clients/gitservice"
 	"github.com/wso2/asdlc/asdlc-service/clients/oauth"
 	"github.com/wso2/asdlc/asdlc-service/clients/observability"
+	"github.com/wso2/asdlc/asdlc-service/clients/observer"
 	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
 	"github.com/wso2/asdlc/asdlc-service/config"
 	"github.com/wso2/asdlc/asdlc-service/controllers"
@@ -122,6 +123,32 @@ func main() {
 	if cfg.Observability.BaseURL != "" {
 		observClient = observability.NewClient(cfg.Observability.BaseURL)
 		slog.Info("Observability API", "baseURL", cfg.Observability.BaseURL)
+	}
+
+	// Observer client for /progress/* — Thunder client_credentials against
+	// the platform-default reader app. Falls back to nil (and 503 on the
+	// route) if any of the OAuth params are missing.
+	var observerTokenProvider *oauth.TokenProvider
+	var observerClient observer.Client
+	if cfg.Observability.BaseURL != "" && cfg.Observability.TokenURL != "" && cfg.Observability.ClientID != "" {
+		observerTokenProvider = oauth.NewTokenProvider(
+			cfg.Observability.TokenURL,
+			cfg.Observability.ClientID,
+			cfg.Observability.ClientSecret,
+			cfg.Observability.HostHeader,
+		)
+		var err error
+		observerClient, err = observer.NewClient(observer.Config{
+			BaseURL:       cfg.Observability.BaseURL,
+			TokenProvider: observerTokenProvider,
+		})
+		if err != nil {
+			slog.Error("Observer client init failed", "error", err)
+		} else if observerClient != nil {
+			slog.Info("Observer client configured", "baseURL", cfg.Observability.BaseURL, "clientID", cfg.Observability.ClientID)
+		}
+	} else {
+		slog.Warn("Observer client not configured — /progress/* will return 503 progress_unavailable")
 	}
 
 	// Per-target Service JWT providers. Each one is a Thunder client_credentials
@@ -302,7 +329,12 @@ func main() {
 		ComponentController:    controllers.NewComponentController(componentService, taskService),
 		SpecController:         controllers.NewSpecController(specService),
 		DesignController:       controllers.NewDesignController(designService),
-		TaskController:         controllers.NewTaskController(taskService, dispatchSvc),
+		TaskController: controllers.NewTaskController(
+			taskService,
+			dispatchSvc,
+			services.NewProgressService(taskService, componentClient, observerClient, cfg.Observability.WorkflowPlaneNamespace),
+			componentClient,
+		),
 		BoardController:        controllers.NewBoardController(boardService),
 		ConfigController:       controllers.NewConfigController(configService),
 		CollabController:       controllers.NewCollabController(projectService),

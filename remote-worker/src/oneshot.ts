@@ -19,6 +19,7 @@ import { runClaudeQuery } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
+import { emit, primeScrubber } from "./lib/progress/emitter.js";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -70,33 +71,34 @@ async function main(): Promise<number> {
   try {
     req = readDispatchFromEnv();
   } catch (err) {
+    // Pre-scrubber stderr is the only safe channel here — the bearer
+    // hasn't been read yet so we can't enroll it as a redaction literal.
     console.error("[oneshot] env validation failed:", err instanceof Error ? err.message : String(err));
     return 2;
   }
 
-  console.log(
-    `[oneshot] starting taskId=${req.taskId} component=${req.componentName} branch=${req.branchName} correlationId=${req.correlationId}`,
-  );
+  primeScrubber([process.env.ANTHROPIC_API_KEY, req.bearer]);
+
+  emit({
+    kind: "phase",
+    phase: "workspace_provisioning",
+  });
 
   let layout;
   try {
     layout = await provisionWorkspace(req);
   } catch (err) {
-    console.error("[oneshot] provisionWorkspace failed:", err instanceof Error ? err.message : String(err));
+    const msg = err instanceof Error ? err.message : String(err);
+    emit({ kind: "result", status: "failure", error: `workspace_provisioning: ${msg}` });
+    console.error("[oneshot] provisionWorkspace failed:", msg);
     return 2;
   }
+
+  emit({ kind: "phase", phase: "workspace_ready" });
 
   const log = openTaskLog(layout.workspace);
   const { completion } = runClaudeQuery(req, layout, log);
   const result = await completion;
-
-  if (result.exitCode === 0) {
-    console.log(`[oneshot] agent completed successfully taskId=${req.taskId}`);
-  } else {
-    console.error(
-      `[oneshot] agent failed taskId=${req.taskId} exitCode=${result.exitCode} error=${result.error ?? "unknown"}`,
-    );
-  }
   return result.exitCode;
 }
 

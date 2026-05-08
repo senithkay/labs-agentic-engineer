@@ -93,10 +93,29 @@ type AgentsServiceConfig struct {
 	BaseURL string
 }
 
-// ObservabilityConfig holds connection settings for the observability service.
-// BaseURL is optional; if empty, build log endpoints return an unavailable error.
+// ObservabilityConfig holds connection settings for the OpenChoreo Observer
+// service. BaseURL is optional; if empty, the BFF returns 503
+// progress_unavailable on the /progress/* endpoints. Auth fields drive the
+// Thunder client_credentials flow used to read workflow-run logs.
 type ObservabilityConfig struct {
 	BaseURL string
+
+	// OAuth client_credentials settings — wired to the platform-default
+	// reader app `openchoreo-observer-resource-reader-client` on this
+	// branch. Promoting to multi-tenant cloud should swap this for a
+	// per-app registration (see task-execution-progress.md §5.4).
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	HostHeader   string
+
+	// WorkflowPlaneNamespace is the K8s namespace where Argo schedules
+	// build + coding-agent pods. fluent-bit reads stdout from this
+	// namespace, so this is what we pass as Observer's
+	// WorkflowSearchScope.namespace. Defaults to
+	// "openchoreo-workflow-plane" — the platform-standard name for the
+	// single ClusterWorkflowPlane (`default`) in our local k3d setup.
+	WorkflowPlaneNamespace string
 }
 
 // PlatformAPIConfig holds connection settings for the OpenChoreo platform API.

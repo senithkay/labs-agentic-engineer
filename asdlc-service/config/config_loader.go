@@ -51,7 +51,12 @@ func Load() (Config, error) {
 		JWTAllowedAudience:      r.readOptionalString("JWT_AUDIENCE", "asdlc-bff"),
 		JWTResourceMetadataURL:  r.readOptionalString("JWT_RESOURCE_METADATA_URL", ""),
 		Observability: ObservabilityConfig{
-			BaseURL: r.readOptionalString("OBSERVABILITY_SERVICE_BASE_URL", ""),
+			BaseURL:                r.readOptionalString("OBSERVER_URL", r.readOptionalString("OBSERVABILITY_SERVICE_BASE_URL", "")),
+			TokenURL:               r.readOptionalString("OBSERVER_OAUTH_TOKEN_URL", ""),
+			ClientID:               r.readOptionalString("OBSERVER_OAUTH_CLIENT_ID", ""),
+			ClientSecret:           r.readOptionalString("OBSERVER_OAUTH_CLIENT_SECRET", ""),
+			HostHeader:             r.readOptionalString("OBSERVER_OAUTH_HOST_HEADER", ""),
+			WorkflowPlaneNamespace: r.readOptionalString("WORKFLOW_PLANE_NAMESPACE", "openchoreo-workflow-plane"),
 		},
 		AgentsService: AgentsServiceConfig{
 			BaseURL: r.readOptionalString("AGENTS_SERVICE_BASE_URL", ""),

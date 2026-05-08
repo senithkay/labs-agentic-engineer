@@ -44,6 +44,11 @@ type ComponentClient interface {
 	TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*models.WorkflowRun, error)
 	ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*models.WorkflowRunList, error)
 	GetWorkflowRun(ctx context.Context, orgName, runName string) (*models.WorkflowRun, error)
+	// PatchWorkflowRunLabel applies a JSON merge patch that sets a single
+	// metadata label on a WorkflowRun. The watcher uses this to flip the
+	// `app-factory.openchoreo.dev/state` label from `pending` to
+	// `succeeded` / `failed` when it observes a terminal transition.
+	PatchWorkflowRunLabel(ctx context.Context, orgName, runName, key, value string) error
 }
 
 // CodingAgentParams is the input to TriggerCodingAgent. Mirrors the schema
@@ -165,41 +170,31 @@ func normalizeWorkflowRun(run ocWorkflowRun) models.WorkflowRun {
 	}
 
 	status := "Pending"
+	completed := false
 	for _, cond := range run.Status.Conditions {
-		if cond.Type == "WorkflowCompleted" && cond.Reason != "" {
-			status = cond.Reason
-			break
+		if cond.Type == "WorkflowCompleted" {
+			if cond.Status == "True" {
+				completed = true
+			}
+			if cond.Reason != "" {
+				status = cond.Reason
+				break
+			}
 		}
 		if cond.Type == "WorkflowRunning" && cond.Status == "True" {
 			status = "Running"
 		}
 	}
 
-	var image, commit string
 	tasks := make([]models.WorkflowRunTask, 0, len(run.Status.Tasks))
 	for _, task := range run.Status.Tasks {
-		flat := models.WorkflowRunTask{Name: task.Name, Outputs: map[string]string{}}
-		if task.Outputs != nil {
-			for _, p := range task.Outputs.Parameters {
-				flat.Outputs[p.Name] = p.Value
-			}
-		}
-		tasks = append(tasks, flat)
-		// Convenience extracts retained for backward compat with the
-		// existing component_service callers that read Image / Commit
-		// directly off the flat WorkflowRun.
-		if task.Outputs != nil {
-			switch task.Name {
-			case "publish-image":
-				if v, ok := flat.Outputs["image"]; ok {
-					image = v
-				}
-			case "checkout-source":
-				if v, ok := flat.Outputs["git-revision"]; ok {
-					commit = v
-				}
-			}
-		}
+		tasks = append(tasks, models.WorkflowRunTask{
+			Name:        task.Name,
+			Phase:       task.Phase,
+			Message:     task.Message,
+			StartedAt:   task.StartedAt,
+			CompletedAt: task.CompletedAt,
+		})
 	}
 
 	return models.WorkflowRun{
@@ -208,8 +203,7 @@ func normalizeWorkflowRun(run ocWorkflowRun) models.WorkflowRun {
 		StartedAt:     run.Metadata.CreationTimestamp,
 		ComponentName: FriendlyComponentName(componentName, projectName),
 		ProjectName:   projectName,
-		Image:         image,
-		Commit:        commit,
+		Completed:     completed,
 		Tasks:         tasks,
 	}
 }
@@ -621,8 +615,9 @@ func (c *componentClient) triggerBuildInner(ctx context.Context, orgName, projec
 		Metadata: ocObjectMeta{
 			Name: runName,
 			Labels: map[string]string{
-				"openchoreo.dev/component": scopedComp,
-				"openchoreo.dev/project":   projectName,
+				"openchoreo.dev/component":           scopedComp,
+				"openchoreo.dev/project":             projectName,
+				"app-factory.openchoreo.dev/state":   "pending",
 			},
 		},
 		Spec: ocWorkflowRunSpec{
@@ -672,6 +667,7 @@ func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingA
 				"app-factory.openchoreo.dev/coding-agent-task": params.TaskID,
 				"app-factory.openchoreo.dev/project":           params.ProjectName,
 				"app-factory.openchoreo.dev/component":         scopedComp,
+				"app-factory.openchoreo.dev/state":             "pending",
 			},
 		},
 		Spec: ocWorkflowRunSpec{
@@ -745,5 +741,59 @@ func (c *componentClient) GetWorkflowRun(ctx context.Context, orgName, runName s
 	}
 	run := normalizeWorkflowRun(raw)
 	return &run, nil
+}
+
+// PatchWorkflowRunLabel sets a single label on the WorkflowRun's metadata.
+//
+// The openchoreo-api server does NOT register HTTP PATCH on
+// /api/v1/namespaces/{ns}/workflowruns/{name} — only GET and PUT. So we
+// follow the agent-manager precedent (clients/openchoreosvc/client/
+// generic-workflows.go:108-147): GET the full object, mutate
+// metadata.labels in memory, PUT it back. Safe because OC's
+// UpdateWorkflowRun handler explicitly discards the Status block from
+// the request body (workflows.go:338) — the controller owns Status
+// independently, so a stale-Status PUT can't clobber controller updates.
+//
+// Behaviour:
+//   - 404 on GET (run TTL'd away): returns nil. Nothing to patch.
+//   - Label already at the desired value: no-op (no PUT). Avoids the
+//     write-storm that would otherwise happen on every 10s watcher tick
+//     observing the same terminal state.
+//   - PUT failure: error wrapped + returned. Caller decides whether to
+//     retry on the next tick.
+func (c *componentClient) PatchWorkflowRunLabel(ctx context.Context, orgName, runName, key, value string) error {
+	url := c.workflowRunURL(c.resolveNamespace(orgName), runName)
+
+	// Fetch
+	getReq := c.newRequest(ctx, "openchoreo.PatchWorkflowRunLabel.Get", http.MethodGet, url)
+	var raw ocWorkflowRun
+	if err := c.send(ctx, getReq, &raw, http.StatusOK); err != nil {
+		var httpErr *requests.HttpError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			return nil // run already cleaned up — nothing to do
+		}
+		return fmt.Errorf("patch workflow run label (get): %w", err)
+	}
+
+	// No-op short-circuit: label already at the desired value.
+	if raw.Metadata.Labels != nil && raw.Metadata.Labels[key] == value {
+		return nil
+	}
+
+	// Mutate
+	if raw.Metadata.Labels == nil {
+		raw.Metadata.Labels = map[string]string{}
+	}
+	raw.Metadata.Labels[key] = value
+
+	// Push back. The handler discards Status, so the round-trip can't
+	// race the controller's status writes.
+	putReq := c.newRequest(ctx, "openchoreo.PatchWorkflowRunLabel.Put", http.MethodPut, url)
+	putReq.SetJSON(raw)
+	var ignored ocWorkflowRun
+	if err := c.send(ctx, putReq, &ignored, http.StatusOK); err != nil {
+		return fmt.Errorf("patch workflow run label (put): %w", err)
+	}
+	return nil
 }
 

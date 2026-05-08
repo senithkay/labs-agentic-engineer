@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Accordion, AccordionDetails, AccordionSummary, alpha, Box, CircularProgress, IconButton, PageContent, Tooltip, Typography, useTheme } from '@wso2/oxygen-ui';
 import { ChevronDown, ChevronRight, Github } from '@wso2/oxygen-ui-icons-react';
 import { useProjectBoard } from '../hooks/useProjectBoard';
 import { TasksPageHeader } from '../components/tasks/TasksPageHeader';
-import { TaskDetailPopup } from '../components/tasks/TaskDetailPopup';
 import { LabelList } from '../components/tasks/LabelList';
+import { projectTaskDetailPath } from '../lib/paths';
 import type { Task } from '../services/api';
 
 // ── Section config ──────────────────────────────────────────────────────────
@@ -38,14 +38,27 @@ interface TaskRowProps {
 function TaskRow({ task, section, orgId, projectId }: TaskRowProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+  const navigate = useNavigate();
   const rowRef = useRef<HTMLDivElement>(null);
-  const [popupOpen, setPopupOpen] = useState(false);
+  const [hovering, setHovering] = useState(false);
+
+  const handleOpen = () => {
+    if (task.componentTaskId) {
+      navigate(projectTaskDetailPath(orgId, projectId, task.componentTaskId));
+      return;
+    }
+    if (task.url) {
+      window.open(task.url, '_blank', 'noopener,noreferrer');
+    }
+  };
 
   return (
     <>
       <Box
         ref={rowRef}
-        onClick={() => setPopupOpen(p => !p)}
+        onClick={handleOpen}
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
         sx={{
           display: 'flex',
           alignItems: 'center',
@@ -55,7 +68,7 @@ function TaskRow({ task, section, orgId, projectId }: TaskRowProps) {
           cursor: 'pointer',
           borderRadius: 1.25,
           border: '1px solid',
-          borderColor: popupOpen
+          borderColor: hovering
             ? 'primary.main'
             : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)',
           ...(section.borderColor && {
@@ -69,9 +82,6 @@ function TaskRow({ task, section, orgId, projectId }: TaskRowProps) {
           bgcolor: 'background.paper',
           transition: 'border-color 0.15s, background-color 0.15s',
           '&:hover': {
-            borderColor: popupOpen
-              ? 'primary.main'
-              : isDark ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.13)',
             bgcolor: isDark ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.01)',
           },
         }}
@@ -154,19 +164,9 @@ function TaskRow({ task, section, orgId, projectId }: TaskRowProps) {
 
         {/* Chevron indicator */}
         <Box sx={{ flexShrink: 0 }}>
-          {popupOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          <ChevronRight size={16} />
         </Box>
       </Box>
-
-      <TaskDetailPopup
-        open={popupOpen}
-        anchorEl={rowRef.current}
-        task={task}
-        isInTodo={section.key === 'todo'}
-        orgId={orgId}
-        projectId={projectId}
-        onClose={() => setPopupOpen(false)}
-      />
     </>
   );
 }

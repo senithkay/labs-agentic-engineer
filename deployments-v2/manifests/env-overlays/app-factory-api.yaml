@@ -31,11 +31,19 @@ env:
     value: "asdlc-bff-to-git-service-secret"
   # SERVICE_AUTH_AGENTS_* intentionally not set — agents-service runs with JWKS
   # validation disabled (JWKS_URL not set), so service auth is unnecessary.
-  # URL the coding-agent runner pod (in `workflows-default` namespace) uses to
-  # reach git-service in the data-plane namespace. BFF passes this verbatim to
-  # the WorkflowRun parameter, which the pod reads as ASDLC_GIT_SERVICE_URL.
+  # URL the coding-agent runner pod (in `workflows-asdlc-user-projects` ns)
+  # uses to reach git-service in the data-plane release namespace. BFF
+  # passes this verbatim to the WorkflowRun parameter, which the pod
+  # reads as ASDLC_GIT_SERVICE_URL.
+  #
+  # The dp-wso2cloud-app-factory-development-<hash> suffix is derived
+  # deterministically by OC's release controller from
+  # (org=default, project=app-factory, env=development) — the hash
+  # `bad5f211` is stable across teardown+setup.sh re-runs as long as
+  # the (org, project, env) tuple stays the same. If they change,
+  # setup.sh needs to discover this dynamically.
   - key: AGENT_GIT_SERVICE_URL
-    value: "http://app-factory-git-service.dp-default-app-factory-development-be7a44ac.svc.cluster.local:3300"
+    value: "http://app-factory-git-service.dp-wso2cloud-app-factory-development-bad5f211.svc.cluster.local:3300"
   - key: BFF_TASK_SIGNING_KEY_PATH
     value: "/app/keys/task-signing.pem"
   - key: BFF_TASK_TOKEN_ISSUER
@@ -46,6 +54,29 @@ env:
     value: "${OAUTH_STATE_SIGNING_KEY}"
   - key: GITHUB_WEBHOOK_SECRET
     value: "${GITHUB_WEBHOOK_SECRET}"
+  # Observer client — task-execution-progress.md §5.4. Reads the
+  # platform-default reader OAuth app's secret out of OpenBao via the
+  # SecretReference at wso2cloud-deployment/.../secret-references/
+  # app-factory-observer-oauth.yaml. WORKFLOW_PLANE_NAMESPACE is the
+  # k8s namespace where Argo schedules build + coding-agent pods —
+  # fluent-bit on that plane ships their stdout, so this is what we
+  # pass as Observer's WorkflowSearchScope.namespace.
+  - key: OBSERVER_URL
+    value: "http://observer.openchoreo-observability-plane.svc.cluster.local:8080"
+  - key: OBSERVER_OAUTH_TOKEN_URL
+    value: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
+  - key: OBSERVER_OAUTH_CLIENT_ID
+    value: "openchoreo-observer-resource-reader-client"
+  - key: OBSERVER_OAUTH_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: app-factory-observer-oauth
+        key: client_secret
+  # WORKFLOW_PLANE_NAMESPACE is the LOGICAL namespace name; Observer
+  # prepends `workflows-` to construct the actual K8s namespace where
+  # Argo schedules pods (so this maps to k8s ns `workflows-asdlc-user-projects`).
+  - key: WORKFLOW_PLANE_NAMESPACE
+    value: "asdlc-user-projects"
 files:
   - key: task-signing.pem
     mountPath: /app/keys

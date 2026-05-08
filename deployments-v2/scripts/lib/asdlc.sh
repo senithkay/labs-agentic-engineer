@@ -12,8 +12,15 @@ seed_openbao() {
   spinner "Waiting for OpenBao to be ready" "1 min" -- \
     kubectl wait --for=condition=Ready pod -n openbao -l app.kubernetes.io/name=openbao --timeout=180s || true
 
-  log_info "seeding 4 secrets via bao kv put"
+  log_info "seeding app secrets via bao kv put"
 
+  # OpenBao runs in dev mode (in-memory), so this seeder is idempotent
+  # and re-runs every setup. It also writes the per-org github-token
+  # paths that git-service's CredentialService normally manages — this
+  # closes the state-asymmetry gap where Postgres rows survive a cluster
+  # restart but OpenBao state is wiped, leaving git-service unable to
+  # resolve the PAT for orgs that already have a DB row. See issue 1 of
+  # the platform-fixes review.
   kubectl exec -n openbao openbao-0 -- sh -c "
     bao kv put secret/apps/anthropic            key='${ANTHROPIC_API_KEY}' >/dev/null
     bao kv put secret/apps/github-platform-pat  value='${GITHUB_PLATFORM_PAT}' >/dev/null
@@ -27,6 +34,37 @@ seed_openbao() {
     bao kv put secret/apps/bff-task-signing-key pem=@/tmp/pem >/dev/null
     rm -f /tmp/pem
   " || log_warn "bao kv put for task-signing-key failed — OpenBao may already be seeded"
+
+  # Pre-seed per-org PAT at the path git-service's CredentialService
+  # expects (`secret/asdlc/{ocOrgID}/github/pat`, body `{value: <PAT>}`).
+  # Source of truth: git-service/services/credential_service.go:259 +
+  # pkg/credentials/openbao_store.go:155-186.
+  #
+  # On first setup, git-service's own seeder also writes this path. The
+  # asymmetric-state bug we're fixing: OpenBao runs in dev mode (memory)
+  # so its state is wiped on every cluster restart, while Postgres has
+  # a PVC and persists OrgCredential rows. git-service's seeder
+  # (default_org_pat.go:79-83) skips when a DB row already exists →
+  # OpenBao stays empty after a restart. Pre-seeding here on every
+  # setup makes the writes idempotent against an already-bootstrapped
+  # Postgres.
+  if [ -n "${GITHUB_PLATFORM_PAT:-}" ] && [ -n "${GITHUB_REPO_OWNER:-}" ]; then
+    local ORGS="${GITHUB_PLATFORM_PAT_SEED_ORGS:-default,admin}"
+    log_info "pre-seeding per-org PAT for: $ORGS"
+    local IFS_BAK="$IFS"
+    IFS=','
+    for org in $ORGS; do
+      org="$(echo "$org" | tr -d ' ')"
+      [ -z "$org" ] && continue
+      # Metadata-tagging (managed-by) is best-effort and not load-bearing
+      # for git-service's lookup — skipping to avoid nested-shell escaping
+      # complexity. The data write is what matters.
+      kubectl exec -n openbao openbao-0 -- sh -c "
+        bao kv put secret/asdlc/${org}/github/pat value='${GITHUB_PLATFORM_PAT}' >/dev/null
+      " || log_warn "pre-seed for org $org failed"
+    done
+    IFS="$IFS_BAK"
+  fi
 
   log_ok "OpenBao seeded"
 }
@@ -60,10 +98,11 @@ bootstrap_workloads() {
   export PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-}"
   export PUBLIC_CONSOLE_URL="${PUBLIC_CONSOLE_URL:-}"
 
-  log_info "bootstrapping ${#COMPONENTS[@]} workloads (build + import + apply)"
   source "$ROOT_DIR/deployments-v2/scripts/components.sh"
   source "$ROOT_DIR/deployments-v2/scripts/lib/images.sh"
   source "$ROOT_DIR/deployments-v2/scripts/lib/workload.sh"
+
+  log_info "bootstrapping ${#COMPONENTS[@]} workloads (build + import + apply)"
 
   for row in "${COMPONENTS[@]}"; do
     IFS='|' read -r name src dockerfile context <<<"$row"
@@ -226,8 +265,9 @@ register_streaming_timeouts() {
     return
   fi
 
-  # Clean up any stale copy from the default namespace (can't target
-  # cross-namespace HTTPRoute).
+  # Clean up any stale copy from the workload-source namespace (can't
+  # target cross-namespace HTTPRoute).
+  kubectl delete trafficpolicy app-factory-console-streaming -n "${WORKLOAD_NAMESPACE:-wso2cloud}" --ignore-not-found 2>/dev/null || true
   kubectl delete trafficpolicy app-factory-console-streaming -n default --ignore-not-found 2>/dev/null || true
 
   log_info "Applying SSE streaming timeout TrafficPolicy in $dp_ns"

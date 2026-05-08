@@ -55,7 +55,7 @@ _dc_cycle() {
 
     log_step "$name"
 
-    current_image=$(kubectl get workload "$name" -n default -o jsonpath='{.spec.container.image}' 2>/dev/null || echo "")
+    current_image=$(kubectl get workload "$name" -n "${WORKLOAD_NAMESPACE:-wso2cloud}" -o jsonpath='{.spec.container.image}' 2>/dev/null || echo "")
     current_hash="${current_image##*:}"
 
     if [ "$current_hash" = "$hash" ] && [ -n "$current_image" ]; then
@@ -69,7 +69,7 @@ _dc_cycle() {
     build_image "$name" "$src_dir" "$dockerfile" "$context" "$image"
     import_image "$image"
 
-    if kubectl get workload "$name" -n default >/dev/null 2>&1; then
+    if kubectl get workload "$name" -n "${WORKLOAD_NAMESPACE:-wso2cloud}" >/dev/null 2>&1; then
       log_info "patching existing Workload"
       patch_workload_image "$name" "$image"
     else

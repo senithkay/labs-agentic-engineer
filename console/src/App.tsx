@@ -9,6 +9,7 @@ import OrganizationCreatePage from './pages/OrganizationCreatePage';
 import ProjectCreatePage from './pages/ProjectCreatePage';
 import ProjectArchitecturePage from './pages/ProjectArchitecturePage';
 import ProjectTasksPage from './pages/ProjectTasksPage';
+import TaskDetailPage from './pages/TaskDetailPage';
 import ProjectRequirementsPage from './pages/ProjectRequirementsPage';
 import ProjectOverviewPage from './pages/ProjectOverviewPage';
 import ComponentDetailPage from './pages/ComponentDetailPage';
@@ -74,6 +75,7 @@ export function App() {
           <Route path="requirements" element={<ProjectRequirementsPage />} />
           <Route path="architecture" element={<ProjectArchitecturePage />} />
           <Route path="tasks" element={<ProjectTasksPage />} />
+          <Route path="tasks/:taskId" element={<TaskDetailPage />} />
           <Route path="implementation-plan" element={<Navigate to="../tasks" replace />} />
           <Route path="implementation" element={<Navigate to="../tasks" replace />} />
           <Route path="spec" element={<Navigate to="../requirements" replace />} />

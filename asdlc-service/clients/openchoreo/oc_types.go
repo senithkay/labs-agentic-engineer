@@ -163,18 +163,17 @@ type ocComponentList struct {
 
 // -- WorkflowRun (builds) ----------------------------------------------------
 
-type ocParameter struct {
-	Name  string `json:"name"`
-	Value string `json:"value,omitempty"`
-}
-
-type ocTaskOutputs struct {
-	Parameters []ocParameter `json:"parameters,omitempty"`
-}
-
+// ocTask is the OC CRD-canonical projection of WorkflowRun.Status.Tasks[i].
+// Per openchoreo/api/v1alpha1/workflowrun_types.go:80-109, OC surfaces only
+// {Name, Phase, Message, StartedAt, CompletedAt}. The previously-declared
+// `Outputs` field never existed on the CRD and was always nil on the wire —
+// see docs/design/auth-failure-classification.md.
 type ocTask struct {
-	Name    string         `json:"name"`
-	Outputs *ocTaskOutputs `json:"outputs,omitempty"`
+	Name        string  `json:"name"`
+	Phase       string  `json:"phase,omitempty"`
+	Message     string  `json:"message,omitempty"`
+	StartedAt   string  `json:"startedAt,omitempty"`
+	CompletedAt string  `json:"completedAt,omitempty"`
 }
 
 type ocWorkflowRunStatus struct {
