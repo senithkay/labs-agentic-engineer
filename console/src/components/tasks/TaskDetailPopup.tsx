@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import {
   alpha,
   Box,
@@ -10,9 +11,10 @@ import {
   Typography,
 } from '@wso2/oxygen-ui';
 import ReactMarkdown from 'react-markdown';
-import { Play } from '@wso2/oxygen-ui-icons-react';
+import { ChevronRight, Play } from '@wso2/oxygen-ui-icons-react';
 import { api } from '../../services/api';
 import type { Task } from '../../services/api';
+import { projectTaskDetailPath } from '../../lib/paths';
 import { AssigneeChip } from './AssigneeChip';
 import { LabelList } from './LabelList';
 
@@ -154,6 +156,20 @@ export function TaskDetailPopup({ open, anchorEl, task, isInTodo, orgId, project
               sx={{ alignSelf: 'flex-start', mt: 'auto' }}
             >
               {isExecuting ? 'Executing…' : 'Execute Now'}
+            </Button>
+          )}
+
+          {!isInTodo && task.componentTaskId && (
+            <Button
+              component={RouterLink}
+              to={projectTaskDetailPath(orgId, projectId, task.componentTaskId)}
+              variant="outlined"
+              size="small"
+              endIcon={<ChevronRight size={12} />}
+              onClick={(e: React.MouseEvent) => { e.stopPropagation(); onClose(); }}
+              sx={{ alignSelf: 'flex-start', mt: 'auto' }}
+            >
+              View execution progress
             </Button>
           )}
         </Paper>
