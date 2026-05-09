@@ -72,7 +72,7 @@ the end of `setup.sh` and printed in the login banner.
 | `app-factory-coding-agent-runner` | TypeScript, Claude Agent SDK | n/a | One-shot runner image referenced by ClusterWorkflow `app-factory-coding-agent`. Argo creates one ephemeral pod per ComponentTask; pod exits when the agent finishes. Authed via `ANTHROPIC_API_KEY` (per-WorkflowRun ExternalSecret from OpenBao). |
 | `app-factory-postgresql` | PostgreSQL 16 | 5432 | Component tasks, git repository records (`wso2cloud` namespace) |
 | `thunder` | WSO2 Thunder IDP | 8080/8090 | Identity provider; user auth (PKCE) + service-to-service `client_credentials`. Browser URL: `http://thunder.openchoreo.localhost:8080` |
-| `openbao` | HashiCorp Vault fork | 8200 | Secret store. Holds `ANTHROPIC_API_KEY`, `GITHUB_PLATFORM_PAT`, GitHub webhook secret, BFF task-signing PEM. |
+| `openbao` | HashiCorp Vault fork | 8200 | Secret store. Holds `ANTHROPIC_API_KEY`, per-org GitHub credentials at `secret/asdlc/{ouHandle}/github/pat`, GitHub webhook secret, BFF task-signing PEM. |
 
 **GitHub webhook delivery (local dev)**: the BFF `/webhooks/github` endpoint
 has no public ingress. A host-side bridge — `deployments-v2/scripts/webhook-relay.sh`
@@ -124,10 +124,12 @@ persists across reboots; only `setup.sh` brings up the platform — every
 day-to-day cycle is just `dev-cycle.sh`.
 
 **Required env values** (`deployments-v2/.env`, prompted on first run):
-`ANTHROPIC_API_KEY`. **Optional:** `GITHUB_PLATFORM_PAT` + `GITHUB_REPO_OWNER`
-auto-seed the dev-tier "default" org's credentials so users can skip the
-"Settings → GitHub Integration" step. Auto-generated on first run:
-`GITHUB_WEBHOOK_SECRET`, `OAUTH_STATE_SIGNING_KEY`, `GITHUB_WEBHOOK_PROXY_URL`
+`ANTHROPIC_API_KEY`. **Optional (local-dev only):** `LOCAL_DEV_ADMIN_GITHUB_PAT`
++ `LOCAL_DEV_ADMIN_GITHUB_OWNER` are consumed exclusively by
+`scripts/lib/seed-admin-github.sh`, which calls the public Connect API to
+pre-connect the admin org. The platform binary does not read these vars —
+no env var, manifest, or seed names an org. Auto-generated on first run:
+`GITHUB_WEBHOOK_SECRET`, `OAUTH_STATE_SIGNING_KEY`, `GITHUB_WEBHOOK_DELIVERY_URL`
 (smee.io channel), and `keys/task-signing.pem` (RSA). See
 `deployments-v2/.env.example` for the full template.
 
@@ -147,7 +149,7 @@ one, the right home is upstream.
 
 **Optional GitHub App env values** (only needed if you want App-mode connect to work — PAT mode connect is fully self-contained from the console UI): `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY_PATH`. See `docs/operations/github-app.md` for the App registration runbook.
 
-**Per-org GitHub connection**: each OC org connects via the console (Settings → GitHub Integration) using either GitHub App (preferred) or a Personal Access Token. There is no platform-wide PAT — git-service holds per-org credentials in OpenBao and routes every operation through the resolver. If `GITHUB_PLATFORM_PAT` + `GITHUB_REPO_OWNER` are set in `.env`, the "default" org is seeded automatically on first boot; otherwise navigate to `/organizations/{org}/settings/github` after login.
+**Per-org GitHub connection**: each OC org connects via the console (Settings → GitHub Integration) using either GitHub App (preferred) or a Personal Access Token. There is no platform-wide PAT — git-service holds per-org credentials in OpenBao and routes every operation through the resolver. The local-dev admin shortcut (`LOCAL_DEV_ADMIN_GITHUB_*` in `.env`) routes through the same Connect endpoint via `seed-admin-github.sh`; otherwise navigate to `/organizations/{org}/settings/github` after login.
 
 **PAT scopes** (when connecting via PAT):
 - Classic PAT: `repo` + `admin:org` + `admin:repo_hook`

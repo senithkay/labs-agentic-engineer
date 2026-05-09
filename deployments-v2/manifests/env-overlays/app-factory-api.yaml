@@ -11,8 +11,6 @@ env:
     value: "postgres://app_factory:app_factory_pwd@app-factory-postgresql.wso2cloud:5432/app_factory?sslmode=disable"
   - key: PLATFORM_API_SERVICE_BASE_URL
     value: "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080"
-  - key: PLATFORM_API_NAMESPACE_OVERRIDE
-    value: "admin=asdlc-user-projects,default=asdlc-user-projects"
   - key: JWKS_URL
     value: "http://thunder.openchoreo.localhost:8080/oauth2/jwks"
   - key: JWT_ISSUER
@@ -31,10 +29,10 @@ env:
     value: "asdlc-bff-to-git-service-secret"
   # SERVICE_AUTH_AGENTS_* intentionally not set — agents-service runs with JWKS
   # validation disabled (JWKS_URL not set), so service auth is unnecessary.
-  # URL the coding-agent runner pod (in `workflows-asdlc-user-projects` ns)
-  # uses to reach git-service in the data-plane release namespace. BFF
-  # passes this verbatim to the WorkflowRun parameter, which the pod
-  # reads as ASDLC_GIT_SERVICE_URL.
+  # URL the coding-agent runner pod (in `workflows-<ouHandle>` ns) uses
+  # to reach git-service in the data-plane release namespace. BFF passes
+  # this verbatim to the WorkflowRun parameter, which the pod reads as
+  # ASDLC_GIT_SERVICE_URL.
   #
   # The dp-wso2cloud-app-factory-development-<hash> suffix is derived
   # deterministically by OC's release controller from
@@ -57,10 +55,9 @@ env:
   # Observer client — task-execution-progress.md §5.4. Reads the
   # platform-default reader OAuth app's secret out of OpenBao via the
   # SecretReference at wso2cloud-deployment/.../secret-references/
-  # app-factory-observer-oauth.yaml. WORKFLOW_PLANE_NAMESPACE is the
-  # k8s namespace where Argo schedules build + coding-agent pods —
-  # fluent-bit on that plane ships their stdout, so this is what we
-  # pass as Observer's WorkflowSearchScope.namespace.
+  # app-factory-observer-oauth.yaml. The workflow-plane namespace name
+  # is derived per-request as `workflows-<ouHandle>` inside the BFF
+  # (no platform-wide WORKFLOW_PLANE_NAMESPACE setting any more).
   - key: OBSERVER_URL
     value: "http://observer.openchoreo-observability-plane.svc.cluster.local:8080"
   - key: OBSERVER_OAUTH_TOKEN_URL
@@ -72,8 +69,3 @@ env:
       secretKeyRef:
         name: app-factory-observer-oauth
         key: client_secret
-  # WORKFLOW_PLANE_NAMESPACE is the LOGICAL namespace name; Observer
-  # prepends `workflows-` to construct the actual K8s namespace where
-  # Argo schedules pods (so this maps to k8s ns `workflows-asdlc-user-projects`).
-  - key: WORKFLOW_PLANE_NAMESPACE
-    value: "asdlc-user-projects"

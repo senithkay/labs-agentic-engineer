@@ -56,9 +56,10 @@ type Config struct {
 	DatabaseService DatabaseServiceConfig
 
 	// AgentGitServiceURL is the URL the coding-agent runner pod uses to reach
-	// git-service for /credentials/refresh. The pod runs in the WorkflowPlane
-	// namespace (`workflows-default`), so this must be a cross-namespace FQDN
-	// (e.g. http://app-factory-git-service.<dp-ns>.svc.cluster.local:3300).
+	// git-service for /credentials/refresh. The pod runs in the per-tenant
+	// WorkflowPlane namespace (`workflows-<ouHandle>`), so this must be a
+	// cross-namespace FQDN (e.g.
+	// http://app-factory-git-service.<dp-ns>.svc.cluster.local:3300).
 	// Falls back to GitService.BaseURL when empty.
 	AgentGitServiceURL string
 
@@ -108,13 +109,6 @@ type ObservabilityConfig struct {
 	ClientSecret string
 	HostHeader   string
 
-	// WorkflowPlaneNamespace is the K8s namespace where Argo schedules
-	// build + coding-agent pods. fluent-bit reads stdout from this
-	// namespace, so this is what we pass as Observer's
-	// WorkflowSearchScope.namespace. Defaults to
-	// "openchoreo-workflow-plane" — the platform-standard name for the
-	// single ClusterWorkflowPlane (`default`) in our local k3d setup.
-	WorkflowPlaneNamespace string
 }
 
 // PlatformAPIConfig holds connection settings for the OpenChoreo platform API.
@@ -125,13 +119,6 @@ type PlatformAPIConfig struct {
 	// Used to construct image refs at deploy time — OC does not surface them
 	// in the WorkflowRun API.
 	BuildRegistry string
-	// OrgNamespaceOverride is a comma-separated list of orgHandle=namespace
-	// pairs. When set, the OC client resolves org handles to the given
-	// namespace instead of using the org handle directly. Example:
-	//   admin=dp-wso2cloud-core-development-54e3d6ff
-	// Needed when running under WSO2Cloud where K8s namespaces are
-	// auto-generated and don't match org handles.
-	OrgNamespaceOverride string
 }
 
 // GitServiceConfig holds connection settings for the git-service.

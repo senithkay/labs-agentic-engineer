@@ -112,10 +112,11 @@ func main() {
 		slog.Info("Service auth configured", "tokenURL", cfg.ServiceAuth.TokenURL, "clientID", cfg.ServiceAuth.ClientID)
 	}
 
-	// OpenChoreo clients
-	projectClient := openchoreo.NewProjectClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider, cfg.PlatformAPI.OrgNamespaceOverride)
-	componentClient := openchoreo.NewComponentClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider, cfg.PlatformAPI.OrgNamespaceOverride)
-	secretRefClient := openchoreo.NewSecretRefClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider, cfg.PlatformAPI.OrgNamespaceOverride)
+	// OpenChoreo clients. Each one resolves the OC namespace as the OC
+	// org handle directly (== ouHandle); there is no override map.
+	projectClient := openchoreo.NewProjectClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider)
+	componentClient := openchoreo.NewComponentClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider)
+	secretRefClient := openchoreo.NewSecretRefClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider)
 	namespaceClient := openchoreo.NewNamespaceClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider)
 
 	// Observability client (optional — build logs disabled when URL not set)
@@ -332,7 +333,7 @@ func main() {
 		TaskController: controllers.NewTaskController(
 			taskService,
 			dispatchSvc,
-			services.NewProgressService(taskService, componentClient, observerClient, cfg.Observability.WorkflowPlaneNamespace),
+			services.NewProgressService(taskService, componentClient, observerClient),
 			componentClient,
 		),
 		BoardController:        controllers.NewBoardController(boardService),
@@ -344,6 +345,7 @@ func main() {
 		OrgGitHubController:    orgGitHubCtrl,
 		JWKSController:         controllers.NewJWKSController(taskTokens),
 		ThunderJWKS:            thunderJWKS,
+		OrganizationService:    organizationService,
 	}
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)

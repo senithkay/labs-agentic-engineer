@@ -73,14 +73,13 @@ type componentClient struct {
 	clientBase
 }
 
-func NewComponentClient(baseURL, hostHeader string, tokenProvider *oauth.TokenProvider, namespaceOverride string) ComponentClient {
+func NewComponentClient(baseURL, hostHeader string, tokenProvider *oauth.TokenProvider) ComponentClient {
 	return &componentClient{
 		clientBase: clientBase{
 			baseURL:       baseURL,
 			hostHeader:    hostHeader,
 			httpClient:    &http.Client{Transport: httpx.WrapTransport(nil)},
 			tokenProvider: tokenProvider,
-			nsMap:         parseNamespaceOverride(namespaceOverride),
 		},
 	}
 }
@@ -241,7 +240,7 @@ func normalizeDeployment(rb ocReleaseBinding) models.Deployment {
 // -- Component CRUD ----------------------------------------------------------
 
 func (c *componentClient) ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*models.ComponentList, error) {
-	req := c.newRequest(ctx, "openchoreo.ListComponents", http.MethodGet, c.componentsURL(c.resolveNamespace(orgName)))
+	req := c.newRequest(ctx, "openchoreo.ListComponents", http.MethodGet, c.componentsURL(orgName))
 	req.SetQuery("labelSelector", fmt.Sprintf("openchoreo.dev/project=%s", projectName))
 	if limit > 0 {
 		req.SetQuery("limit", fmt.Sprintf("%d", limit))
@@ -264,7 +263,7 @@ func (c *componentClient) ListComponents(ctx context.Context, orgName, projectNa
 
 func (c *componentClient) GetComponent(ctx context.Context, orgName, projectName, componentName string) (*models.Component, error) {
 	k8sName := ScopedComponentName(projectName, componentName)
-	req := c.newRequest(ctx, "openchoreo.GetComponent", http.MethodGet, c.componentURL(c.resolveNamespace(orgName), k8sName))
+	req := c.newRequest(ctx, "openchoreo.GetComponent", http.MethodGet, c.componentURL(orgName, k8sName))
 
 	var raw ocComponent
 	if err := c.send(ctx, req, &raw, http.StatusOK); err != nil {
@@ -323,7 +322,7 @@ func (c *componentClient) CreateComponent(ctx context.Context, orgName, projectN
 		}
 	}
 
-	httpReq := c.newRequest(ctx, "openchoreo.CreateComponent", http.MethodPost, c.componentsURL(c.resolveNamespace(orgName)))
+	httpReq := c.newRequest(ctx, "openchoreo.CreateComponent", http.MethodPost, c.componentsURL(orgName))
 	httpReq.SetJSON(body)
 
 	var raw ocComponent
@@ -382,7 +381,7 @@ func (c *componentClient) CreateWorkload(ctx context.Context, orgName string, re
 	// container image can be refreshed on each deploy. Updating the Workload
 	// is what drives OC to emit a new ComponentRelease + (with autoDeploy)
 	// ReleaseBinding.
-	postReq := c.newRequest(ctx, "openchoreo.CreateWorkload", http.MethodPost, c.workloadsURL(c.resolveNamespace(orgName)))
+	postReq := c.newRequest(ctx, "openchoreo.CreateWorkload", http.MethodPost, c.workloadsURL(orgName))
 	postReq.SetJSON(body)
 	err := c.send(ctx, postReq, nil, http.StatusCreated)
 	if err == nil {
@@ -392,7 +391,7 @@ func (c *componentClient) CreateWorkload(ctx context.Context, orgName string, re
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
 		return fmt.Errorf("create workload: %w", err)
 	}
-	putReq := c.newRequest(ctx, "openchoreo.UpdateWorkload", http.MethodPut, c.workloadURL(c.resolveNamespace(orgName), body.Metadata.Name))
+	putReq := c.newRequest(ctx, "openchoreo.UpdateWorkload", http.MethodPut, c.workloadURL(orgName, body.Metadata.Name))
 	putReq.SetJSON(body)
 	if err := c.send(ctx, putReq, nil, http.StatusOK); err != nil {
 		return fmt.Errorf("update workload: %w", err)
@@ -446,7 +445,7 @@ func (c *componentClient) CreateComponentRelease(ctx context.Context, params *mo
 		},
 	}
 
-	httpReq := c.newRequest(ctx, "openchoreo.CreateComponentRelease", http.MethodPost, c.componentReleasesURL(c.resolveNamespace(params.OrgName)))
+	httpReq := c.newRequest(ctx, "openchoreo.CreateComponentRelease", http.MethodPost, c.componentReleasesURL(params.OrgName))
 	httpReq.SetJSON(body)
 
 	if err := c.send(ctx, httpReq, nil, http.StatusCreated); err != nil {
@@ -541,7 +540,7 @@ func (c *componentClient) CreateReleaseBinding(ctx context.Context, orgName, pro
 		},
 	}
 
-	httpReq := c.newRequest(ctx, "openchoreo.CreateReleaseBinding", http.MethodPost, c.releaseBindingsURL(c.resolveNamespace(orgName)))
+	httpReq := c.newRequest(ctx, "openchoreo.CreateReleaseBinding", http.MethodPost, c.releaseBindingsURL(orgName))
 	httpReq.SetJSON(body)
 
 	if err := c.send(ctx, httpReq, nil, http.StatusCreated); err != nil {
@@ -551,7 +550,7 @@ func (c *componentClient) CreateReleaseBinding(ctx context.Context, orgName, pro
 }
 
 func (c *componentClient) ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*models.DeploymentList, error) {
-	httpReq := c.newRequest(ctx, "openchoreo.ListReleaseBindings", http.MethodGet, c.releaseBindingsURL(c.resolveNamespace(orgName)))
+	httpReq := c.newRequest(ctx, "openchoreo.ListReleaseBindings", http.MethodGet, c.releaseBindingsURL(orgName))
 	httpReq.SetQuery("component", ScopedComponentName(projectName, componentName))
 
 	var raw ocReleaseBindingList
@@ -584,7 +583,7 @@ func (c *componentClient) TriggerBuildAtCommit(ctx context.Context, orgName, pro
 func (c *componentClient) triggerBuildInner(ctx context.Context, orgName, projectName, componentName, commitSHA string) (*models.WorkflowRun, error) {
 	scopedComp := ScopedComponentName(projectName, componentName)
 	// Fetch the component to get its workflow config
-	getReq := c.newRequest(ctx, "openchoreo.GetComponentForBuild", http.MethodGet, c.componentURL(c.resolveNamespace(orgName), scopedComp))
+	getReq := c.newRequest(ctx, "openchoreo.GetComponentForBuild", http.MethodGet, c.componentURL(orgName, scopedComp))
 	var rawComp ocComponent
 	if err := c.send(ctx, getReq, &rawComp, http.StatusOK); err != nil {
 		return nil, fmt.Errorf("get component for build trigger: %w", err)
@@ -625,7 +624,7 @@ func (c *componentClient) triggerBuildInner(ctx context.Context, orgName, projec
 		},
 	}
 
-	httpReq := c.newRequest(ctx, "openchoreo.TriggerBuild", http.MethodPost, c.workflowRunsURL(c.resolveNamespace(orgName)))
+	httpReq := c.newRequest(ctx, "openchoreo.TriggerBuild", http.MethodPost, c.workflowRunsURL(orgName))
 	httpReq.SetJSON(body)
 
 	var raw ocWorkflowRun
@@ -699,7 +698,7 @@ func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingA
 		},
 	}
 
-	httpReq := c.newRequest(ctx, "openchoreo.TriggerCodingAgent", http.MethodPost, c.workflowRunsURL(c.resolveNamespace(params.OrgName)))
+	httpReq := c.newRequest(ctx, "openchoreo.TriggerCodingAgent", http.MethodPost, c.workflowRunsURL(params.OrgName))
 	httpReq.SetJSON(body)
 
 	var raw ocWorkflowRun
@@ -711,7 +710,7 @@ func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingA
 }
 
 func (c *componentClient) ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*models.WorkflowRunList, error) {
-	httpReq := c.newRequest(ctx, "openchoreo.ListWorkflowRuns", http.MethodGet, c.workflowRunsURL(c.resolveNamespace(orgName)))
+	httpReq := c.newRequest(ctx, "openchoreo.ListWorkflowRuns", http.MethodGet, c.workflowRunsURL(orgName))
 	httpReq.SetQuery("labelSelector", fmt.Sprintf("openchoreo.dev/component=%s", ScopedComponentName(projectName, componentName)))
 	if limit > 0 {
 		httpReq.SetQuery("limit", fmt.Sprintf("%d", limit))
@@ -733,7 +732,7 @@ func (c *componentClient) ListWorkflowRuns(ctx context.Context, orgName, project
 }
 
 func (c *componentClient) GetWorkflowRun(ctx context.Context, orgName, runName string) (*models.WorkflowRun, error) {
-	httpReq := c.newRequest(ctx, "openchoreo.GetWorkflowRun", http.MethodGet, c.workflowRunURL(c.resolveNamespace(orgName), runName))
+	httpReq := c.newRequest(ctx, "openchoreo.GetWorkflowRun", http.MethodGet, c.workflowRunURL(orgName, runName))
 
 	var raw ocWorkflowRun
 	if err := c.send(ctx, httpReq, &raw, http.StatusOK); err != nil {
@@ -762,7 +761,7 @@ func (c *componentClient) GetWorkflowRun(ctx context.Context, orgName, runName s
 //   - PUT failure: error wrapped + returned. Caller decides whether to
 //     retry on the next tick.
 func (c *componentClient) PatchWorkflowRunLabel(ctx context.Context, orgName, runName, key, value string) error {
-	url := c.workflowRunURL(c.resolveNamespace(orgName), runName)
+	url := c.workflowRunURL(orgName, runName)
 
 	// Fetch
 	getReq := c.newRequest(ctx, "openchoreo.PatchWorkflowRunLabel.Get", http.MethodGet, url)

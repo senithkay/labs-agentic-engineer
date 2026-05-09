@@ -49,6 +49,7 @@ import {
   componentConfigsPath,
   projectCreatePath,
 } from '../lib/paths';
+import { resolveOuHandle } from '../utils/orgClaims';
 
 export default function AsdlcLayout() {
   const navigate = useNavigate();
@@ -59,8 +60,10 @@ export default function AsdlcLayout() {
   const user = { name: claims?.name || 'User', email: claims?.email || '' };
 
   // Org identity: use JWT claims (ouHandle) which matches the OC namespace.
-  // Falls back to 'default' which is the standard OC namespace.
-  const claimsOrgId = claims?.ouHandle || claims?.ouName || claims?.ouId || 'default';
+  // Same precedence as the BFF (asdlc-service/middleware/jwt.ResolveOuHandle).
+  // No silent fallback — the route param (`:orgId` from useParams) is the
+  // canonical org for the page; the JWT claim only seeds the org switcher.
+  const claimsOrgId = resolveOuHandle(claims);
   const claimsOrgName = claims?.ouName || claimsOrgId;
 
   const [collapsed, setCollapsed] = useState(false);
@@ -77,7 +80,19 @@ export default function AsdlcLayout() {
   // MOCK: Listen for copilot open requests from pages
   useEffect(() => subscribeCopilotRequest(() => setCopilotOpen(true)), []);
 
-  const routeOrgId = orgId ?? claimsOrgId;
+  // routeOrgId resolves the org for the current page. Precedence:
+  //   1. `:orgId` URL param — set on every project/component sub-route.
+  //   2. JWT claim `ouHandle` — used on org-less pages (e.g. /organizations/new).
+  // If both are missing the user has no resolvable org and we send them
+  // to "/" which renders NoOrganizationPage. This is the fail-loud
+  // counterpart to the dropped `'default'` fallback (§3.3).
+  const resolvedOrgId = orgId ?? claimsOrgId;
+  const routeOrgId = resolvedOrgId ?? '';
+  useEffect(() => {
+    if (!resolvedOrgId) {
+      navigate('/', { replace: true });
+    }
+  }, [resolvedOrgId, navigate]);
   const inProjectLevel = Boolean(projectId);
   const inComponentLevel = Boolean(projectId && componentId);
 
@@ -87,6 +102,7 @@ export default function AsdlcLayout() {
   const [orgs, setOrgs] = useState<import('../services/api/types').Organization[]>([]);
 
   useEffect(() => {
+    if (!routeOrgId) return;
     api.listProjects(routeOrgId).then(setProjects);
   }, [routeOrgId, location.pathname]);
 
@@ -106,7 +122,7 @@ export default function AsdlcLayout() {
   }, [projects, projectId]);
 
   useEffect(() => {
-    if (!projectId) { setComponents([]); return; }
+    if (!projectId || !routeOrgId) { setComponents([]); return; }
     api.listComponents(routeOrgId, projectId).then(setComponents);
   }, [routeOrgId, projectId, location.pathname]);
 

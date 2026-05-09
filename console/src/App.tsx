@@ -19,8 +19,10 @@ import ComponentConfigsPage from './pages/ComponentConfigsPage';
 import OrgSettingsLayout from './pages/OrgSettingsLayout';
 import OrgGitHubSettings from './pages/OrgGitHubSettings';
 import OrgGitHubAppPicker from './pages/OrgGitHubAppPicker';
+import NoOrganizationPage from './pages/NoOrganizationPage';
 import { setOrgGithubTokenAccessor } from './services/api/orgGithub';
-import { organizationOverviewPath } from './lib/paths';
+import { organizationCreatePath, organizationOverviewPath } from './lib/paths';
+import { resolveOuHandle } from './utils/orgClaims';
 
 // Forwards the parent layout's outlet context (e.g. setSidebarCollapsed) through
 // nested route boundaries so deep pages can still call useOutletContext().
@@ -41,12 +43,14 @@ export function App() {
     setOrgGithubTokenAccessor(null);
   }
 
-  const orgId = useMemo(() => {
-    if (!claims) return 'default';
-    return claims.ouHandle || claims.ouName || claims.ouId || 'default';
-  }, [claims]);
+  // Canonical OC org handle from the JWT claims, with the same precedence
+  // the BFF uses (asdlc-service/middleware/jwt.ResolveOuHandle). Returns
+  // undefined when the token has none of `ouHandle`/`ouName`/`ouId`; we
+  // surface that as a fail-loud "no organization" page rather than
+  // silently substituting a placeholder org.
+  const orgId = useMemo(() => resolveOuHandle(claims), [claims]);
 
-  const defaultOrgPath = organizationOverviewPath(orgId);
+  const defaultLandingPath = orgId ? organizationOverviewPath(orgId) : organizationCreatePath();
 
   if (isSignedIn && isClaimsLoading) {
     return null;
@@ -55,10 +59,13 @@ export function App() {
   return (
     <AuthGuard>
       <Routes>
-        <Route path="/login" element={<Navigate to={defaultOrgPath} replace />} />
+        <Route path="/login" element={<Navigate to={defaultLandingPath} replace />} />
 
       <Route element={isSignedIn ? <AsdlcLayout /> : <Navigate to="/login" replace />}>
-        <Route path="/" element={<Navigate to={defaultOrgPath} replace />} />
+        <Route
+          path="/"
+          element={isSignedIn && !orgId ? <NoOrganizationPage /> : <Navigate to={defaultLandingPath} replace />}
+        />
         <Route path="/organizations/new" element={<OrganizationCreatePage />} />
         <Route path="/organizations/:orgId" element={<OrgOverviewPage />} />
         <Route path="/organizations/:orgId/projects/new" element={<ProjectCreatePage />} />
@@ -92,7 +99,7 @@ export function App() {
         </Route>
       </Route>
 
-        <Route path="*" element={<Navigate to={defaultOrgPath} replace />} />
+        <Route path="*" element={<Navigate to={defaultLandingPath} replace />} />
       </Routes>
     </AuthGuard>
   );

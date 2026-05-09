@@ -14,17 +14,14 @@ seed_openbao() {
 
   log_info "seeding app secrets via bao kv put"
 
-  # OpenBao runs in dev mode (in-memory), so this seeder is idempotent
-  # and re-runs every setup. It also writes the per-org github-token
-  # paths that git-service's CredentialService normally manages — this
-  # closes the state-asymmetry gap where Postgres rows survive a cluster
-  # restart but OpenBao state is wiped, leaving git-service unable to
-  # resolve the PAT for orgs that already have a DB row. See issue 1 of
-  # the platform-fixes review.
+  # OpenBao runs in dev mode (in-memory) so the seed is idempotent and
+  # re-runs every setup. The platform binary is org-agnostic — there is
+  # no platform-wide GitHub PAT here. The admin user's PAT (if set) is
+  # written via seed-admin-github.sh after BFF + git-service are up,
+  # routed through the same Connect endpoint the console UI uses.
   kubectl exec -n openbao openbao-0 -- sh -c "
-    bao kv put secret/apps/anthropic            key='${ANTHROPIC_API_KEY}' >/dev/null
-    bao kv put secret/apps/github-platform-pat  value='${GITHUB_PLATFORM_PAT}' >/dev/null
-    bao kv put secret/apps/github-webhook       delivery_url='${GITHUB_WEBHOOK_DELIVERY_URL}' secret='${GITHUB_WEBHOOK_SECRET}' >/dev/null
+    bao kv put secret/apps/anthropic      key='${ANTHROPIC_API_KEY}' >/dev/null
+    bao kv put secret/apps/github-webhook delivery_url='${GITHUB_WEBHOOK_DELIVERY_URL}' secret='${GITHUB_WEBHOOK_SECRET}' >/dev/null
   " || log_warn "bao kv put for text secrets failed — OpenBao may already be seeded"
 
   local PEM_B64
@@ -34,37 +31,6 @@ seed_openbao() {
     bao kv put secret/apps/bff-task-signing-key pem=@/tmp/pem >/dev/null
     rm -f /tmp/pem
   " || log_warn "bao kv put for task-signing-key failed — OpenBao may already be seeded"
-
-  # Pre-seed per-org PAT at the path git-service's CredentialService
-  # expects (`secret/asdlc/{ocOrgID}/github/pat`, body `{value: <PAT>}`).
-  # Source of truth: git-service/services/credential_service.go:259 +
-  # pkg/credentials/openbao_store.go:155-186.
-  #
-  # On first setup, git-service's own seeder also writes this path. The
-  # asymmetric-state bug we're fixing: OpenBao runs in dev mode (memory)
-  # so its state is wiped on every cluster restart, while Postgres has
-  # a PVC and persists OrgCredential rows. git-service's seeder
-  # (default_org_pat.go:79-83) skips when a DB row already exists →
-  # OpenBao stays empty after a restart. Pre-seeding here on every
-  # setup makes the writes idempotent against an already-bootstrapped
-  # Postgres.
-  if [ -n "${GITHUB_PLATFORM_PAT:-}" ] && [ -n "${GITHUB_REPO_OWNER:-}" ]; then
-    local ORGS="${GITHUB_PLATFORM_PAT_SEED_ORGS:-default,admin}"
-    log_info "pre-seeding per-org PAT for: $ORGS"
-    local IFS_BAK="$IFS"
-    IFS=','
-    for org in $ORGS; do
-      org="$(echo "$org" | tr -d ' ')"
-      [ -z "$org" ] && continue
-      # Metadata-tagging (managed-by) is best-effort and not load-bearing
-      # for git-service's lookup — skipping to avoid nested-shell escaping
-      # complexity. The data write is what matters.
-      kubectl exec -n openbao openbao-0 -- sh -c "
-        bao kv put secret/asdlc/${org}/github/pat value='${GITHUB_PLATFORM_PAT}' >/dev/null
-      " || log_warn "pre-seed for org $org failed"
-    done
-    IFS="$IFS_BAK"
-  fi
 
   log_ok "OpenBao seeded"
 }
@@ -91,8 +57,9 @@ bootstrap_workloads() {
   fi
 
   # Ensure env vars used in env-overlay templates are exported for envsubst.
-  export GITHUB_REPO_OWNER="${GITHUB_REPO_OWNER:-}"
-  export GITHUB_PLATFORM_PAT="${GITHUB_PLATFORM_PAT:-}"
+  # The platform binary is org-agnostic — no platform-wide GitHub PAT or
+  # repo owner is exported here. The admin org's GitHub credential (if
+  # any) is seeded by seed-admin-github.sh after BFF + git-service are up.
   export GITHUB_WEBHOOK_DELIVERY_URL="${GITHUB_WEBHOOK_DELIVERY_URL:-}"
   export GITHUB_WEBHOOK_SECRET="${GITHUB_WEBHOOK_SECRET:-}"
   export PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-}"
@@ -317,10 +284,15 @@ register_service_oauth_clients() {
   # Service-to-service client config (client_credentials grant).
   local oauth_config='{"redirect_uris":null,"grant_types":["client_credentials"],"response_types":[],"token_endpoint_auth_method":"client_secret_post","pkce_required":false,"public_client":false,"token":{"access_token":{"validity_period":3600},"id_token":{"validity_period":3600}},"user_info":{"response_type":"JSON"}}'
 
+  # TODO: imperative Thunder OAuth client registration is acceptable
+  # only on local-app-factory. On dev/stage/prod the equivalent must
+  # be declared in the Thunder HelmRelease values block. See
+  # docs/design/default-org-seed-removal.md §3.5.
   local registered=0 skipped=0
   for pair in \
     "asdlc-bff-to-agents-service:asdlc-bff-to-agents-service-secret" \
-    "asdlc-bff-to-git-service:asdlc-bff-to-git-service-secret"; do
+    "asdlc-bff-to-git-service:asdlc-bff-to-git-service-secret" \
+    "local-dev-seeder:local-dev-seeder-secret"; do
     local client_id="${pair%%:*}" client_secret="${pair##*:}"
 
     local exists

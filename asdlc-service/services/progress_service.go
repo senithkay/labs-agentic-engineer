@@ -49,7 +49,6 @@ type progressService struct {
 	taskSvc        TaskService
 	ocClient       openchoreo.ComponentClient
 	observerClient observer.Client
-	wfPlaneNs      string
 
 	// Singleflight collapses N concurrent viewers of the same
 	// (runName, sinceMillis-bucket) into one Observer call. 1500ms wait
@@ -71,23 +70,20 @@ type progressService struct {
 // be nil — methods then return ErrProgressUnavailable so the controller
 // can map to 503.
 //
-// workflowPlaneNamespace is the LOGICAL namespace name passed to Observer
-// (e.g. "asdlc-user-projects"); Observer prepends `workflows-` to map it
-// to the actual K8s namespace where Argo schedules pods.
+// The workflow plane namespace is derived per-call from the task's
+// OrgID (== OC namespace name): Observer queries take the source OC
+// namespace and prepend `workflows-` to address the actual K8s
+// namespace where Argo schedules pods. There is no platform-wide
+// workflow-plane namespace once orgs are not collapsed.
 func NewProgressService(
 	taskSvc TaskService,
 	ocClient openchoreo.ComponentClient,
 	observerClient observer.Client,
-	workflowPlaneNamespace string,
 ) ProgressService {
-	if workflowPlaneNamespace == "" {
-		workflowPlaneNamespace = "asdlc-user-projects"
-	}
 	return &progressService{
 		taskSvc:        taskSvc,
 		ocClient:       ocClient,
 		observerClient: observerClient,
-		wfPlaneNs:      workflowPlaneNamespace,
 		stepSeen:       map[string]string{},
 	}
 }
@@ -122,7 +118,7 @@ func (s *progressService) GetAgentProgress(ctx context.Context, taskID string, s
 	}
 
 	sinceTime := resolveSinceTime(sinceMillis, task.DispatchedAt)
-	lines, err := s.fetchObserverLogs(ctx, task.LastCodingAgentRunName, sinceTime, limit+1)
+	lines, err := s.fetchObserverLogs(ctx, task.LastCodingAgentRunName, task.OrgID, sinceTime, limit+1)
 	if err != nil {
 		return nil, err
 	}
@@ -214,9 +210,13 @@ func (s *progressService) diffBuildSteps(run *models.WorkflowRun, sinceMillis in
 // concurrent viewers of the same (runName, sinceMillis-bucket) share
 // one upstream call. The bucket width is 1s to balance collapsing
 // against cursor freshness.
-func (s *progressService) fetchObserverLogs(ctx context.Context, runName string, sinceTime time.Time, limit int) ([]observer.LogLine, error) {
+//
+// ouHandle is the OC org namespace name (== ouHandle); Observer prepends
+// `workflows-` to address the workflow-plane namespace where Argo
+// schedules the pod that produced the logs.
+func (s *progressService) fetchObserverLogs(ctx context.Context, runName, ouHandle string, sinceTime time.Time, limit int) ([]observer.LogLine, error) {
 	bucket := sinceTime.Unix()
-	key := fmt.Sprintf("agent|%s|%d", runName, bucket)
+	key := fmt.Sprintf("agent|%s|%s|%d", runName, ouHandle, bucket)
 	type result struct {
 		lines []observer.LogLine
 		err   error
@@ -226,7 +226,7 @@ func (s *progressService) fetchObserverLogs(ctx context.Context, runName string,
 		// doesn't trap callers waiting via singleflight.
 		callCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		lines, err := s.observerClient.GetWorkflowRunLogs(callCtx, runName, s.wfPlaneNs, sinceTime, limit)
+		lines, err := s.observerClient.GetWorkflowRunLogs(callCtx, runName, ouHandle, sinceTime, limit)
 		return result{lines: lines, err: err}, nil
 	})
 	select {
@@ -247,7 +247,7 @@ func (s *progressService) fetchObserverLogs(ctx context.Context, runName string,
 	case <-time.After(1500 * time.Millisecond):
 		// Singleflight wait cap — fall through to a direct call so the
 		// caller still gets a response even if the leader is slow.
-		return s.observerClient.GetWorkflowRunLogs(ctx, runName, s.wfPlaneNs, sinceTime, limit)
+		return s.observerClient.GetWorkflowRunLogs(ctx, runName, ouHandle, sinceTime, limit)
 	}
 }
 
