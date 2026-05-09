@@ -17,6 +17,13 @@ const RequestBody = z.object({
  * skills/document-generation/index.ts). The body carries optional source
  * files (filename → content) and an optional user prompt. Response is the
  * AI SDK UI Message Stream over SSE.
+ *
+ * Skills that declare a `postProcess` hook (e.g. wireframes / domain-model
+ * which emit a tiny DSL but persist as Excalidraw JSON) get a final
+ * `text-delta` chunk with `{ replace: true, delta: <transformed> }` emitted
+ * after the live stream finishes. The BFF treats `replace: true` as a
+ * signal to discard everything previously accumulated and use only this
+ * payload as the file content.
  */
 export function registerDocumentGeneration(app: express.Express) {
   app.post(
@@ -72,11 +79,58 @@ export function registerDocumentGeneration(app: express.Express) {
         },
       });
 
+      // Buffer the live stream so we can apply the skill's post-processor on
+      // close. The downstream consumer still sees every chunk in real time
+      // (used by the console for best-effort live preview).
+      let accumulated = "";
+      let sawFinish = false;
+
       try {
         for await (const chunk of result.toUIMessageStream()) {
           if (abortController.signal.aborted) break;
+          if (
+            typeof chunk === "object" &&
+            chunk !== null &&
+            (chunk as { type?: string }).type === "text-delta"
+          ) {
+            const delta = (chunk as { delta?: unknown }).delta;
+            if (typeof delta === "string") accumulated += delta;
+          }
+          if (
+            typeof chunk === "object" &&
+            chunk !== null &&
+            (chunk as { type?: string }).type === "finish"
+          ) {
+            sawFinish = true;
+          }
           res.write(`data: ${JSON.stringify(chunk)}\n\n`);
         }
+
+        if (skill.postProcess && sawFinish && !abortController.signal.aborted) {
+          try {
+            const transformed = skill.postProcess.transform(accumulated);
+            // Emit a synthetic text-delta with replace:true. Keeps wire format
+            // additive — older clients (BFF without replace handling) will
+            // append it; newer clients reset their buffer.
+            const replaceChunk = {
+              type: "text-delta",
+              delta: transformed,
+              replace: true,
+            };
+            res.write(`data: ${JSON.stringify(replaceChunk)}\n\n`);
+            console.log(
+              `[document-generation/${skillId}] post-processed ${accumulated.length} -> ${transformed.length} chars`,
+            );
+          } catch (err) {
+            console.error(`[document-generation/${skillId}] postProcess failed:`, err);
+            const errorChunk = {
+              type: "error",
+              errorText: err instanceof Error ? err.message : String(err),
+            };
+            res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
+          }
+        }
+
         res.write("data: [DONE]\n\n");
       } catch (err) {
         console.error(`[document-generation/${skillId}] pipe error:`, err);

@@ -3,12 +3,16 @@ import { requirementsFromPrompt } from "./requirements-from-prompt.js";
 import { functionalRequirements } from "./functional-requirements.js";
 import { nonFunctionalRequirements } from "./non-functional-requirements.js";
 import { userStories } from "./user-stories.js";
+import { wireframes } from "./wireframes.js";
+import { domainModel } from "./domain-model.js";
 
 const SKILLS: DocumentGenerationSkill[] = [
   requirementsFromPrompt,
   functionalRequirements,
   nonFunctionalRequirements,
   userStories,
+  wireframes,
+  domainModel,
 ];
 
 const SKILLS_BY_ID = new Map<string, DocumentGenerationSkill>(

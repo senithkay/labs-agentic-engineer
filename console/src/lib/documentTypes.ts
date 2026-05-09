@@ -7,7 +7,9 @@ export type DocumentTypeId =
   | 'requirements'
   | 'functional-requirements'
   | 'non-functional-requirements'
-  | 'user-stories';
+  | 'user-stories'
+  | 'wireframes'
+  | 'domain-model';
 
 export interface DocumentType {
   id: DocumentTypeId;
@@ -64,6 +66,34 @@ export const DOCUMENT_TYPES: DocumentType[] = [
     generationSkillId: 'user-stories',
     generationSourceFiles: ['requirements.md', 'functional-requirements.md'],
   },
+  {
+    id: 'wireframes',
+    label: 'Wireframes',
+    description: 'UI sketches and screen flows (Excalidraw canvas).',
+    defaultFilename: 'wireframes.excalidraw',
+    extension: '.excalidraw',
+    unique: false,
+    generationSkillId: 'wireframes',
+    generationSourceFiles: [
+      'requirements.md',
+      'functional-requirements.md',
+      'user-stories.md',
+    ],
+  },
+  {
+    id: 'domain-model',
+    label: 'Domain Model',
+    description: 'Entities, relationships, and domain concepts (Excalidraw canvas).',
+    defaultFilename: 'domain-model.excalidraw',
+    extension: '.excalidraw',
+    unique: false,
+    generationSkillId: 'domain-model',
+    generationSourceFiles: [
+      'requirements.md',
+      'functional-requirements.md',
+      'user-stories.md',
+    ],
+  },
 ];
 
 const DOCUMENT_TYPES_BY_ID = new Map<DocumentTypeId, DocumentType>(
@@ -77,16 +107,18 @@ export function getDocumentType(id: DocumentTypeId | string): DocumentType | und
 /**
  * Match a filename to its document type. Falls back to undefined for
  * filenames that don't correspond to a registered type (user-renamed docs).
+ *
+ * Multiple types may share an extension (e.g. `wireframes` and `domain-model`
+ * are both `.excalidraw`); the stem prefix disambiguates them.
  */
 export function documentTypeForFile(filename: string): DocumentType | undefined {
   const lower = filename.toLowerCase();
   return DOCUMENT_TYPES.find((t) => {
-    // Exact match (e.g. "requirements.md") OR derived match
-    // (e.g. "functional-requirements-2.md" maps to functional-requirements).
+    const ext = t.extension.toLowerCase();
     if (lower === t.defaultFilename.toLowerCase()) return true;
     if (!t.unique) {
-      const stem = t.defaultFilename.replace(/\.md$/i, '').toLowerCase();
-      if (lower.startsWith(stem) && lower.endsWith('.md')) return true;
+      const stem = t.defaultFilename.slice(0, -ext.length).toLowerCase();
+      if (lower.startsWith(stem) && lower.endsWith(ext)) return true;
     }
     return false;
   });
@@ -102,11 +134,12 @@ export function nextFilenameFor(type: DocumentType, existing: string[]): string 
   if (type.unique) {
     return type.defaultFilename;
   }
-  const stem = type.defaultFilename.replace(/\.md$/i, '');
+  const ext = type.extension;
+  const stem = type.defaultFilename.slice(0, -ext.length);
   if (!existingSet.has(type.defaultFilename.toLowerCase())) {
     return type.defaultFilename;
   }
   let n = 2;
-  while (existingSet.has(`${stem}-${n}.md`.toLowerCase())) n++;
-  return `${stem}-${n}.md`;
+  while (existingSet.has(`${stem}-${n}${ext}`.toLowerCase())) n++;
+  return `${stem}-${n}${ext}`;
 }

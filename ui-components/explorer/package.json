@@ -12,7 +12,8 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
-    "@asdlc/md-editor": "workspace:*"
+    "@asdlc/md-editor": "workspace:*",
+    "@asdlc/excalidraw-editor": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0",

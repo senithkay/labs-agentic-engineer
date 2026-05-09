@@ -221,6 +221,9 @@ func TestValidateRequirementFilename(t *testing.T) {
 		{"main", "requirements.md", false},
 		{"functional", "functional-requirements.md", false},
 		{"upper-MD", "Requirements.MD", false},
+		{"excalidraw", "wireframes.excalidraw", false},
+		{"excalidraw-suffixed", "domain-model-2.excalidraw", false},
+		{"excalidraw-upper", "Diagram.EXCALIDRAW", false},
 
 		{"empty", "", true},
 		{"with slash", "sub/file.md", true},
@@ -229,6 +232,7 @@ func TestValidateRequirementFilename(t *testing.T) {
 		{"dotdot", "..", true},
 		{"no extension", "requirements", true},
 		{"wrong extension", "requirements.txt", true},
+		{"excalidraw-json", "diagram.excalidraw.json", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

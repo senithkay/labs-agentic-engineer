@@ -248,12 +248,20 @@ func (s *requirementsService) StreamGenerate(
 			Type      string `json:"type"`
 			Delta     string `json:"delta"`
 			ErrorText string `json:"errorText"`
+			// Replace, when set, signals that the skill has post-processed
+			// the live deltas and this delta carries the final payload to
+			// persist (e.g. wireframes/domain-model: DSL -> Excalidraw JSON).
+			// We discard everything previously accumulated.
+			Replace bool `json:"replace,omitempty"`
 		}
 		if err := json.Unmarshal(payload, &chunk); err != nil {
 			continue
 		}
 		switch chunk.Type {
 		case "text-delta":
+			if chunk.Replace {
+				accumulated.Reset()
+			}
 			accumulated.WriteString(chunk.Delta)
 		case "finish":
 			sawFinish = true

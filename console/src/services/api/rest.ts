@@ -305,13 +305,18 @@ export const restApi = {
    * Stream document generation for a specific requirement file via the
    * skill-routed endpoint. The skill ID, source filenames, and optional
    * user prompt are looked up by the caller from the document-types registry.
+   *
+   * `onDelta` receives each text-delta as it arrives. Skills with a
+   * post-processor (wireframes / domain-model) emit a final delta with
+   * `opts.replace = true` carrying the persisted payload — callers should
+   * reset their accumulator and use the delta verbatim.
    */
   async generateRequirementFile(
     orgHandle: string,
     projectId: string,
     filename: string,
     body: { skillId: string; sources?: string[]; prompt?: string },
-    onDelta: (delta: string) => void,
+    onDelta: (delta: string, opts?: { replace?: boolean }) => void,
     signal?: AbortSignal,
   ): Promise<boolean> {
     const headers: Record<string, string> = {
@@ -351,7 +356,7 @@ export const restApi = {
           try {
             const chunk = JSON.parse(payload);
             if (chunk.type === 'text-delta' && typeof chunk.delta === 'string') {
-              onDelta(chunk.delta);
+              onDelta(chunk.delta, chunk.replace ? { replace: true } : undefined);
             } else if (chunk.type === 'error') {
               errored = true;
             }

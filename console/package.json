@@ -18,6 +18,7 @@
   "dependencies": {
     "@asdlc/md-editor": "workspace:*",
     "@asdlc/explorer": "workspace:*",
+    "@asdlc/excalidraw-dsl": "workspace:*",
     "@asdlc/project-status": "workspace:*",
     "@asgardeo/react": "^0.20.0",
     "@emotion/react": "11.14.0",

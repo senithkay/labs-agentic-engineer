@@ -32,6 +32,7 @@ import {
   nextFilenameFor,
   type DocumentType,
 } from '../lib/documentTypes';
+import { tryDslToExcalidraw, type DslKind } from '@asdlc/excalidraw-dsl';
 
 interface LayoutContext {
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -466,8 +467,13 @@ export default function ProjectRequirementsPage() {
       const type = getDocumentType(typeId);
       if (!type) return undefined;
       const filename = nextFilenameFor(type, Object.keys(savedFiles));
-      // Optimistically create with empty content; server PUT happens via auto-save when user types.
-      const initial = `# ${type.label}\n\nGenerate from existing documents using the Sparkles button above.`;
+      // Optimistically create with starter content; server PUT happens via auto-save when user types.
+      // Markdown gets a heading + hint; canvas-backed types start blank
+      // because the editor parses empty string as a blank scene and any
+      // markdown placeholder would be invalid JSON.
+      const initial = type.extension === '.excalidraw'
+        ? ''
+        : `# ${type.label}\n\nGenerate from existing documents using the Sparkles button above.`;
       setLiveContents((prev) => ({ ...prev, [filename]: initial }));
       setSavedFiles((prev) => ({ ...prev, [filename]: '' }));
       setActivePath(filename);
@@ -540,6 +546,19 @@ export default function ProjectRequirementsPage() {
 
     const filename = activePath;
     const skillId = activeDocType.generationSkillId;
+    // Excalidraw-backed skills (wireframes / domain-model) stream a tiny DSL
+    // and emit a final `replace:true` delta with the converted JSON. While
+    // the DSL is in flight we run the same conversion client-side for a
+    // best-effort live preview on the canvas — partial DSL that doesn't
+    // parse yet just leaves the canvas at its previous state.
+    const excalidrawKind: DslKind | null =
+      filename.toLowerCase().endsWith('.excalidraw')
+        ? activeDocType.id === 'wireframes'
+          ? 'wireframes'
+          : activeDocType.id === 'domain-model'
+            ? 'domain-model'
+            : null
+        : null;
     let accumulated = '';
     const ok = await api.generateRequirementFile(
       routeOrgId,
@@ -549,9 +568,25 @@ export default function ProjectRequirementsPage() {
         skillId,
         sources: activeDocType.generationSourceFiles,
       },
-      (delta) => {
+      (delta, opts) => {
         if (!delta) return;
-        accumulated += delta;
+        if (opts?.replace) {
+          accumulated = delta;
+        } else {
+          accumulated += delta;
+        }
+        if (excalidrawKind) {
+          if (opts?.replace) {
+            // Final converted Excalidraw JSON from the agents-service.
+            setLiveContents((prev) => ({ ...prev, [filename]: delta }));
+          } else {
+            const attempt = tryDslToExcalidraw(excalidrawKind, accumulated);
+            if (attempt.ok) {
+              setLiveContents((prev) => ({ ...prev, [filename]: attempt.json }));
+            }
+          }
+          return;
+        }
         setLiveContents((prev) => ({ ...prev, [filename]: accumulated }));
         editorRef.current?.setActiveMarkdown(accumulated);
       },
@@ -635,7 +670,15 @@ export default function ProjectRequirementsPage() {
   const editorCollab: CollabConfig | undefined =
     connected && !viewingHistorical ? collabConfig : undefined;
 
-  const canShowDiff = hasUnsavedChanges && lastTaggedActive !== null && !viewingHistorical && !streamingMain;
+  // Diff is markdown-only — the underlying MdEditor renders inline diff
+  // decorations, which don't apply to canvas-backed (.excalidraw) files.
+  const isCanvasFile = activePath?.toLowerCase().endsWith('.excalidraw') ?? false;
+  const canShowDiff =
+    hasUnsavedChanges &&
+    lastTaggedActive !== null &&
+    !viewingHistorical &&
+    !streamingMain &&
+    !isCanvasFile;
   const renderDiff = showDiff && canShowDiff;
 
   const generateLabel = activeDocType?.generationSourceFiles?.length

@@ -231,6 +231,7 @@ export function Explorer({
         {activePath && activeContent !== undefined ? (
           <ActiveFileEditor
             key={activePath}
+            activePath={activePath}
             initialContent={activeContent}
             onChange={handleEditorChange}
             editorProps={editorProps}

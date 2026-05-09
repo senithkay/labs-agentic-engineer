@@ -187,8 +187,23 @@ func validateRelPath(relPath string) error {
 	return nil
 }
 
+// allowedRequirementExts is the set of file extensions recognised inside
+// `.asdlc/requirements/`. Markdown holds prose; `.excalidraw` holds
+// Excalidraw scene JSON for wireframes / domain models.
+var allowedRequirementExts = []string{".md", ".excalidraw"}
+
+func hasAllowedRequirementExt(name string) bool {
+	lower := strings.ToLower(name)
+	for _, ext := range allowedRequirementExts {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 // validateRequirementFilename ensures `name` is a single basename ending in
-// `.md` (no path separators, no traversal).
+// one of the allowed requirement extensions (no path separators, no traversal).
 func validateRequirementFilename(name string) error {
 	if name == "" {
 		return fmt.Errorf("%w: empty filename", ErrArtifactPathInvalid)
@@ -199,8 +214,8 @@ func validateRequirementFilename(name string) error {
 	if name == "." || name == ".." {
 		return fmt.Errorf("%w: invalid filename", ErrArtifactPathInvalid)
 	}
-	if !strings.HasSuffix(strings.ToLower(name), ".md") {
-		return fmt.Errorf("%w: requirement files must end with .md", ErrArtifactPathInvalid)
+	if !hasAllowedRequirementExt(name) {
+		return fmt.Errorf("%w: requirement files must end with %s", ErrArtifactPathInvalid, strings.Join(allowedRequirementExts, " or "))
 	}
 	return nil
 }
@@ -333,7 +348,7 @@ func readMarkdownDir(dir string) (map[string]string, error) {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasSuffix(strings.ToLower(name), ".md") {
+		if !hasAllowedRequirementExt(name) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, name))
@@ -956,7 +971,7 @@ func readMarkdownDirAtTag(ctx context.Context, clonePath, tag, relPath string) (
 	files := make(map[string]string)
 	for _, name := range strings.Split(strings.TrimSpace(out), "\n") {
 		name = strings.TrimSpace(name)
-		if name == "" || !strings.HasSuffix(strings.ToLower(name), ".md") {
+		if name == "" || !hasAllowedRequirementExt(name) {
 			continue
 		}
 		content, err := runGitOutput(ctx, clonePath, "show", tag+":"+filepath.Join(relPath, name))

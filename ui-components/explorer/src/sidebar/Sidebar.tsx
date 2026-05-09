@@ -49,12 +49,21 @@ interface DocInfo {
   headingCount: number;
 }
 
+// Extensions whose suffix is hidden in the sidebar label.
+const STRIP_EXT_RE = /\.(md|markdown|excalidraw)$/i;
+
+function stripExtension(path: string): string {
+  return path.replace(STRIP_EXT_RE, '');
+}
+
 function computeDocInfo(path: string, markdown: string): DocInfo {
-  // Always show the filename (without the .md/.markdown extension) as the
-  // sidebar title — file identity beats document title here. The full TOC
-  // (including any H1) stays expandable underneath.
+  // Always show the filename (without its known extension) as the sidebar
+  // title — file identity beats document title here. The full TOC
+  // (including any H1) stays expandable underneath. Non-markdown files
+  // (e.g. *.excalidraw) parse to an empty TOC and render without an
+  // outline.
   const parsed = parseToc(markdown);
-  const title = path.replace(/\.(md|markdown)$/i, '');
+  const title = stripExtension(path);
   return { title, toc: parsed, headingCount: parsed.length };
 }
 
@@ -256,7 +265,7 @@ export function Sidebar({
               const isDirty = dirtyPaths.has(path);
               const isRenaming = renamingPath === path;
               const info = docInfoByPath.get(path);
-              const displayTitle = info?.title ?? path.replace(/\.(md|markdown)$/i, '');
+              const displayTitle = info?.title ?? stripExtension(path);
               const toc = info?.toc ?? [];
               const headingCount = info?.headingCount ?? 0;
               const isCollapsed = collapsedDocs.has(path);
