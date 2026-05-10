@@ -241,18 +241,84 @@ func (p *Projector) ApplyBuildResult(
 	})
 }
 
-// errTaskNotFound is a sentinel for "no task with this PR number" so callers
-// can distinguish from real DB errors.
+// LinkTaskByIssue persists per-PR fields (PullRequestNumber,
+// PullRequestURL, BranchName, …) on the task identified by the
+// (repoFullName, issueNumber) tuple, under the same per-task advisory
+// lock used by ApplyToTaskByPR. No state transition — callers chain
+// ApplyToTaskByPR after to advance the lifecycle. Returns
+// errTaskNotFound when no task matches the issue (a human-opened PR
+// citing an unrelated issue, or a stale repo row).
+//
+// fillFields runs inside the transaction; it MUST only mutate columns
+// that are safe to write without going through ApplyTaskEvent
+// (PullRequestNumber, PullRequestURL, BranchName).
+func (p *Projector) LinkTaskByIssue(
+	ctx context.Context,
+	repoFullName string,
+	issueNumber int,
+	fillFields func(t *models.ComponentTask),
+) error {
+	if issueNumber <= 0 {
+		return fmt.Errorf("invalid issue number")
+	}
+	if repoFullName == "" {
+		return fmt.Errorf("repoFullName is required")
+	}
+	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		projectID, err := lookupProjectByRepo(tx, repoFullName)
+		if err != nil {
+			return fmt.Errorf("resolve project for repo %q: %w", repoFullName, err)
+		}
+		if projectID == "" {
+			return errTaskNotFound{issueNumber: issueNumber, repoFullName: repoFullName}
+		}
+
+		var task models.ComponentTask
+		err = tx.Where("project_id = ? AND issue_number = ?", projectID, issueNumber).
+			First(&task).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errTaskNotFound{issueNumber: issueNumber, repoFullName: repoFullName}
+		}
+		if err != nil {
+			return fmt.Errorf("find task by issue: %w", err)
+		}
+		if err := acquireTaskLock(tx, task.ID); err != nil {
+			return err
+		}
+		// Re-read under the lock — same belt-and-suspenders pattern used
+		// by ApplyToTaskByPR.
+		if err := tx.First(&task, "id = ?", task.ID).Error; err != nil {
+			return fmt.Errorf("re-read task: %w", err)
+		}
+		if fillFields != nil {
+			fillFields(&task)
+		}
+		now := time.Now().UTC()
+		task.LastEventAt = &now
+		return tx.Save(&task).Error
+	})
+}
+
+// errTaskNotFound is a sentinel for "no task with this PR number" (or
+// issue number, when set via LinkTaskByIssue) so callers can distinguish
+// from real DB errors.
 type errTaskNotFound struct {
 	prNumber     int
+	issueNumber  int
 	repoFullName string
 }
 
 func (e errTaskNotFound) Error() string {
-	if e.repoFullName != "" {
+	switch {
+	case e.issueNumber > 0 && e.repoFullName != "":
+		return fmt.Sprintf("no task for issue #%d in repo %s", e.issueNumber, e.repoFullName)
+	case e.issueNumber > 0:
+		return fmt.Sprintf("no task for issue #%d", e.issueNumber)
+	case e.repoFullName != "":
 		return fmt.Sprintf("no task for PR #%d in repo %s", e.prNumber, e.repoFullName)
+	default:
+		return fmt.Sprintf("no task for PR #%d", e.prNumber)
 	}
-	return fmt.Sprintf("no task for PR #%d", e.prNumber)
 }
 
 // IsTaskNotFound reports whether err comes from ApplyToTaskByPR with no

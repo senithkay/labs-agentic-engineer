@@ -48,12 +48,14 @@ type ComponentClient interface {
 
 // CodingAgentParams is the input to TriggerCodingAgent. Mirrors the schema
 // of `app-factory-coding-agent` ClusterWorkflow. All fields are required.
+// The agent itself creates the feature branch and opens the PR (with
+// `Closes #<issueNumber>` so the BFF webhook can link it back to the
+// task), so no branch is plumbed through here.
 type CodingAgentParams struct {
 	OrgName       string
 	ProjectName   string
 	ComponentName string
 	TaskID        string
-	BranchName    string
 	Prompt        string
 	RepoURL       string
 	IdentityName  string
@@ -671,7 +673,6 @@ func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingA
 						OrgID:         params.OrgName,
 						ProjectID:     params.ProjectName,
 						ComponentName: params.ComponentName,
-						BranchName:    params.BranchName,
 						Prompt:        params.Prompt,
 					},
 					Repository: &ocWorkflowRepository{

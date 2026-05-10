@@ -41,9 +41,10 @@ type WorkflowRunService interface {
 	RetryAuthFailedBuild(ctx context.Context, task *models.ComponentTask) (runName string, err error)
 	// TriggerCodingAgent creates a WorkflowRun of ClusterWorkflow
 	// `app-factory-coding-agent` for the per-task ephemeral pod that runs the
-	// Claude Agent SDK. Replaces the legacy `remote-worker /dispatch` HTTP
-	// call. Caller has already set up the GitHub artifacts (issue, branch,
-	// draft PR) and resolved the credential identity.
+	// Claude Agent SDK. The pod clones the project's repo at its default
+	// branch; the agent itself creates the feature branch and opens the PR
+	// with `Closes #<issueNumber>`. The dispatch caller has already created
+	// the GitHub issue and resolved the credential identity.
 	TriggerCodingAgent(ctx context.Context, params CodingAgentTrigger) (runName string, err error)
 }
 
@@ -273,7 +274,6 @@ func (s *workflowRunService) TriggerCodingAgent(ctx context.Context, p CodingAge
 		ProjectName:   p.Task.ProjectID,
 		ComponentName: p.Task.ComponentName,
 		TaskID:        p.Task.ID,
-		BranchName:    p.Task.BranchName,
 		Prompt:        p.Prompt,
 		RepoURL:       p.RepoURL,
 		IdentityName:  p.IdentityName,

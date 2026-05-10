@@ -110,13 +110,13 @@ type ocDockerParameters struct {
 
 // ocCodingAgentTask carries the per-task fields of the coding-agent
 // ClusterWorkflow's `task` parameter object. Field names match the
-// openAPIV3Schema in the YAML.
+// openAPIV3Schema in the YAML. No branch field — the agent creates its
+// own branch and opens the PR with `Closes #<issueNumber>`.
 type ocCodingAgentTask struct {
 	ID            string `json:"id"`
 	OrgID         string `json:"orgId"`
 	ProjectID     string `json:"projectId"`
 	ComponentName string `json:"componentName"`
-	BranchName    string `json:"branchName"`
 	Prompt        string `json:"prompt"`
 }
 
