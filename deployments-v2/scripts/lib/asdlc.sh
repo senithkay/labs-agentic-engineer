@@ -72,9 +72,12 @@ bootstrap_workloads() {
   log_info "bootstrapping ${#COMPONENTS[@]} workloads (build + import + apply)"
 
   for row in "${COMPONENTS[@]}"; do
-    IFS='|' read -r name src dockerfile context <<<"$row"
+    IFS='|' read -r name src dockerfile context hash_paths <<<"$row"
+    [ -z "$hash_paths" ] && hash_paths="$src"
     local hash image
-    hash=$(content_hash "$ROOT_DIR/$src")
+    local hash_dirs=() p
+    for p in $hash_paths; do hash_dirs+=("$ROOT_DIR/$p"); done
+    hash=$(content_hash "${hash_dirs[@]}")
     image="asdlc.local/${name}:${hash}"
     log_step "$name"
     build_image "$name" "$ROOT_DIR/$src" "$dockerfile" "$context" "$image"

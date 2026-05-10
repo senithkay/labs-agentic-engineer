@@ -88,7 +88,7 @@ type ServiceAuthConfig struct {
 }
 
 // AgentsServiceConfig holds connection settings for the asdlc-agents-service
-// (AI SDK v6-based; BA, architect, task-generator, wireframe).
+// (AI SDK v6-based; BA, architect, tech-lead).
 type AgentsServiceConfig struct {
 	BaseURL string
 }

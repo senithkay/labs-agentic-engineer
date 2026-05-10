@@ -20,7 +20,7 @@ type AppParams struct {
 	Config                 config.Config
 	ProjectController      controllers.ProjectController
 	ComponentController    controllers.ComponentController
-	SpecController         controllers.SpecController
+	RequirementsController controllers.RequirementsController
 	DesignController       controllers.DesignController
 	TaskController         controllers.TaskController
 	BoardController        controllers.BoardController
@@ -73,8 +73,8 @@ func NewHandler(params AppParams) http.Handler {
 	if params.ComponentController != nil {
 		registerComponentRoutes(apiMux, params.ComponentController)
 	}
-	if params.SpecController != nil {
-		registerSpecRoutes(apiMux, params.SpecController)
+	if params.RequirementsController != nil {
+		registerRequirementsRoutes(apiMux, params.RequirementsController)
 	}
 	if params.DesignController != nil {
 		registerDesignRoutes(apiMux, params.DesignController)
