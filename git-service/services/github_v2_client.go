@@ -263,10 +263,12 @@ func (c *githubV2Client) initProjectStatusOptions(ctx context.Context, projectID
 	}
 
 	// Build the input options list: preserve existing (with ID), add missing (without ID).
+	// description is required (non-null) by the GitHub API — use empty string.
 	type optionInput struct {
-		ID    string `json:"id,omitempty"`
-		Name  string `json:"name"`
-		Color string `json:"color"`
+		ID          string `json:"id,omitempty"`
+		Name        string `json:"name"`
+		Color       string `json:"color"`
+		Description string `json:"description"`
 	}
 	var inputOptions []optionInput
 	for _, name := range optionNames {
@@ -287,10 +289,10 @@ func (c *githubV2Client) initProjectStatusOptions(ctx context.Context, projectID
 	}
 
 	// Mutation to update the Status field with all options.
+	// Note: UpdateProjectV2FieldInput only takes fieldId (not projectId).
 	mutation := `
-		mutation($projectId: ID!, $fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+		mutation($fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
 			updateProjectV2Field(input: {
-				projectId: $projectId
 				fieldId: $fieldId
 				singleSelectOptions: $options
 			}) {
@@ -301,9 +303,8 @@ func (c *githubV2Client) initProjectStatusOptions(ctx context.Context, projectID
 		}`
 
 	if err := c.graphqlRequest(ctx, pat, mutation, map[string]any{
-		"projectId": projectID,
-		"fieldId":   statusFieldID,
-		"options":   inputOptions,
+		"fieldId": statusFieldID,
+		"options": inputOptions,
 	}, nil); err != nil {
 		return fmt.Errorf("update project status field options: %w", err)
 	}
