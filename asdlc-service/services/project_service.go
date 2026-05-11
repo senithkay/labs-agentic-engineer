@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 
 	"github.com/wso2/asdlc/asdlc-service/clients/gitservice"
 	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/clients/requests"
 	"github.com/wso2/asdlc/asdlc-service/models"
 	"github.com/wso2/asdlc/asdlc-service/repositories"
 )
@@ -251,20 +249,21 @@ func (s *projectService) GetProjectStatus(ctx context.Context, orgName, projectN
 	return status, nil
 }
 
+// translateHTTPError lifts OC-level sentinel errors (openchoreo.ErrNotFound
+// etc.) into the project-service vocabulary the controllers branch on. The
+// underlying err is preserved in the chain so deeper layers can still
+// errors.Is against openchoreo.* if they want richer context.
 func translateHTTPError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var httpErr *requests.HttpError
-	if errors.As(err, &httpErr) {
-		switch httpErr.StatusCode {
-		case http.StatusNotFound:
-			return fmt.Errorf("%w: %s", ErrProjectNotFound, httpErr.Body)
-		case http.StatusUnauthorized:
-			return ErrUnauthorized
-		case http.StatusForbidden:
-			return ErrForbidden
-		}
+	switch {
+	case errors.Is(err, openchoreo.ErrNotFound):
+		return fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+	case errors.Is(err, openchoreo.ErrUnauthorized):
+		return ErrUnauthorized
+	case errors.Is(err, openchoreo.ErrForbidden):
+		return ErrForbidden
 	}
 	return err
 }

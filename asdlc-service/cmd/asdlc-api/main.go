@@ -113,11 +113,19 @@ func main() {
 	}
 
 	// OpenChoreo clients. Each one resolves the OC namespace as the OC
-	// org handle directly (== ouHandle); there is no override map.
-	projectClient := openchoreo.NewProjectClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider)
-	componentClient := openchoreo.NewComponentClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider)
-	secretRefClient := openchoreo.NewSecretRefClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider)
-	namespaceClient := openchoreo.NewNamespaceClient(cfg.PlatformAPI.BaseURL, cfg.PlatformAPI.HostHeader, tokenProvider)
+	// org handle directly (== ouHandle); there is no override map. Migrated
+	// clients (namespace, project) take an openchoreo.Config; the still-hand-
+	// rolled clients (component, secretref) keep the legacy positional args
+	// until they migrate too.
+	ocConfig := openchoreo.Config{
+		BaseURL:      cfg.PlatformAPI.BaseURL,
+		HostHeader:   cfg.PlatformAPI.HostHeader,
+		AuthProvider: tokenProvider,
+	}
+	projectClient := openchoreo.NewProjectClient(ocConfig)
+	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
+	secretRefClient := openchoreo.NewSecretRefClient(ocConfig)
+	componentClient := openchoreo.NewComponentClient(ocConfig)
 
 	// Observability client (optional — build logs disabled when URL not set)
 	var observClient observability.Client
