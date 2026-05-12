@@ -15,8 +15,6 @@ import yaml from 'js-yaml';
 import SwaggerUI from 'swagger-ui-react';
 import 'swagger-ui-react/swagger-ui.css';
 import { api } from '../services/api';
-import { getToken } from '../services/api/rest';
-import { env } from '../config/env';
 import type { ComponentOpenAPI } from '../services/api';
 import type { Deployment } from '../services/api/types';
 
@@ -82,32 +80,10 @@ export default function ComponentTestPage() {
     }
   }, [specResult, activeDeployment]);
 
-  // Send every swagger-ui request through the BFF test-proxy so we side-step
-  // browser CORS. The original target URL + method ride in X-Asdlc-* headers;
-  // the proxy validates the URL is one of the component's known endpoints,
-  // forwards method/body/safe headers, and streams the response back.
-  const requestInterceptor = useCallback(
-    async (raw: unknown) => {
-      const req = raw as {
-        url: string;
-        method: string;
-        headers?: Record<string, string>;
-      };
-      if (!projectId || !componentId) return req;
-      const token = await getToken();
-      const originalUrl = req.url;
-      const originalMethod = req.method || 'GET';
-      const headers: Record<string, string> = { ...(req.headers || {}) };
-      headers['X-Asdlc-Target-Url'] = originalUrl;
-      headers['X-Asdlc-Target-Method'] = originalMethod;
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      req.url = `${env.VITE_CORE_API_BASE_URL}/api/v1/organizations/${routeOrgId}/projects/${projectId}/components/${componentId}/test-proxy`;
-      req.method = 'POST';
-      req.headers = headers;
-      return req;
-    },
-    [routeOrgId, projectId, componentId],
-  );
+  // swagger-ui invokes the deployed endpoint directly. CORS is enabled on
+  // the service ClusterComponentType's HTTPRoute so the browser preflight
+  // succeeds without a server-side proxy. Nothing to intercept today; the
+  // hook is retained as a no-op for future per-request header injection.
 
   if (loading) {
     return (
@@ -197,10 +173,6 @@ export default function ComponentTestPage() {
                 {activeDeployment.endpointUrl}
               </Typography>
             </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-              Requests are routed through App Factory's test proxy to avoid browser CORS.
-              The curl preview below shows the proxy URL; the real upstream call is the one in <code>X-Asdlc-Target-Url</code>.
-            </Typography>
             <Box
               sx={{
                 // Tame swagger-ui's heavy header / model styling next to Oxygen UI.
@@ -215,7 +187,6 @@ export default function ComponentTestPage() {
                 docExpansion="list"
                 tryItOutEnabled
                 deepLinking={false}
-                requestInterceptor={requestInterceptor}
               />
             </Box>
           </CardContent>

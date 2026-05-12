@@ -6,7 +6,6 @@ var (
 	ErrProjectNotFound     = errors.New("project not found")
 	ErrComponentNotFound   = errors.New("component not found")
 	ErrComponentNotService = errors.New("component is not a service")
-	ErrInvalidTestTarget   = errors.New("test-proxy target URL does not match a deployment endpoint")
 	ErrUnauthorized        = errors.New("unauthorized")
 	ErrForbidden           = errors.New("forbidden")
 	ErrSpecNotFound        = errors.New("spec not found")
