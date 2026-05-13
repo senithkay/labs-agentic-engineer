@@ -94,6 +94,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Phase 5 — F2 deploy-gating: renames task_depends_on → depends_on_components.
+	// See docs/design/cross-component-wiring-gaps.md. Idempotent.
+	if err := migrations.RunPhase5DeployGating(db); err != nil {
+		slog.Error("phase5_deploy_gating migration failed", "error", err)
+		os.Exit(1)
+	}
+
 	// Repositories — only task and config remain
 	taskRepo := repositories.NewTaskRepository(db)
 	configRepo := repositories.NewConfigRepository(db)
@@ -287,8 +294,16 @@ func main() {
 	if agentGitServiceURL == "" {
 		agentGitServiceURL = cfg.GitService.BaseURL
 	}
-	dispatchSvc := services.NewDispatchService(taskRepo, gitClient, componentService, configService, artifactStore, taskTokens, tokenInject, wfRunService, agentGitServiceURL)
+	dispatchSvc := services.NewDispatchService(taskRepo, gitClient, componentService, configService, artifactStore, taskTokens, tokenInject, wfRunService, projector, agentGitServiceURL, cfg.AgentPlatformURL)
 	slog.Info("Dispatch service", "agentGitServiceURL", agentGitServiceURL)
+
+	// F1 — wire the post-deploy dispatch cascade. The projector fires
+	// OnTaskDeployed whenever ApplyBuildResult lands a task in `deployed`;
+	// the cascade takes a per-project lock and calls DispatchTasks to
+	// re-evaluate `pending_deps` siblings and auto-dispatch the ones
+	// whose deps are now satisfied. See docs/design/cross-component-
+	// wiring-gaps.md §3 F1.
+	projector.SetDispatchHook(services.NewDispatchCascadeHook(db, dispatchSvc))
 
 	webhook.Register(webhookRouter, db, projector, wfRunService)
 	if gitClient != nil {
@@ -345,6 +360,7 @@ func main() {
 			dispatchSvc,
 			services.NewProgressService(taskService, componentClient, observerClient),
 			componentClient,
+			taskTokens,
 		),
 		BoardController:        controllers.NewBoardController(boardService),
 		ConfigController:       controllers.NewConfigController(configService),
