@@ -9,9 +9,10 @@ import {
   Stack,
   Typography,
 } from '@wso2/oxygen-ui';
-import { Rocket, Sparkles } from '@wso2/oxygen-ui-icons-react';
+import { Package, Rocket, Sparkles } from '@wso2/oxygen-ui-icons-react';
 import { Explorer, type AddFileMenuItem, type CustomView, type ExplorerRef } from '@asdlc/explorer';
-import { CELL_DIAGRAM_VIEW_ID, createCellDiagramView } from '@asdlc/cell-diagram-view';
+import { CELL_DIAGRAM_VIEW_ID, CellDiagramView } from '@asdlc/cell-diagram-view';
+import { MdEditor } from '@asdlc/md-editor';
 import { api } from '../services/api';
 import type { ArtifactVersion, Design, DesignComponent } from '../services/api';
 import { projectTasksPath } from '../lib/paths';
@@ -38,6 +39,16 @@ interface LayoutContext {
 
 const AUTO_SAVE_DEBOUNCE_MS = 1500;
 const DESIGN_ROOT_FILE = 'design.md';
+
+// Tree-display tweaks for the design Explorer. The on-disk layout is
+// `.asdlc/design/components/<name>/{design.md,openapi.yaml}` but a "Components"
+// folder row in the sidebar adds nothing the user cares about, so we collapse
+// it. Each component then renders at top level with a package icon.
+const ARCHITECTURE_TRANSPARENT_FOLDERS = new Set(['components']);
+function getArchitectureFolderIcon(folderPath: string) {
+  if (folderPath.startsWith('components/')) return <Package size={16} style={{ flexShrink: 0 }} />;
+  return undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -369,10 +380,85 @@ export default function ProjectArchitecturePage() {
   // each `component-added` event progressively populates the canvas. Once
   // finalize fires and the bundle refreshes, fall back to design.components.
   const effectiveComponents = generating ? streamingComponents : (design?.components ?? []);
-  const customViews = useMemo<CustomView[]>(
-    () => [createCellDiagramView({ components: effectiveComponents })],
-    [effectiveComponents],
+
+  const designMdContent = liveContents[DESIGN_ROOT_FILE] ?? '';
+  const designReadOnly = viewingHistorical || generating;
+  const handleDesignMdChange = useCallback(
+    (md: string) => {
+      handleFileChange(DESIGN_ROOT_FILE, md);
+    },
+    [handleFileChange],
   );
+
+  // The "Component Design" view rolls the cell diagram and the top-level
+  // architecture markdown into one page — the cell diagram on top, the
+  // narrative on the bottom — so the user navigates once and sees the
+  // whole system in context. The standalone `design.md` row is hidden
+  // from the side tree below for the same reason.
+  const customViews = useMemo<CustomView[]>(
+    () => [
+      {
+        id: CELL_DIAGRAM_VIEW_ID,
+        label: 'Component Design',
+        // Single-scroll layout: the cell diagram is rendered as a fixed-height
+        // "figure" at the top of the view, with the markdown editor flowing
+        // beneath it in the same scroll context. The diagram reads as an
+        // embedded picture — non-interactive in the markdown sense (you can't
+        // edit it by typing), and it scrolls out of the way as the user reads
+        // or edits the narrative below.
+        content: (
+          <Box
+            sx={{
+              height: '100%',
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              bgcolor: 'background.paper',
+            }}
+          >
+            <Box
+              aria-label="Architecture cell diagram"
+              sx={{
+                flexShrink: 0,
+                height: 360,
+                display: 'flex',
+                position: 'relative',
+                // Clip the diagram's portal-mounted zoom controls, which
+                // anchor to the document body and otherwise dangle in the
+                // bottom-right of the page even though the diagram itself
+                // is only a fragment of the view here.
+                '& button[aria-label^="Zoom"]': { display: 'none' },
+                bgcolor: 'background.default',
+                borderBottom: 1,
+                borderColor: 'divider',
+              }}
+            >
+              <CellDiagramView components={effectiveComponents} />
+            </Box>
+            <Box sx={{ flexShrink: 0 }}>
+              <MdEditor
+                value={designMdContent}
+                onChange={handleDesignMdChange}
+                readOnly={designReadOnly}
+                placeholder="System architecture overview…"
+              />
+            </Box>
+          </Box>
+        ),
+      },
+    ],
+    [effectiveComponents, designMdContent, handleDesignMdChange, designReadOnly],
+  );
+
+  // Strip the root `design.md` from the file list passed to Explorer — its
+  // content already lives in the merged "Component Design" view above.
+  // Doing it here (instead of skipping it in `setLiveContents`) keeps
+  // auto-save and version history working through the existing buffer.
+  const treeFiles = useMemo(() => {
+    if (liveContents[DESIGN_ROOT_FILE] === undefined) return liveContents;
+    const { [DESIGN_ROOT_FILE]: _hidden, ...rest } = liveContents;
+    return rest;
+  }, [liveContents]);
 
   if (loading) {
     return (
@@ -456,9 +542,19 @@ export default function ProjectArchitecturePage() {
       <Box sx={{ flexGrow: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Box sx={{ flex: 1, minHeight: 0, display: 'flex' }}>
           <Explorer
-            files={liveContents}
+            files={treeFiles}
             customViews={customViews}
             pendingPaths={pendingArtifacts}
+            // The `components/` directory is an organisational detail on disk;
+            // in the tree we want each component to read as a top-level
+            // entity, so hide the parent folder and promote its children up.
+            transparentFolders={ARCHITECTURE_TRANSPARENT_FOLDERS}
+            // Component folders (children of `components/`) display as the
+            // unit that gets built and shipped, so give them a package icon.
+            getFolderIcon={getArchitectureFolderIcon}
+            // Heading-level outlines under each file in the side tree add
+            // noise on this page — the cell diagram is the primary navigator.
+            showHeadings={false}
             activePath={activePath}
             onActivePathChange={setActivePath}
             onFileChange={handleFileChange}

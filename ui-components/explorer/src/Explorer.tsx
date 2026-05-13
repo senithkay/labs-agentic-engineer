@@ -32,6 +32,9 @@ export function Explorer({
   onDelete,
   customViews,
   pendingPaths,
+  transparentFolders,
+  getFolderIcon,
+  showHeadings = true,
   searchPlaceholder = 'Search documents',
   sidebarWidth = 280,
   minHeight,
@@ -232,6 +235,9 @@ export function Explorer({
           activePath={activePath ?? null}
           dirtyPaths={dirtyPaths}
           pendingPaths={pendingPaths}
+          transparentFolders={transparentFolders}
+          getFolderIcon={getFolderIcon}
+          showHeadings={showHeadings}
           onActivate={setActive}
           onTocClick={handleTocClick}
           onAddFile={onAddFile ? handleAddFile : undefined}

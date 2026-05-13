@@ -100,6 +100,28 @@ export interface ExplorerProps {
    */
   pendingPaths?: Set<string>;
 
+  /**
+   * Folder paths that should not appear as their own row in the tree. Their
+   * children promote one level up. Underlying paths in `files` are
+   * unchanged — only the visual nesting collapses. Example: pass
+   * `new Set(['components'])` so `components/foo/design.md` displays under a
+   * top-level `foo` folder.
+   */
+  transparentFolders?: Set<string>;
+
+  /**
+   * Custom icon per folder path. Receives the folder's real path (not the
+   * displayed segment) so callers can disambiguate. Return `undefined` to
+   * fall back to the default folder icon.
+   */
+  getFolderIcon?: (path: string) => React.ReactNode | undefined;
+
+  /**
+   * Whether to render parsed markdown headings as nested entries under each
+   * file in the sidebar. Default: true.
+   */
+  showHeadings?: boolean;
+
   // --- layout / style ---
   /** Placeholder shown in the sidebar search input. Default: "Search documents" */
   searchPlaceholder?: string;

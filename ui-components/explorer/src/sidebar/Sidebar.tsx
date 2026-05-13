@@ -38,7 +38,7 @@ type TreeRow =
   | { kind: 'folder'; path: string; depth: number }
   | { kind: 'file'; path: string; depth: number };
 
-function buildTreeRows(paths: string[]): TreeRow[] {
+function buildTreeRows(paths: string[], transparentFolders?: Set<string>): TreeRow[] {
   const sorted = [...paths].sort((a, b) => {
     // Sort: files at root first, then folders alphabetically, then files
     // alphabetically. This mirrors the design page intent: root
@@ -53,14 +53,20 @@ function buildTreeRows(paths: string[]): TreeRow[] {
   for (const path of sorted) {
     const parts = path.split('/');
     let prefix = '';
+    // `visibleDepth` tracks indent shown to the user. It diverges from the
+    // loop index whenever we pass through a transparent folder (the folder
+    // is omitted and its children promote one level up).
+    let visibleDepth = 0;
     for (let i = 0; i < parts.length - 1; i++) {
       prefix = prefix ? `${prefix}/${parts[i]}` : parts[i];
+      if (transparentFolders?.has(prefix)) continue;
       if (!emitted.has(prefix)) {
         emitted.add(prefix);
-        rows.push({ kind: 'folder', path: prefix, depth: i });
+        rows.push({ kind: 'folder', path: prefix, depth: visibleDepth });
       }
+      visibleDepth++;
     }
-    rows.push({ kind: 'file', path, depth: parts.length - 1 });
+    rows.push({ kind: 'file', path, depth: visibleDepth });
   }
   return rows;
 }
@@ -90,6 +96,12 @@ export interface SidebarProps {
   dirtyPaths: Set<string>;
   /** Paths in this set render a spinner instead of their file/folder icon. */
   pendingPaths?: Set<string>;
+  /** Folder paths that should not appear in the tree (children promote up). */
+  transparentFolders?: Set<string>;
+  /** Override the folder icon per-path. Return undefined to use the default. */
+  getFolderIcon?: (path: string) => React.ReactNode | undefined;
+  /** Render parsed headings under each file as nested rows. Default true. */
+  showHeadings?: boolean;
   onActivate: (path: string) => void;
   onTocClick: (path: string, headingIndex: number) => void;
   onAddFile?: (typeId?: string) => void;
@@ -132,6 +144,9 @@ export function Sidebar({
   activePath,
   dirtyPaths,
   pendingPaths,
+  transparentFolders,
+  getFolderIcon,
+  showHeadings = true,
   onActivate,
   onTocClick,
   onAddFile,
@@ -201,12 +216,12 @@ export function Sidebar({
   };
 
   const treeRows = useMemo(() => {
-    const rows = buildTreeRows(filteredPaths);
+    const rows = buildTreeRows(filteredPaths, transparentFolders);
     return rows.filter((row) => {
       if (row.depth === 0) return true;
       return !isAncestorCollapsed(row.path, collapsedFolders);
     });
-  }, [filteredPaths, collapsedFolders]);
+  }, [filteredPaths, collapsedFolders, transparentFolders]);
 
   const usesTree = useMemo(() => filteredPaths.some((p) => p.includes('/')), [filteredPaths]);
 
@@ -454,7 +469,7 @@ export function Sidebar({
                       {folderIsPending(row.path) ? (
                         <CircularProgress size={14} sx={{ flexShrink: 0 }} />
                       ) : (
-                        <Folder size={16} style={{ flexShrink: 0 }} />
+                        getFolderIcon?.(row.path) ?? <Folder size={16} style={{ flexShrink: 0 }} />
                       )}
                       <Typography
                         component="span"
@@ -485,7 +500,10 @@ export function Sidebar({
               const toc = info?.toc ?? [];
               const headingCount = info?.headingCount ?? 0;
               const isCollapsed = collapsedDocs.has(path);
-              const hasToc = toc.length > 0;
+              // `showHeadings` disables the in-tree TOC entirely — when it's
+              // off there's nothing to expand, so the chevron + nested list
+              // both vanish via this single gate.
+              const hasToc = showHeadings && toc.length > 0;
 
               return (
                 <Box component="li" key={path} role="treeitem" aria-selected={isActive} aria-expanded={hasToc ? !isCollapsed : undefined} sx={{ listStyle: 'none' }}>
