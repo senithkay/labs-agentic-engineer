@@ -22,6 +22,7 @@ import OrgGitHubSettings from './pages/OrgGitHubSettings';
 import OrgGitHubAppPicker from './pages/OrgGitHubAppPicker';
 import NoOrganizationPage from './pages/NoOrganizationPage';
 import { setOrgGithubTokenAccessor } from './services/api/orgGithub';
+import { useBillingOrg } from './hooks/useBillingOrg';
 import { organizationOverviewPath } from './lib/paths';
 import { resolveOuHandle } from './utils/orgClaims';
 
@@ -43,6 +44,9 @@ export function App() {
     setTokenAccessor(null);
     setOrgGithubTokenAccessor(null);
   }
+
+  // Triggers server-side org/subscription provisioning so downstream entitlement checks pass.
+  useBillingOrg('app-factory', isSignedIn);
 
   // Canonical OC org handle from the JWT claims, with the same precedence
   // the BFF uses (asdlc-service/middleware/jwt.ResolveOuHandle). Returns
