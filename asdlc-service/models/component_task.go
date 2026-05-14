@@ -42,13 +42,14 @@ const (
 	// org's GitHub credential is disconnected (or, in PR D, when reach
 	// reconciliation drops the task's repo from the App install). Terminal.
 	TaskStatusAbandoned TaskStatus = "abandoned"
-	// TaskStatusPendingDeps gates dispatch on un-deployed dependencies (F2
+	// TaskStatusOnHold gates dispatch on un-deployed dependencies (F2
 	// deploy-gating, docs/design/cross-component-wiring-gaps.md §3). The
 	// dispatcher transitions a task into this state if any task it
 	// dependsOn (by component name) is not yet `deployed`; an upstream
 	// deploy fires the projector's onTaskDeployed cascade which
-	// re-evaluates and auto-dispatches.
-	TaskStatusPendingDeps TaskStatus = "pending_deps"
+	// re-evaluates and auto-dispatches. Uses the same "on_hold" value as
+	// the GitHub Project board column so both surfaces stay in sync.
+	TaskStatusOnHold TaskStatus = "on_hold"
 	// TaskStatusVerificationFailed (F3c, docs/design/cross-component-
 	// wiring-gaps.md §3 F3c) is the task state when the dispatched agent
 	// reports that integration verification against a dependency endpoint
@@ -153,6 +154,14 @@ type ComponentTask struct {
 	// re-minted + recreated this task's WorkflowRun in response to
 	// git_clone_failed_auth. Budget enforced in build_watcher.
 	BuildAuthRetryCount int `gorm:"not null;default:0" json:"buildAuthRetryCount,omitempty"`
+
+	// DispatchDeferredAt is set the first time dispatchOne reverts a task
+	// to on_hold because a dependency's external URL is not yet available
+	// in the OC ReleaseBinding status (timing race between build completion
+	// and the OC controller resolving the ingress). The on_hold_watcher
+	// retries dispatch every 10s; after deferDeadline (2 min) the task is
+	// permanently failed. Nil on tasks that were never deferred.
+	DispatchDeferredAt *time.Time `gorm:"column:dispatch_deferred_at" json:"dispatchDeferredAt,omitempty"`
 
 	// BodySyncPending is set when the GitHub issue body edit failed after
 	// retries; a periodic reconciler re-attempts the edit. The DB row's

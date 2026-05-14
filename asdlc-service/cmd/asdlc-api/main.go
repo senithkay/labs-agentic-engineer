@@ -308,7 +308,7 @@ func main() {
 	// F1 — wire the post-deploy dispatch cascade. The projector fires
 	// OnTaskDeployed whenever ApplyBuildResult lands a task in `deployed`;
 	// the cascade takes a per-project lock and calls DispatchTasks to
-	// re-evaluate `pending_deps` siblings and auto-dispatch the ones
+	// re-evaluate `on_hold` siblings and auto-dispatch the ones
 	// whose deps are now satisfied. See docs/design/cross-component-
 	// wiring-gaps.md §3 F1.
 	projector.SetDispatchHook(services.NewDispatchCascadeHook(db, dispatchSvc))
@@ -410,6 +410,10 @@ func main() {
 		}
 	}()
 
+	// On-hold watcher retries dispatch for tasks deferred due to OC
+	// ReleaseBinding URL resolution lag (timing race at cascade time).
+	onHoldWatcher := webhook.NewOnHoldWatcher(db, dispatchSvc)
+
 	// Build watcher polls OC for in-flight WorkflowRun status. Goroutine is
 	// fine because state lives in Postgres — a restart resumes from the
 	// next tick with no in-memory state.
@@ -417,6 +421,7 @@ func main() {
 	defer cancelWatcher()
 	go buildWatcher.Run(watcherCtx)
 	go codingAgentWatcher.Run(watcherCtx)
+	go onHoldWatcher.Run(watcherCtx)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

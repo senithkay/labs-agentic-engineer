@@ -14,10 +14,12 @@ const STAGES: { key: TaskStatus | 'dispatched'; label: string }[] = [
 ];
 
 const FAILURE_STATUSES: TaskStatus[] = ['rejected', 'failed', 'abandoned'];
+// Terminal success statuses: all stages should render as done (green, no pulse).
+const TERMINAL_SUCCESS_STATUSES: TaskStatus[] = ['deployed'];
 
 function stageIndex(status: TaskStatus | undefined): number {
   if (!status) return 0;
-  if (status === 'pending' || status === 'pending_deps') return 0;
+  if (status === 'pending' || status === 'on_hold') return 0;
   if (status === 'in_progress') return 1;
   if (status === 'ready_for_review') return 2;
   if (status === 'merged') return 3;
@@ -30,13 +32,14 @@ function stageIndex(status: TaskStatus | undefined): number {
 export function TaskPipelineStrip({ status }: { status: TaskStatus | undefined }) {
   const theme = useTheme();
   const failed = status && FAILURE_STATUSES.includes(status);
+  const allDone = status !== undefined && TERMINAL_SUCCESS_STATUSES.includes(status);
   const idx = stageIndex(status);
 
   return (
     <Stack direction="row" spacing={0.75} alignItems="center" sx={{ py: 1 }}>
       {STAGES.map((stage, i) => {
-        const isCurrent = i === idx;
-        const isDone = i < idx;
+        const isCurrent = !allDone && i === idx;
+        const isDone = allDone || i < idx;
         const tone = failed
           ? theme.palette.error.main
           : isCurrent
