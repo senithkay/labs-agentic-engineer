@@ -35,6 +35,7 @@ export function Explorer({
   transparentFolders,
   getFolderIcon,
   showHeadings = true,
+  getFileRenderer,
   searchPlaceholder = 'Search documents',
   sidebarWidth = 280,
   minHeight,
@@ -260,6 +261,7 @@ export function Explorer({
             onChange={handleEditorChange}
             editorProps={editorProps}
             editorRef={innerEditorRef}
+            getFileRenderer={getFileRenderer}
           />
         ) : (
           <Box

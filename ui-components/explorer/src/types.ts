@@ -122,6 +122,15 @@ export interface ExplorerProps {
    */
   showHeadings?: boolean;
 
+  /**
+   * Optional override for the right-pane editor. When `getFileRenderer`
+   * returns a non-null React node for a given path, that node is rendered
+   * instead of the default markdown/Excalidraw editor. The saved content is
+   * passed as the second argument so callers can parse it without
+   * re-fetching. Returning `undefined` falls through to the default chain.
+   */
+  getFileRenderer?: (path: string, content: string) => React.ReactNode | undefined;
+
   // --- layout / style ---
   /** Placeholder shown in the sidebar search input. Default: "Search documents" */
   searchPlaceholder?: string;

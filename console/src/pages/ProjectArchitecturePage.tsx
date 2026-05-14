@@ -13,6 +13,7 @@ import { Package, Rocket, Sparkles } from '@wso2/oxygen-ui-icons-react';
 import { Explorer, type AddFileMenuItem, type CustomView, type ExplorerRef } from '@asdlc/explorer';
 import { CELL_DIAGRAM_VIEW_ID, CellDiagramView } from '@asdlc/cell-diagram-view';
 import { MdEditor } from '@asdlc/md-editor';
+import { OpenApiView } from '@asdlc/openapi-view';
 import { api } from '../services/api';
 import type { ArtifactVersion, Design, DesignComponent } from '../services/api';
 import { projectTasksPath } from '../lib/paths';
@@ -48,6 +49,15 @@ const ARCHITECTURE_TRANSPARENT_FOLDERS = new Set(['components']);
 function getArchitectureFolderIcon(folderPath: string) {
   if (folderPath.startsWith('components/')) return <Package size={16} style={{ flexShrink: 0 }} />;
   return undefined;
+}
+
+// Route the per-component `openapi.yaml` files to the dedicated OpenAPI
+// viewer. Every other path (component design.md, custom views, etc.)
+// returns undefined so Explorer's default editor chain handles them.
+const OPENAPI_PATH_RE = /^components\/[^/]+\/openapi\.ya?ml$/;
+function renderOpenApiFile(path: string, content: string): React.ReactNode | undefined {
+  if (!OPENAPI_PATH_RE.test(path)) return undefined;
+  return <OpenApiView spec={content} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -416,30 +426,66 @@ export default function ProjectArchitecturePage() {
               bgcolor: 'background.paper',
             }}
           >
+            {/* The diagram is sized to match the markdown content column
+                (816px, centered) with a soft framed look so it reads as a
+                figure inset inside the document — not as a top panel that
+                happens to live above another panel. */}
             <Box
               aria-label="Architecture cell diagram"
               sx={{
                 flexShrink: 0,
-                height: 360,
+                pt: 4,
+                pb: 2,
+                px: 3,
                 display: 'flex',
-                position: 'relative',
-                // Clip the diagram's portal-mounted zoom controls, which
-                // anchor to the document body and otherwise dangle in the
-                // bottom-right of the page even though the diagram itself
-                // is only a fragment of the view here.
-                '& button[aria-label^="Zoom"]': { display: 'none' },
-                bgcolor: 'background.default',
-                borderBottom: 1,
-                borderColor: 'divider',
+                flexDirection: 'column',
+                alignItems: 'center',
               }}
             >
-              <CellDiagramView components={effectiveComponents} />
+              <Box sx={{ width: '100%', maxWidth: 816 }}>
+                <Typography
+                  variant="overline"
+                  component="h3"
+                  sx={{
+                    m: 0,
+                    mb: 1,
+                    color: 'text.secondary',
+                    letterSpacing: '0.08em',
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                >
+                  Cell Diagram
+                </Typography>
+                <Box
+                  sx={{
+                    width: '100%',
+                    height: 640,
+                    display: 'flex',
+                    borderRadius: 1.5,
+                    border: 1,
+                    borderColor: 'divider',
+                    overflow: 'hidden',
+                    position: 'relative',
+                    // Clip the diagram's portal-mounted zoom controls so the
+                    // figure reads as a picture, not a canvas surface.
+                    '& button[aria-label^="Zoom"]': { display: 'none' },
+                  }}
+                >
+                  <CellDiagramView components={effectiveComponents} />
+                </Box>
+              </Box>
             </Box>
             <Box sx={{ flexShrink: 0 }}>
+              {/* Toolbar suppressed — the editor sits inside the same
+                  document surface as the diagram above; a toolbar bar
+                  would reintroduce the panel-on-panel feel. Inline
+                  markdown still works (`**bold**`, `# heading`, …). */}
               <MdEditor
                 value={designMdContent}
                 onChange={handleDesignMdChange}
                 readOnly={designReadOnly}
+                showToolbar={false}
                 placeholder="System architecture overview…"
               />
             </Box>
@@ -555,6 +601,10 @@ export default function ProjectArchitecturePage() {
             // Heading-level outlines under each file in the side tree add
             // noise on this page — the cell diagram is the primary navigator.
             showHeadings={false}
+            // Render `components/<x>/openapi.yaml` as a swagger-style docs
+            // page instead of falling through to the markdown editor with
+            // raw YAML. All other paths use the default editor chain.
+            getFileRenderer={renderOpenApiFile}
             activePath={activePath}
             onActivePathChange={setActivePath}
             onFileChange={handleFileChange}
