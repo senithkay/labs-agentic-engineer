@@ -328,6 +328,33 @@ endpoints (e.g. a web-app that calls a sibling service to log in) —
 seeding and the credentials comment belong only on the component that
 actually seeds the account.
 
+Web-app upstream URL wiring — Setup subsection:
+
+If the target component's design has \`type: web-app\` AND \`dependsOn\` is
+non-empty, the issue body's **Scope** section MUST contain a bullet for
+each upstream of the form:
+
+  - **Wire upstream \`<name>\`**: Set \`VITE_<NAME_UPPER_SNAKE>_URL=<URL>\` in
+    \`<appPath>/.env\` BEFORE \`npm run build\`. The URL comes from the
+    \`## Dependency endpoint resolved\` comment for \`<name>\` posted on
+    this issue.
+
+\`<NAME_UPPER_SNAKE>\` is the upstream component name converted to
+upper-snake-case (e.g. \`todo-api\` → \`TODO_API\`). The .env key MUST
+match the SKILL's required \`VITE_<UPSTREAM>_URL\` pattern verbatim —
+this is the contract the SPA's \`src/api.ts\` reads with \`import.meta.env\`.
+
+ALSO add an **Acceptance criteria** bullet for web-app tasks: "The SPA's
+API client (\`src/api.ts\` or equivalent) reads each upstream URL via
+\`import.meta.env.VITE_<UPSTREAM>_URL\` and throws on missing value — no
+silent \`?? ""\` fallback. (The silent fallback shipped a production
+\`405\` bug; see SKILL.)"
+
+For service components (NOT web-apps), add a **Scope** bullet: "Do NOT
+add CORS middleware. The platform's gateway attaches an Envoy CORS
+filter to every \`visibility: external\` HTTPRoute via the
+ClusterComponentType; doubled CORS headers break browsers."
+
 Hard rules:
   - Stay at the WHAT/boundary altitude. Do NOT write step-by-step instructions,
     code skeletons, or library choices. Trust the agent.
