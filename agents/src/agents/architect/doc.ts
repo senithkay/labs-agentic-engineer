@@ -97,6 +97,12 @@ export class DesignDoc {
     entry.openapi = null;
   }
 
+  // Sets dbEngine on a database component.
+  setDbEngine(name: string, engine: "mysql" | "mongodb"): void {
+    const entry = this.requireEntry(name);
+    entry.slim = { ...entry.slim, dbEngine: engine };
+  }
+
   // ── OpenAPI ───────────────────────────────────────────────────────────
 
   // Sets the spec. Returns `changed:false` if the new spec is semantically
@@ -137,6 +143,8 @@ export class DesignDoc {
       // web-app components do not publish a wire contract; the architect
       // prompt forbids set_openapi for them, so they are never "pending".
       if (entry.slim.componentType === "web-app") continue;
+      // Database components never need an OpenAPI spec.
+      if (entry.slim.componentType === "database") continue;
       if (entry.openapi === null) pending.push(name);
     }
     return pending;
@@ -146,13 +154,13 @@ export class DesignDoc {
 
   // Produces the canonical ArchitectOutput shipped at data-finish. Pending
   // components emit empty-string openAPISpec; finalize() should refuse to
-  // emit a finish if any are pending.
+  // emit a finish if any are pending. Database components always emit "".
   materialize(): ArchitectOutput {
     const components: DesignComponent[] = [];
     for (const [, entry] of this.components) {
       components.push({
         ...entry.slim,
-        openAPISpec: entry.openapi ?? "",
+        openAPISpec: entry.slim.componentType === "database" ? "" : (entry.openapi ?? ""),
       });
     }
     return {

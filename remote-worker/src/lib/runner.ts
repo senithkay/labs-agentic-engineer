@@ -47,6 +47,10 @@ export function runClaudeQuery(
     ASDLC_PLATFORM_URL: process.env.ASDLC_PLATFORM_URL ?? "",
     ASDLC_GIT_SERVICE_URL: req.gitServiceUrl,
     ASDLC_CORRELATION_ID: req.correlationId ?? "",
+    ASDLC_ORG_ID: req.orgId ?? "",
+    ASDLC_PROJECT_ID: req.projectId ?? "",
+    ASDLC_COMPONENT_NAME: req.componentName ?? "",
+    ASDLC_DATABASE_SERVICE_URL: process.env.ASDLC_DATABASE_SERVICE_URL ?? "",
   };
 
   // SDK v0.2.126 auto-discovers the bundled native binary — no

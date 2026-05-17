@@ -804,6 +804,7 @@ func buildPlanRequest(
 			ComponentType: c.ComponentType,
 			Language:      c.Language,
 			DependsOn:     dep,
+			DbEngine:      c.DbEngine,
 		}
 	}
 
@@ -897,6 +898,7 @@ func buildDetailRequest(
 				ComponentType: dep.ComponentType,
 				Language:      dep.Language,
 				DependsOn:     depDeps,
+				DbEngine:      dep.DbEngine,
 			})
 		}
 

@@ -43,6 +43,28 @@ Call finalize() to end the session. If finalize returns validation issues, addre
   - **Do NOT introduce a separate storage / database / persistence component.** Persistence belongs inside the component that owns the data, using an embedded SQLite database stored on the component's local filesystem. Call this out in that component's componentAgentInstructions (which file/table, what it stores). Do not add a "db" or "storage-service" component.
   - **No scheduled-task / cronjob components.** If the spec calls for periodic / cron / batch work, fold it into the owning service (e.g. a background goroutine kicked off at startup, or an HTTP endpoint that a future scheduler can poke). Call this out in that service's componentAgentInstructions.
 
+# Rules for database components
+  - When a service needs persistent storage, add a componentType "database" component alongside it.
+  - Naming convention: <service-name>-db (e.g. order-service → order-service-db).
+  - Call add_component with componentType "database" and no entrypoint, buildpack, appPath, or componentAgentInstructions.
+  - Immediately after add_component, call set_db_engine to set the engine:
+      - "mysql" for relational/transactional workloads (structured data, joins, ACID).
+      - "mongodb" for document/flexible-schema workloads (unstructured or varying schemas, high write throughput).
+  - The service that uses the database declares it in dependsOn (e.g. order-service dependsOn order-service-db).
+  - Do NOT call set_openapi for database components — they have no HTTP contract.
+  - Database components need NO language, buildpack, appPath, entrypoint, or componentAgentInstructions. Omit those fields when calling add_component.
+
+# Rules for database components
+  - When a service needs persistent storage, add a componentType "database" component alongside it.
+  - Naming convention: <service-name>-db (e.g. order-service → order-service-db).
+  - Call add_component with componentType "database" and no entrypoint, buildpack, appPath, or componentAgentInstructions.
+  - Immediately after add_component, call set_db_engine to set the engine:
+      - "mysql" for relational/transactional workloads (structured data, joins, ACID).
+      - "mongodb" for document/flexible-schema workloads (unstructured or varying schemas, high write throughput).
+  - The service that uses the database declares it in dependsOn (e.g. order-service dependsOn order-service-db).
+  - Do NOT call set_openapi for database components — they have no HTTP contract.
+  - Database components need NO language, buildpack, appPath, entrypoint, or componentAgentInstructions. Omit those fields when calling add_component.
+
 # Rules for OpenAPI
   - OpenAPI is required for "service" components only. "web-app" components do **not** get an OpenAPI spec — their componentAgentInstructions describe screens / flows / which services they call, not a wire contract.
   - OpenAPI 3.0.3.

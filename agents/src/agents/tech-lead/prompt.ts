@@ -55,17 +55,30 @@ Rules:
     depend on already-merged work, omit it from dependsOn (it's done).
   - Order does not matter — dependsOn carries the topology.
   - Titles must be unique within this batch.
-  - Output a JSON array only — no surrounding object, no commentary.`;
+  - Output a JSON array only — no surrounding object, no commentary.
+
+Database components (componentType "database"):
+  - Generate exactly one provisioning task per database component.
+  - Suggested title: "Provision <dbEngine> database: <component-name>"
+    (e.g. "Provision mysql database: order-service-db").
+  - Services that dependsOn a database component must list the database's
+    provisioning task title in their dependsOn (the database must be
+    provisioned before the service is implemented).
+  - Database provisioning tasks have no dependsOn of their own unless the
+    architecture explicitly requires it.`;
 
 function renderSlimDesign(components: SlimDesignComponent[]): string {
   if (components.length === 0) return "(no components)";
   return components
-    .map(
-      (c) =>
-        `- ${c.name} (${c.componentType}, ${c.language})${
-          c.dependsOn.length ? ` — depends on: ${c.dependsOn.join(", ")}` : ""
-        }`,
-    )
+    .map((c) => {
+      const typeLabel =
+        c.componentType === "database" && c.dbEngine
+          ? `${c.componentType} [db: ${c.dbEngine}]`
+          : c.componentType;
+      return `- ${c.name} (${typeLabel}, ${c.language})${
+        c.dependsOn.length ? ` — depends on: ${c.dependsOn.join(", ")}` : ""
+      }`;
+    })
     .join("\n");
 }
 
@@ -367,7 +380,31 @@ Hard rules:
   - Do NOT add a TL;DR, summary, trailing checklist, status box, or
     decorative emoji in headings. Use only the five ## headings above.
   - Do NOT add a top-level # title. The issue title is set separately.
-  - Output the markdown body only — no surrounding code fences, no commentary.`;
+  - Output the markdown body only — no surrounding code fences, no commentary.
+
+# Database provisioning tasks
+
+When the task targets a componentType "database" component, this is a
+database provisioning task — NOT a coding task. The agent does NOT write
+application code. Instead, write the issue body to instruct the agent to:
+
+1. Read the component's dbEngine from \`.asdlc/design.json\` (field
+   \`components[name=<componentName>].dbEngine\`).
+2. Call the database-service MCP to provision the database:
+   - POST \`$ASDLC_DATABASE_SERVICE_URL/mcp\` with JSON-RPC \`create_database\`
+   - Arguments: \`{ db_type: <dbEngine>, name: <component-name>,
+     org_id: $ASDLC_ORG_ID, project_id: $ASDLC_PROJECT_ID,
+     component: <component-name> }\`
+3. Write \`databases/<component-name>.json\` to the repo with only
+   \`{ "component": "<name>", "db_type": "<dbEngine>" }\` — NO credentials.
+4. Commit and open a PR normally (same workflow as any other task).
+
+Services that depend on this database retrieve credentials at implementation
+time by calling \`lookup_database\` on the same database-service MCP with the
+same org/project/component key.
+
+Use the same five ## headings (Overview / Scope / Acceptance criteria /
+References / Task dependencies) for database task bodies.`;
 
 export function buildDetailUserPrompt(
   projectName: string,

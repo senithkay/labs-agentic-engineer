@@ -51,6 +51,56 @@ gh issue list --label asdlc --label implementation --state open \
   --json number,title,url
 ```
 
+## Database provisioning tasks
+
+If the component this task targets has `componentType: "database"` in
+`.asdlc/design.json` (check `components[name=$ASDLC_COMPONENT_NAME].componentType`),
+this is a **database provisioning task** — not a coding task. Do NOT write
+application code. Follow these steps instead:
+
+1. **Read the component entry** from `.asdlc/design.json` to get the `dbEngine`
+   (`mysql` or `mongodb`).
+2. **Call the database-service MCP** to provision the database:
+   ```bash
+   curl -sf -X POST "$ASDLC_DATABASE_SERVICE_URL/mcp" \
+     -H "Content-Type: application/json" \
+     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",
+          \"params\":{\"name\":\"create_database\",\"arguments\":{
+            \"db_type\":\"<dbEngine>\",
+            \"name\":\"$ASDLC_COMPONENT_NAME\",
+            \"org_id\":\"$ASDLC_ORG_ID\",
+            \"project_id\":\"$ASDLC_PROJECT_ID\",
+            \"component\":\"$ASDLC_COMPONENT_NAME\"}}}"
+   ```
+   A successful response contains the connection credentials — these are
+   stored server-side. **Do not write credentials to any file.**
+3. **Write a metadata file** (no credentials):
+   ```bash
+   mkdir -p databases
+   cat > "databases/$ASDLC_COMPONENT_NAME.json" <<EOF
+   {
+     "component": "$ASDLC_COMPONENT_NAME",
+     "db_type": "<dbEngine>"
+   }
+   EOF
+   ```
+4. **Commit and open a PR** following the standard workflow below
+   (`git checkout -b feature/<slug>`, `git add`, `git commit "chore: provision <dbEngine> database $ASDLC_COMPONENT_NAME"`,
+   `git push`, `gh pr create` with `Closes #<issue-number>` in the body).
+5. **Mark PR ready**: `gh pr ready <pr-number>`.
+
+Services that depend on this database can retrieve credentials later via the
+`lookup_database` MCP tool with the same org/project/component key:
+```bash
+curl -sf -X POST "$ASDLC_DATABASE_SERVICE_URL/mcp" \
+  -H "Content-Type: application/json" \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",
+       \"params\":{\"name\":\"lookup_database\",\"arguments\":{
+         \"org_id\":\"$ASDLC_ORG_ID\",
+         \"project_id\":\"$ASDLC_PROJECT_ID\",
+         \"component\":\"$ASDLC_COMPONENT_NAME\"}}}"
+```
+
 ## Workflow
 
 1. **Read the issue with its comments** (`gh issue view <url> --comments`).
