@@ -2,18 +2,35 @@ package services
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
-	"math/rand"
-	"strings"
-	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/wso2/asdlc/database-service/repository"
 )
+
+// DBType identifies the database engine.
+type DBType string
+
+const (
+	DBTypeMySQL   DBType = "mysql"
+	DBTypeMongoDB DBType = "mongodb"
+)
+
+// DBStatus holds the connectivity status for a single database engine.
+type DBStatus struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message,omitempty"`
+}
+
+// HealthStatus holds the health of all database engines.
+type HealthStatus struct {
+	MySQL   DBStatus `json:"mysql"`
+	MongoDB DBStatus `json:"mongodb"`
+}
 
 // DatabaseCredentials holds the connection details for a provisioned database.
 type DatabaseCredentials struct {
+	DBType   string `json:"db_type"`
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Database string `json:"database"`
@@ -21,146 +38,147 @@ type DatabaseCredentials struct {
 	Password string `json:"password"`
 }
 
-// DatabaseProvisioningService handles database provisioning and management.
-type DatabaseProvisioningService interface {
-	ProvisionDatabase(ctx context.Context, projectName string) (*DatabaseCredentials, error)
-	TestConnection(ctx context.Context, creds *DatabaseCredentials) error
+// CreateDatabaseRequest carries all parameters needed to provision a database
+// and record the (org, project, component) → database mapping.
+type CreateDatabaseRequest struct {
+	DBType    DBType
+	Name      string
+	OrgID     string
+	ProjectID string
+	Component string
 }
 
-type databaseProvisioningService struct {
-	mysqlRootURL string
-	mysqlHost    string
-	mysqlPort    int
+// DatabaseService manages database provisioning across MySQL and MongoDB.
+type DatabaseService interface {
+	// HealthCheck returns the connectivity status of all database engines.
+	HealthCheck(ctx context.Context) *HealthStatus
+	// TestProvisionedDatabase looks up the credentials for the given (org, project, component)
+	// key and verifies the connection using those per-database user credentials — not root.
+	TestProvisionedDatabase(ctx context.Context, orgID, projectID, component string) error
+	// CreateDatabase creates a new database and a dedicated user on the given engine,
+	// then records the (org, project, component) → database mapping.
+	CreateDatabase(ctx context.Context, req CreateDatabaseRequest) (*DatabaseCredentials, error)
+	// LookupDatabase retrieves the database credentials for the given (org, project, component) key.
+	// Returns (nil, nil) when no mapping exists.
+	LookupDatabase(ctx context.Context, orgID, projectID, component string) (*DatabaseCredentials, error)
 }
 
-// NewDatabaseProvisioningService creates a new database provisioning service.
-// mysqlRootURL should be in format: root:password@tcp(host:port)/
-// Example: root:root@tcp(localhost:3306)/
-func NewDatabaseProvisioningService(mysqlRootURL, mysqlHost string, mysqlPort int) DatabaseProvisioningService {
-	return &databaseProvisioningService{
-		mysqlRootURL: mysqlRootURL,
-		mysqlHost:    mysqlHost,
-		mysqlPort:    mysqlPort,
+type databaseService struct {
+	mysql       *mysqlBackend
+	mongodb     *mongoDBBackend
+	mappingRepo repository.MappingRepository
+}
+
+// NewDatabaseService creates a DatabaseService backed by MySQL, MongoDB, and
+// an internal PostgreSQL mapping store.
+func NewDatabaseService(
+	mysqlRootURL, mysqlHost string, mysqlPort int,
+	mongoRootURL, mongoHost string, mongoPort int,
+	mappingRepo repository.MappingRepository,
+) DatabaseService {
+	return &databaseService{
+		mysql:       newMySQLBackend(mysqlRootURL, mysqlHost, mysqlPort),
+		mongodb:     newMongoDBBackend(mongoRootURL, mongoHost, mongoPort),
+		mappingRepo: mappingRepo,
 	}
 }
 
-// ProvisionDatabase creates a new database and user with random credentials.
-func (s *databaseProvisioningService) ProvisionDatabase(ctx context.Context, projectName string) (*DatabaseCredentials, error) {
-	// Sanitize project name for use in MySQL identifiers
-	dbName := strings.ToLower(strings.ReplaceAll(projectName, "-", "_"))
-	if len(dbName) > 30 {
-		dbName = dbName[:30]
+func (s *databaseService) HealthCheck(ctx context.Context) *HealthStatus {
+	status := &HealthStatus{}
+
+	if err := s.mysql.ping(ctx); err != nil {
+		status.MySQL = DBStatus{OK: false, Message: err.Error()}
+	} else {
+		status.MySQL = DBStatus{OK: true}
 	}
 
-	// Generate random username and password
-	username := fmt.Sprintf("user_%s_%s", dbName, randString(6))
-	password := generateSecurePassword()
+	if err := s.mongodb.ping(ctx); err != nil {
+		status.MongoDB = DBStatus{OK: false, Message: err.Error()}
+	} else {
+		status.MongoDB = DBStatus{OK: true}
+	}
 
-	// Connect as root to create database and user
-	rootConn, err := sql.Open("mysql", s.mysqlRootURL)
+	return status
+}
+
+func (s *databaseService) TestProvisionedDatabase(ctx context.Context, orgID, projectID, component string) error {
+	creds, err := s.LookupDatabase(ctx, orgID, projectID, component)
 	if err != nil {
-		return nil, fmt.Errorf("connect to mysql root: %w", err)
+		return fmt.Errorf("lookup: %w", err)
 	}
-	defer rootConn.Close()
-
-	// Test connection
-	if err := rootConn.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("ping root connection: %w", err)
+	if creds == nil {
+		return fmt.Errorf("no database found for org=%s project=%s component=%s", orgID, projectID, component)
 	}
 
-	// Create database
-	createDBSQL := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", dbName)
-	if _, err := rootConn.ExecContext(ctx, createDBSQL); err != nil {
-		return nil, fmt.Errorf("create database: %w", err)
+	switch DBType(creds.DBType) {
+	case DBTypeMySQL:
+		return s.mysql.testCredentials(ctx, creds.Host, creds.Port, creds.Database, creds.Username, creds.Password)
+	case DBTypeMongoDB:
+		return s.mongodb.testCredentials(ctx, creds.Host, creds.Port, creds.Database, creds.Username, creds.Password)
+	default:
+		return fmt.Errorf("unknown database type: %s", creds.DBType)
 	}
-
-	// Create user with privileges
-	createUserSQL := fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'%%' IDENTIFIED BY '%s'", username, password)
-	if _, err := rootConn.ExecContext(ctx, createUserSQL); err != nil {
-		return nil, fmt.Errorf("create user: %w", err)
-	}
-
-	// Grant privileges
-	grantSQL := fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%%'", dbName, username)
-	if _, err := rootConn.ExecContext(ctx, grantSQL); err != nil {
-		return nil, fmt.Errorf("grant privileges: %w", err)
-	}
-
-	// Flush privileges
-	if _, err := rootConn.ExecContext(ctx, "FLUSH PRIVILEGES"); err != nil {
-		return nil, fmt.Errorf("flush privileges: %w", err)
-	}
-
-	slog.InfoContext(ctx, "database provisioned successfully",
-		"database", dbName,
-		"username", username,
-		"project", projectName)
-
-	return &DatabaseCredentials{
-		Host:     s.mysqlHost,
-		Port:     s.mysqlPort,
-		Database: dbName,
-		Username: username,
-		Password: password,
-	}, nil
 }
 
-// TestConnection verifies that the provided credentials can connect to the database.
-func (s *databaseProvisioningService) TestConnection(ctx context.Context, creds *DatabaseCredentials) error {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
-		creds.Username, creds.Password, creds.Host, creds.Port, creds.Database)
-
-	conn, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return fmt.Errorf("open connection: %w", err)
-	}
-	defer conn.Close()
-
-	if err := conn.PingContext(ctx); err != nil {
-		return fmt.Errorf("ping database: %w", err)
-	}
-
-	// Test basic query
-	var result string
-	if err := conn.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&result); err != nil {
-		return fmt.Errorf("query database: %w", err)
-	}
-
-	slog.InfoContext(ctx, "database connection test successful",
-		"database", creds.Database,
-		"username", creds.Username)
-
-	return nil
-}
-
-// generateSecurePassword creates a random 16-character password with mixed character types.
-func generateSecurePassword() string {
-	const (
-		lowercase = "abcdefghijklmnopqrstuvwxyz"
-		uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-		digits    = "0123456789"
-		special   = "!@#$%^&*()_+-=[]{}|;:,.<>?"
+func (s *databaseService) CreateDatabase(ctx context.Context, req CreateDatabaseRequest) (*DatabaseCredentials, error) {
+	var (
+		creds *DatabaseCredentials
+		err   error
 	)
 
-	chars := lowercase + uppercase + digits + special
-	password := make([]byte, 16)
-	for i := range password {
-		password[i] = chars[rand.Intn(len(chars))]
+	switch req.DBType {
+	case DBTypeMySQL:
+		creds, err = s.mysql.createDatabase(ctx, req.Name)
+	case DBTypeMongoDB:
+		creds, err = s.mongodb.createDatabase(ctx, req.Name)
+	default:
+		return nil, fmt.Errorf("unknown database type: %s", req.DBType)
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	return string(password)
-}
-
-// randString generates a random string of specified length.
-func randString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	result := make([]byte, length)
-	for i := range result {
-		result[i] = charset[rand.Intn(len(charset))]
+	// Persist the (org, project, component) → database mapping.
+	if req.OrgID != "" && req.ProjectID != "" && req.Component != "" {
+		mapping := &repository.DatabaseMapping{
+			OrgID:     req.OrgID,
+			ProjectID: req.ProjectID,
+			Component: req.Component,
+			DBType:    creds.DBType,
+			DBName:    creds.Database,
+			Host:      creds.Host,
+			Port:      creds.Port,
+			Username:  creds.Username,
+			Password:  creds.Password,
+		}
+		if upsertErr := s.mappingRepo.Upsert(ctx, mapping); upsertErr != nil {
+			// Log but do not fail the operation — the database was created successfully.
+			slog.ErrorContext(ctx, "failed to store database mapping",
+				"org_id", req.OrgID,
+				"project_id", req.ProjectID,
+				"component", req.Component,
+				"error", upsertErr,
+			)
+		}
 	}
-	return string(result)
+
+	return creds, nil
 }
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
+func (s *databaseService) LookupDatabase(ctx context.Context, orgID, projectID, component string) (*DatabaseCredentials, error) {
+	mapping, err := s.mappingRepo.Get(ctx, orgID, projectID, component)
+	if err != nil {
+		return nil, fmt.Errorf("lookup database: %w", err)
+	}
+	if mapping == nil {
+		return nil, nil // not found
+	}
+	return &DatabaseCredentials{
+		DBType:   mapping.DBType,
+		Host:     mapping.Host,
+		Port:     mapping.Port,
+		Database: mapping.DBName,
+		Username: mapping.Username,
+		Password: mapping.Password,
+	}, nil
 }

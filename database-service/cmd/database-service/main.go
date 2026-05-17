@@ -13,6 +13,8 @@ import (
 	"github.com/wso2/asdlc/database-service/api"
 	"github.com/wso2/asdlc/database-service/config"
 	"github.com/wso2/asdlc/database-service/controllers"
+	"github.com/wso2/asdlc/database-service/database"
+	"github.com/wso2/asdlc/database-service/repository"
 	"github.com/wso2/asdlc/database-service/services"
 )
 
@@ -25,19 +27,27 @@ func main() {
 
 	setupLogger(cfg.LogLevel)
 
-	// Services
-	dbProvisioningService := services.NewDatabaseProvisioningService(
-		cfg.MySQLRootURL,
-		cfg.MySQLHost,
-		cfg.MySQLPort,
+	// Internal PostgreSQL — mapping store for (org, project, component) → database.
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("failed to open internal database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	mappingRepo := repository.NewMappingRepository(db)
+
+	dbService := services.NewDatabaseService(
+		cfg.MySQLRootURL, cfg.MySQLHost, cfg.MySQLPort,
+		cfg.MongoRootURL, cfg.MongoHost, cfg.MongoPort,
+		mappingRepo,
 	)
 
-	// Controllers
-	dbCtrl := controllers.NewDatabaseController(dbProvisioningService)
+	dbCtrl := controllers.NewDatabaseController(dbService)
 
-	// Handler
 	handler := api.NewHandler(api.AppParams{
 		DatabaseCtrl: dbCtrl,
+		DatabaseSvc:  dbService,
 	})
 
 	server := &http.Server{

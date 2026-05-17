@@ -7,6 +7,8 @@ import (
 )
 
 func registerDatabaseRoutes(mux *http.ServeMux, ctrl controllers.DatabaseController) {
-	mux.HandleFunc("POST /api/v1/databases/provision", ctrl.ProvisionDatabase)
-	mux.HandleFunc("POST /api/v1/databases/test-connection", ctrl.TestConnection)
+	mux.HandleFunc("GET /health", ctrl.HealthCheck)
+	mux.HandleFunc("POST /api/v1/connections/test", ctrl.TestConnection)
+	mux.HandleFunc("POST /api/v1/databases", ctrl.CreateDatabase)
+	mux.HandleFunc("GET /api/v1/databases/lookup", ctrl.LookupDatabase)
 }
