@@ -71,6 +71,13 @@ type Config struct {
 	// GitHub issue.
 	AgentPlatformURL string
 
+	// AgentDatabaseServiceURL is the URL the coding-agent runner pod uses to
+	// reach the database-service MCP endpoint. The pod runs in the per-tenant
+	// WorkflowPlane namespace, so this must be a cross-namespace FQDN (e.g.
+	// http://app-factory-database-service.<dp-ns>.svc.cluster.local:3500).
+	// When empty, DB provisioning tasks will not be able to call the MCP.
+	AgentDatabaseServiceURL string
+
 	// JWKS settings for inbound JWT verification — Thunder publishes the
 	// User JWT and Service JWT signing key at JWKSURL; verifiers refresh
 	// on kid miss. Issuer and audience configure RFC 7519 claim checks.

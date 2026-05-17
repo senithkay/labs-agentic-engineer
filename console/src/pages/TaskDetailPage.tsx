@@ -26,6 +26,7 @@ const STATUS_TONE: Record<TaskStatus, 'default' | 'primary' | 'success' | 'error
   pending: 'default',
   on_hold: 'default',
   in_progress: 'primary',
+  testing: 'primary',
   verification_failed: 'warning',
   ready_for_review: 'primary',
   merged: 'success',
@@ -144,7 +145,7 @@ export default function TaskDetailPage() {
 
         <Card variant="outlined">
           <CardContent>
-            <TaskPipelineStrip status={taskStatus} />
+            <TaskPipelineStrip status={taskStatus} componentType={task.componentType} />
           </CardContent>
         </Card>
 

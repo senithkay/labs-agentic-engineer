@@ -50,6 +50,36 @@ apply_postgres() {
   log_ok "postgres applied"
 }
 
+apply_mysql() {
+  local manifest="$ROOT_DIR/deployments-v2/manifests/app-factory-mysql.yaml"
+  if [ ! -f "$manifest" ]; then
+    die "missing mysql manifest: $manifest"
+  fi
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    log_skip "[dry-run] would apply mysql from $manifest"
+    return
+  fi
+  kubectl apply -f "$manifest" -n wso2cloud
+  spinner "Waiting for MySQL" "3 min" -- \
+    kubectl wait --for=condition=Available deployment/app-factory-mysql -n wso2cloud --timeout=180s || true
+  log_ok "mysql applied"
+}
+
+apply_mongodb() {
+  local manifest="$ROOT_DIR/deployments-v2/manifests/app-factory-mongodb.yaml"
+  if [ ! -f "$manifest" ]; then
+    die "missing mongodb manifest: $manifest"
+  fi
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    log_skip "[dry-run] would apply mongodb from $manifest"
+    return
+  fi
+  kubectl apply -f "$manifest" -n wso2cloud
+  spinner "Waiting for MongoDB" "3 min" -- \
+    kubectl wait --for=condition=Available deployment/app-factory-mongodb -n wso2cloud --timeout=180s || true
+  log_ok "mongodb applied"
+}
+
 # Apply the ClusterRole + ClusterRoleBinding that lets git-service SSA
 # build-credential Secrets straight into workflows-<orgID> namespaces.
 # See deployments-v2/manifests/git-service-wp-rbac.yaml for the design
@@ -314,7 +344,7 @@ spec:
       name: app-factory-console-http-b5d082d5
   timeouts:
     request: 300s
-    streamIdle: 60s
+    streamIdle: 120s
 EOF
   log_ok "SSE streaming timeout policy applied"
 }

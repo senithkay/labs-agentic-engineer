@@ -63,6 +63,19 @@ type DispatchService interface {
 	// source of truth for upstream URLs (the prompt no longer carries
 	// them). Best-effort: per-task failures are logged but never bubble.
 	AnnounceDependencyDeployed(ctx context.Context, orgID, projectID, componentName string)
+	// MarkDbTesting transitions a database provisioning task from
+	// in_progress → testing. Called by the agent via POST
+	// /api/v1/tasks/{id}/db-testing after create_database MCP succeeds.
+	MarkDbTesting(ctx context.Context, taskID string) error
+	// MarkDbDeployed transitions a database provisioning task from
+	// testing → deployed. Called by the agent via POST
+	// /api/v1/tasks/{id}/db-deployed after test_connection MCP passes.
+	// Fires the cascade hook so any pending_deps dependents are re-evaluated.
+	MarkDbDeployed(ctx context.Context, taskID string) error
+	// MarkDbFailed transitions a database provisioning task to failed.
+	// Drives in_progress → failed or testing → failed. Called by the agent
+	// via POST /api/v1/tasks/{id}/db-failed on any provisioning error.
+	MarkDbFailed(ctx context.Context, taskID, diagnostic string) error
 }
 
 type dispatchService struct {
@@ -75,8 +88,9 @@ type dispatchService struct {
 	tokenInject   func(ctx context.Context) context.Context
 	wfRunService  WorkflowRunService
 	projector     TaskStateProjector
-	gitServiceURL string // URL the agent pod uses to reach git-service; cross-namespace FQDN in cluster
-	platformURL   string // URL the agent pod uses to call the BFF F3c verification-failed callback
+	gitServiceURL      string // URL the agent pod uses to reach git-service; cross-namespace FQDN in cluster
+	platformURL        string // URL the agent pod uses to call the BFF F3c verification-failed callback
+	databaseServiceURL string // URL the agent pod uses to reach the database-service MCP endpoint
 }
 
 func NewDispatchService(
@@ -91,19 +105,21 @@ func NewDispatchService(
 	projector TaskStateProjector,
 	gitServiceURL string,
 	platformURL string,
+	databaseServiceURL string,
 ) DispatchService {
 	return &dispatchService{
-		taskRepo:      taskRepo,
-		gitClient:     gitClient,
-		componentSvc:  componentSvc,
-		configSvc:     configSvc,
-		store:         store,
-		taskTokens:    taskTokens,
-		tokenInject:   tokenInject,
-		wfRunService:  wfRunService,
-		projector:     projector,
-		gitServiceURL: gitServiceURL,
-		platformURL:   platformURL,
+		taskRepo:           taskRepo,
+		gitClient:          gitClient,
+		componentSvc:       componentSvc,
+		configSvc:          configSvc,
+		store:              store,
+		taskTokens:         taskTokens,
+		tokenInject:        tokenInject,
+		wfRunService:       wfRunService,
+		projector:          projector,
+		gitServiceURL:      gitServiceURL,
+		platformURL:        platformURL,
+		databaseServiceURL: databaseServiceURL,
 	}
 }
 
@@ -134,8 +150,14 @@ func (s *dispatchService) DispatchTasks(ctx context.Context, orgID, projectID st
 	// per-batch — DependsOnComponents lists names that map 1:1 to tasks
 	// in the same batch (validated at persist time in task_stream.go).
 	statusByComponent := make(map[string]string, len(tasks))
+	// typeByComponent allows dispatch to distinguish database components
+	// (which never have OC deployments) from service components (which do).
+	// Used in resolveDependencyEndpoints to skip the external-URL check for
+	// database dependencies — their dependents use lookup_database MCP instead.
+	typeByComponent := make(map[string]string, len(tasks))
 	for _, t := range tasks {
 		statusByComponent[t.ComponentName] = t.Status
+		typeByComponent[t.ComponentName] = t.ComponentType
 	}
 
 	var results []DispatchResult
@@ -169,7 +191,7 @@ func (s *dispatchService) DispatchTasks(ctx context.Context, orgID, projectID st
 			continue
 		}
 
-		res := s.dispatchOne(ctx, task, repoInfo, identity)
+		res := s.dispatchOne(ctx, task, repoInfo, identity, typeByComponent)
 		results = append(results, res)
 	}
 
@@ -199,6 +221,7 @@ func (s *dispatchService) dispatchOne(
 	task *models.ComponentTask,
 	repoInfo *gitservice.RepoInfo,
 	identity *gitservice.IdentityProjection,
+	typeByComponent map[string]string,
 ) DispatchResult {
 	res := DispatchResult{TaskID: task.ID, ComponentName: task.ComponentName}
 
@@ -241,7 +264,7 @@ func (s *dispatchService) dispatchOne(
 	// its GitHub issue, posted by AnnounceDependencyDeployed when each
 	// upstream landed `deployed`. Keeping the prompt thin makes the
 	// cluster and local flows read from the same source.
-	depEndpoints, err := s.resolveDependencyEndpoints(ctx, task)
+	depEndpoints, err := s.resolveDependencyEndpoints(ctx, task, typeByComponent)
 	if err != nil {
 		const deferDeadline = 2 * time.Minute
 		now := time.Now()
@@ -307,6 +330,7 @@ func (s *dispatchService) dispatchOne(
 		Bearer:             bearer,
 		GitServiceURL:      s.gitServiceURL,
 		PlatformURL:        s.platformURL,
+		DatabaseServiceURL: s.databaseServiceURL,
 		AnthropicSecretRef: anthropicRes.SecretRefName,
 	})
 	if err != nil {
@@ -380,6 +404,49 @@ func (s *dispatchService) MarkVerificationFailed(ctx context.Context, taskID, di
 	return nil
 }
 
+// MarkDbTesting transitions a database provisioning task from
+// in_progress → testing. Uses the same projector path as MarkVerificationFailed.
+func (s *dispatchService) MarkDbTesting(ctx context.Context, taskID string) error {
+	if s.projector == nil {
+		return fmt.Errorf("db-testing: projector not configured")
+	}
+	if err := s.projector.ApplyBuildResult(ctx, taskID, TaskEventDbTesting, ""); err != nil {
+		return fmt.Errorf("apply db-testing: %w", err)
+	}
+	slog.InfoContext(ctx, "db task marked testing", "task", taskID)
+	return nil
+}
+
+// MarkDbDeployed transitions a database provisioning task from
+// testing → deployed. ApplyBuildResult fires the cascade hook automatically
+// when the new status is `deployed`, unblocking any pending_deps dependents.
+func (s *dispatchService) MarkDbDeployed(ctx context.Context, taskID string) error {
+	if s.projector == nil {
+		return fmt.Errorf("db-deployed: projector not configured")
+	}
+	if err := s.projector.ApplyBuildResult(ctx, taskID, TaskEventDbDeployed, ""); err != nil {
+		return fmt.Errorf("apply db-deployed: %w", err)
+	}
+	slog.InfoContext(ctx, "db task marked deployed", "task", taskID)
+	return nil
+}
+
+// MarkDbFailed transitions a database provisioning task to failed.
+// Works from both in_progress and testing states.
+func (s *dispatchService) MarkDbFailed(ctx context.Context, taskID, diagnostic string) error {
+	if s.projector == nil {
+		return fmt.Errorf("db-failed: projector not configured")
+	}
+	if len(diagnostic) > 4000 {
+		diagnostic = diagnostic[:4000] + "…(truncated)"
+	}
+	if err := s.projector.ApplyBuildResult(ctx, taskID, TaskEventDbFailed, diagnostic); err != nil {
+		return fmt.Errorf("apply db-failed: %w", err)
+	}
+	slog.InfoContext(ctx, "db task marked failed", "task", taskID, "diagnostic", diagnostic)
+	return nil
+}
+
 // RetryTask (F3c) is the operator-driven retry path for a task in
 // `verification_failed`. It:
 //
@@ -439,7 +506,9 @@ func (s *dispatchService) RetryTask(ctx context.Context, taskID string) (Dispatc
 	// dispatchOne doesn't gate on Status (the gating lives in
 	// DispatchTasks); it triggers a fresh WorkflowRun and persists
 	// DispatchedAt + LastCodingAgentRunName + Status=in_progress on success.
-	res := s.dispatchOne(ctx, task, repoInfo, identity)
+	// For retry, typeByComponent is empty — this task is already dispatched
+	// and verification_failed; we don't need dep-type info here.
+	res := s.dispatchOne(ctx, task, repoInfo, identity, nil)
 	slog.InfoContext(ctx, "task retried after verification_failed",
 		"task", taskID, "status", res.Status)
 	return res, nil
@@ -590,7 +659,21 @@ type DependencyEndpoint struct {
 // The asdlc skill loaded in the runner image carries the rest of the
 // workflow (read the issue + its comments, harvest dep URLs, bake them
 // in, verify before PR, recovery).
+//
+// For database provisioning tasks the prompt differs: no branch/PR workflow;
+// the agent calls database-service MCP tools and signals state via the
+// BFF's db-testing / db-deployed / db-failed callback endpoints.
 func buildAgentPrompt(task *models.ComponentTask) string {
+	if task.ComponentType == "database" {
+		return fmt.Sprintf(
+			"Work on this GitHub issue: %s\n\n"+
+				"This is a database provisioning task. Read the issue for context, "+
+				"then follow the ASDLC skill's database provisioning workflow: "+
+				"call the database-service MCP tools and report the result to the "+
+				"platform. Do NOT create a branch, commit code, or open a PR.",
+			task.IssueURL,
+		)
+	}
 	return fmt.Sprintf(
 		"Work on this GitHub issue: %s\n\n"+
 			"You are at the project repo root, on its default branch. Create your "+
@@ -608,9 +691,15 @@ func buildAgentPrompt(task *models.ComponentTask) string {
 // ListDeployments call MUST return a non-empty external URL. An empty URL
 // means the provider component is missing `visibility: external` on its
 // `spec.endpoints` — that is the §1.3 invariant breaking. Fail loudly here.
+//
+// Exception: database components (typeByComponent[dep] == "database") are
+// never deployed as OC workloads and therefore never have external URLs.
+// Dependents access them via the lookup_database MCP, not via an HTTP URL,
+// so they are silently skipped in the URL-invariant check.
 func (s *dispatchService) resolveDependencyEndpoints(
 	ctx context.Context,
 	task *models.ComponentTask,
+	typeByComponent map[string]string,
 ) ([]DependencyEndpoint, error) {
 	if len(task.DependsOnComponents) == 0 || s.componentSvc == nil {
 		return nil, nil
@@ -620,6 +709,11 @@ func (s *dispatchService) resolveDependencyEndpoints(
 	}
 	out := make([]DependencyEndpoint, 0, len(task.DependsOnComponents))
 	for _, depComponent := range task.DependsOnComponents {
+		// Database components are provisioned via MCP, not deployed as OC
+		// workloads. Dependents retrieve credentials via lookup_database MCP.
+		if typeByComponent != nil && typeByComponent[depComponent] == "database" {
+			continue
+		}
 		ocName := toK8sName(depComponent)
 		list, err := s.componentSvc.ListDeployments(ctx, task.OrgID, task.ProjectID, ocName)
 		if err != nil {

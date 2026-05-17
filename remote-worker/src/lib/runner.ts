@@ -11,8 +11,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
 
 // Phase 0 allowed-tools: git, gh, build/test/lint via Bash; standard file
-// tools. MCP is retired.
-const ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
+// tools. Database-service MCP tools are added dynamically when
+// ASDLC_DATABASE_SERVICE_URL is set (database provisioning tasks only).
+const BASE_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
+const DB_MCP_TOOLS = [
+  "mcp__database-service__create_database",
+  "mcp__database-service__lookup_database",
+  "mcp__database-service__test_connection",
+];
 
 export interface RunResult {
   exitCode: number;
@@ -56,12 +62,21 @@ export function runClaudeQuery(
   // SDK v0.2.126 auto-discovers the bundled native binary — no
   // pathToClaudeCodeExecutable needed. settingSources: [] ensures no
   // host filesystem settings leak into the container agent.
+  const dbServiceUrl = process.env.ASDLC_DATABASE_SERVICE_URL ?? "";
+  const mcpServers: Record<string, { type: "http"; url: string }> | undefined = dbServiceUrl
+    ? { "database-service": { type: "http", url: `${dbServiceUrl}/mcp` } }
+    : undefined;
+  const allowedTools = dbServiceUrl
+    ? [...BASE_TOOLS, ...DB_MCP_TOOLS]
+    : BASE_TOOLS;
+
   const q = query({
     prompt: req.prompt,
     options: {
       cwd: layout.workspace,
       plugins: [{ type: "local", path: PLUGIN_PATH }],
-      allowedTools: ALLOWED_TOOLS,
+      allowedTools,
+      mcpServers,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       persistSession: false,

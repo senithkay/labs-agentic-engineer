@@ -162,6 +162,7 @@ export type TaskStatus =
   | 'pending'
   | 'on_hold'
   | 'in_progress'
+  | 'testing'
   | 'verification_failed'
   | 'ready_for_review'
   | 'merged'
@@ -178,6 +179,10 @@ export interface ComponentTask {
   order: number;
   status: TaskStatus;
   workspacePath: string;
+  // Set at task-generation time from .asdlc/design.json. Used to render the
+  // correct pipeline strip ("database" shows 4-stage DB view; others show
+  // the full 6-stage GitHub+build view).
+  componentType?: string;
 
   // Tech-lead agent revamp — task-level data lives on the row; component
   // shape (OpenAPI, language, appPath, etc.) is read fresh from

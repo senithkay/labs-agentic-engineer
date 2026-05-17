@@ -49,6 +49,8 @@ env:
   # still records the diagnostic on the GitHub issue).
   - key: AGENT_PLATFORM_URL
     value: "http://app-factory-api.dp-wso2cloud-app-factory-development-bad5f211.svc.cluster.local:8080"
+  - key: AGENT_DATABASE_SERVICE_URL
+    value: "http://app-factory-database-service.dp-wso2cloud-app-factory-development-bad5f211.svc.cluster.local:3500"
   - key: BFF_TASK_SIGNING_KEY
     value: "${BFF_TASK_SIGNING_KEY}"
   - key: BFF_TASK_TOKEN_ISSUER

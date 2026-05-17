@@ -101,6 +101,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Phase 6 — DB task lifecycle: adds component_type column to
+	// component_tasks. Used to render the correct pipeline strip in the
+	// console and to skip the external-URL check for database dependencies
+	// at dispatch time. Idempotent.
+	if err := migrations.RunPhase6DbTasks(db); err != nil {
+		slog.Error("phase6_db_tasks migration failed", "error", err)
+		os.Exit(1)
+	}
+
 	// Repositories — only task and config remain
 	taskRepo := repositories.NewTaskRepository(db)
 	configRepo := repositories.NewConfigRepository(db)
@@ -309,8 +318,8 @@ func main() {
 	if agentGitServiceURL == "" {
 		agentGitServiceURL = cfg.GitService.BaseURL
 	}
-	dispatchSvc := services.NewDispatchService(taskRepo, gitClient, componentService, configService, artifactStore, taskTokens, tokenInject, wfRunService, projector, agentGitServiceURL, cfg.AgentPlatformURL)
-	slog.Info("Dispatch service", "agentGitServiceURL", agentGitServiceURL)
+	dispatchSvc := services.NewDispatchService(taskRepo, gitClient, componentService, configService, artifactStore, taskTokens, tokenInject, wfRunService, projector, agentGitServiceURL, cfg.AgentPlatformURL, cfg.AgentDatabaseServiceURL)
+	slog.Info("Dispatch service", "agentGitServiceURL", agentGitServiceURL, "agentDatabaseServiceURL", cfg.AgentDatabaseServiceURL)
 
 	// F1 — wire the post-deploy dispatch cascade. The projector fires
 	// OnTaskDeployed whenever ApplyBuildResult lands a task in `deployed`;

@@ -56,50 +56,70 @@ gh issue list --label asdlc --label implementation --state open \
 If the component this task targets has `componentType: "database"` in
 `.asdlc/design.json` (check `components[name=$ASDLC_COMPONENT_NAME].componentType`),
 this is a **database provisioning task** — not a coding task. Do NOT write
-application code. Follow these steps instead:
+application code, create branches, or open a PR. Follow these steps instead:
+
+The runner has already wired the `database-service` MCP server into your tool
+list. Use the tools directly — no curl, no JSON-RPC, no service discovery.
 
 1. **Read the component entry** from `.asdlc/design.json` to get the `dbEngine`
    (`mysql` or `mongodb`).
-2. **Call the database-service MCP** to provision the database:
-   ```bash
-   curl -sf -X POST "$ASDLC_DATABASE_SERVICE_URL/mcp" \
-     -H "Content-Type: application/json" \
-     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",
-          \"params\":{\"name\":\"create_database\",\"arguments\":{
-            \"db_type\":\"<dbEngine>\",
-            \"name\":\"$ASDLC_COMPONENT_NAME\",
-            \"org_id\":\"$ASDLC_ORG_ID\",
-            \"project_id\":\"$ASDLC_PROJECT_ID\",
-            \"component\":\"$ASDLC_COMPONENT_NAME\"}}}"
-   ```
-   A successful response contains the connection credentials — these are
-   stored server-side. **Do not write credentials to any file.**
-3. **Write a metadata file** (no credentials):
-   ```bash
-   mkdir -p databases
-   cat > "databases/$ASDLC_COMPONENT_NAME.json" <<EOF
-   {
-     "component": "$ASDLC_COMPONENT_NAME",
-     "db_type": "<dbEngine>"
-   }
-   EOF
-   ```
-4. **Commit and open a PR** following the standard workflow below
-   (`git checkout -b feature/<slug>`, `git add`, `git commit "chore: provision <dbEngine> database $ASDLC_COMPONENT_NAME"`,
-   `git push`, `gh pr create` with `Closes #<issue-number>` in the body).
-5. **Mark PR ready**: `gh pr ready <pr-number>`.
 
-Services that depend on this database can retrieve credentials later via the
-`lookup_database` MCP tool with the same org/project/component key:
-```bash
-curl -sf -X POST "$ASDLC_DATABASE_SERVICE_URL/mcp" \
-  -H "Content-Type: application/json" \
-  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",
-       \"params\":{\"name\":\"lookup_database\",\"arguments\":{
-         \"org_id\":\"$ASDLC_ORG_ID\",
-         \"project_id\":\"$ASDLC_PROJECT_ID\",
-         \"component\":\"$ASDLC_COMPONENT_NAME\"}}}"
-```
+2. **Provision the database** — call the `create_database` tool:
+   - `db_type`: value of `dbEngine` from design.json (`mysql` or `mongodb`)
+   - `name`: `$ASDLC_COMPONENT_NAME`
+   - `org_id`: `$ASDLC_ORG_ID`
+   - `project_id`: `$ASDLC_PROJECT_ID`
+   - `component`: `$ASDLC_COMPONENT_NAME`
+
+   If the tool returns an error, signal failure and stop:
+   ```bash
+   curl -sS -X POST "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-failed" \
+     -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")" \
+     -H "Content-Type: application/json" \
+     -d "{\"diagnostic\":\"create_database failed: <error text>\"}"
+   ```
+   **Do not** retry, investigate, or do DNS/port discovery on failure.
+
+3. **Signal the platform that testing is starting:**
+   ```bash
+   curl -sS -X POST \
+     "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-testing" \
+     -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")"
+   ```
+
+4. **Test the database connection** — call the `test_connection` tool:
+   - `org_id`: `$ASDLC_ORG_ID`
+   - `project_id`: `$ASDLC_PROJECT_ID`
+   - `component`: `$ASDLC_COMPONENT_NAME`
+
+   The tool looks up the stored credentials internally — you never handle them.
+
+5. **Report the result to the platform:**
+
+   If the test **passed**:
+   ```bash
+   curl -sS -X POST \
+     "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-deployed" \
+     -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")"
+   ```
+
+   If the test **failed**:
+   ```bash
+   curl -sS -X POST \
+     "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-failed" \
+     -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")" \
+     -H "Content-Type: application/json" \
+     -d "{\"diagnostic\":\"test_connection failed: <error text>\"}"
+   ```
+
+   Skip platform callbacks if `ASDLC_PLATFORM_URL` is empty (local-flow / older platform).
+
+**Do NOT** create a branch, commit code, or open a PR — database provisioning tasks
+have no code artefact to review. The platform drives the lifecycle entirely via the
+callback endpoints above.
+
+Services that depend on this database retrieve credentials at their own dispatch
+time via the `lookup_database` MCP tool using the same org/project/component key.
 
 ## Workflow
 

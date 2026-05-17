@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/lib/pq"
+
 	"github.com/wso2/asdlc/database-service/api"
 	"github.com/wso2/asdlc/database-service/config"
 	"github.com/wso2/asdlc/database-service/controllers"

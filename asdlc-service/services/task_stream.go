@@ -70,7 +70,12 @@ func (s *taskService) StreamGenerateTasks(ctx context.Context, orgID, projectID 
 	committed := false
 	defer func() {
 		if !committed {
-			tx.Rollback()
+			// Use a detached context so a canceled request context (client
+			// disconnect / gateway timeout) doesn't prevent the ROLLBACK from
+			// reaching PostgreSQL. Without this, the advisory lock leaks into
+			// the connection pool and blocks the next generate request until
+			// pgx eventually closes the bad connection.
+			tx.WithContext(context.Background()).Rollback()
 		}
 	}()
 	if lockErr := tx.Exec(`SELECT pg_advisory_xact_lock(?)`, hashTechLeadKey(projectID)).Error; lockErr != nil {
@@ -449,6 +454,7 @@ func (s *taskService) persistAndIssue(
 			Status:              string(models.TaskStatusPending),
 			LifecycleStatus:     string(models.TaskLifecycleGhIssueWaiting),
 			ExecType:            "WORKER",
+			ComponentType:       comp.ComponentType,
 		}
 		if err := s.taskRepo.Create(ctx, task); err != nil {
 			return nil, fmt.Errorf("create task row %d: %w", i, err)
