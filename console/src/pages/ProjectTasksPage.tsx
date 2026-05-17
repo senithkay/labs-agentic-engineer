@@ -4,6 +4,7 @@ import { alpha, Box, Button, CircularProgress, IconButton, PageContent, Typograp
 import { AlertTriangle, CheckCircle, ChevronRight, Clock, Info, X } from '@wso2/oxygen-ui-icons-react';
 import { useProjectBoard } from '../hooks/useProjectBoard';
 import { AnimatedBanner } from '../components/tasks/AnimatedBanner';
+import { DatabaseArtifactsPanel } from '../components/tasks/DatabaseArtifactsPanel';
 import { TaskSection } from '../components/tasks/TaskSection';
 import { TasksPageHeader } from '../components/tasks/TasksPageHeader';
 import type { SectionConfig } from '../components/tasks/types';
@@ -77,7 +78,7 @@ export default function ProjectTasksPage() {
 
   if (isLoading) {
     return (
-      <PageContent>
+      <PageContent fullWidth noPadding sx={{ pl: 2, pr: 2, pt: 2, display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pt: 16, gap: 1.5 }}>
           <CircularProgress size={28} thickness={3} />
           <Typography variant="body2" color="text.disabled">Loading tasks…</Typography>
@@ -88,7 +89,7 @@ export default function ProjectTasksPage() {
 
   if (error) {
     return (
-      <PageContent>
+      <PageContent fullWidth noPadding sx={{ pl: 2, pr: 2, pt: 2, display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ display: 'flex', justifyContent: 'center', pt: 16 }}>
           <Typography variant="body2" color="error.main">{error}</Typography>
         </Box>
@@ -112,8 +113,11 @@ export default function ProjectTasksPage() {
   }
 
   return (
-    <PageContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+    <PageContent fullWidth noPadding sx={{ display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 260px', alignItems: 'start' }}>
+
+        {/* Left: tasks column — fills remaining space, shrinks when sidebar expands */}
+        <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0, pl: 2, pr: 2, pt: 2 }}>
 
         <TasksPageHeader
           projectId={projectId ?? ''}
@@ -337,7 +341,7 @@ export default function ProjectTasksPage() {
         </AnimatedBanner>
 
         {/* Task sections */}
-        <Box sx={{ flex: 1, overflowY: 'auto', pr: 0.25 }}>
+        <Box>
           {totalTasks === 0 && !isGenerating && !generateBanner && (
             <Box
               sx={{
@@ -380,6 +384,11 @@ export default function ProjectTasksPage() {
             </Box>
           ))}
         </Box>
+
+        </Box>{/* end left tasks column */}
+
+        {/* Right: database artifacts panel */}
+        <DatabaseArtifactsPanel orgId={orgId ?? ''} projectId={projectId ?? ''} />
 
       </Box>
     </PageContent>

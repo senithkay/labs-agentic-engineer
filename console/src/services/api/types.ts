@@ -225,6 +225,22 @@ export interface ComponentTask {
   updatedAt: string;
 }
 
+// -- Database Artifacts (provisioned databases for a project) ----------------
+
+export type DatabaseArtifactStatus = 'pending' | 'provisioning' | 'healthy' | 'unhealthy';
+
+export interface DatabaseArtifact {
+  component: string;
+  dbType?: string;
+  dbName?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  taskStatus: string;
+  status: DatabaseArtifactStatus;
+}
+
 // -- Task progress (live execution feed) -------------------------------------
 // Mirrors asdlc-service/clients/observer/schema.go and
 // remote-worker/src/lib/progress/schema.ts. Versioned NDJSON envelope —

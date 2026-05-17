@@ -1025,6 +1025,13 @@ export const restApi = {
     });
   },
 
+  async listDatabaseArtifacts(orgHandle: string, projectId: string): Promise<import('./types').DatabaseArtifact[]> {
+    const data = await fetchJSON<{ databases: import('./types').DatabaseArtifact[] }>(
+      `${projectPrefix(orgHandle, projectId)}/databases`
+    );
+    return data.databases ?? [];
+  },
+
   /**
    * Streams task generation as SSE. The two-phase tech-lead agent emits:
    *   data-plan-item            — { tempId, componentName, title, rationale, dependsOn }
