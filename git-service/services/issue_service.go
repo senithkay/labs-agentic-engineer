@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/wso2/asdlc/git-service/models"
 	"github.com/wso2/asdlc/git-service/pkg/credentials"
@@ -110,13 +111,36 @@ func (s *issueService) ensureBoard(ctx context.Context, gitRepo *models.GitRepos
 	return githubProjectID, nil
 }
 
+// addIssueToProject adds the issue to the GitHub Project board with up to 3
+// attempts and exponential backoff. GitHub's secondary rate limit throttles
+// rapid addProjectV2ItemById mutations (common when generating many tasks at
+// once), so retrying with a short pause recovers most failures without user
+// intervention.
 func (s *issueService) addIssueToProject(ctx context.Context, githubProjectID string, issue *IssueResult, token string) {
 	if issue.NodeID == "" || s.githubV2 == nil || githubProjectID == "" {
 		slog.WarnContext(ctx, "skipping board add: missing project id or issue node id", "issue", issue.URL)
 		return
 	}
-	if err := s.githubV2.AddIssueToProject(ctx, githubProjectID, issue.NodeID, token); err != nil {
-		slog.WarnContext(ctx, "failed to add issue to GitHub project board", "issue", issue.URL, "error", err)
+	const maxAttempts = 3
+	delay := time.Second
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err := s.githubV2.AddIssueToProject(ctx, githubProjectID, issue.NodeID, token)
+		if err == nil {
+			return
+		}
+		if attempt == maxAttempts {
+			slog.WarnContext(ctx, "failed to add issue to GitHub project board after retries",
+				"issue", issue.URL, "attempts", attempt, "error", err)
+			return
+		}
+		slog.WarnContext(ctx, "add issue to board failed, retrying",
+			"issue", issue.URL, "attempt", attempt, "delay", delay, "error", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		delay *= 2
 	}
 }
 

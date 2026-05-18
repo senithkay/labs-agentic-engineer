@@ -846,10 +846,13 @@ func buildAgentPrompt(task *models.ComponentTask) string {
 	if task.ComponentType == "database" {
 		return fmt.Sprintf(
 			"Work on this GitHub issue: %s\n\n"+
-				"This is a database provisioning task. Read the issue for context, "+
-				"then follow the ASDLC skill's database provisioning workflow: "+
-				"call the database-service MCP tools and report the result to the "+
-				"platform. Do NOT create a branch, commit code, or open a PR.",
+				"This is a database provisioning task. Follow the ASDLC skill's database "+
+				"provisioning workflow exactly. Use the `create_database` and `test_connection` "+
+				"MCP tools. Signal state to the platform using ONLY these exact endpoints:\n"+
+				"  - Before test_connection: POST $ASDLC_PLATFORM_URL/api/v1/tasks/$ASDLC_TASK_ID/db-testing\n"+
+				"  - On success: POST $ASDLC_PLATFORM_URL/api/v1/tasks/$ASDLC_TASK_ID/db-deployed\n"+
+				"  - On any failure: POST $ASDLC_PLATFORM_URL/api/v1/tasks/$ASDLC_TASK_ID/db-failed\n"+
+				"Do NOT invent other endpoint names. Do NOT create a branch, commit code, or open a PR.",
 			task.IssueURL,
 		)
 	}

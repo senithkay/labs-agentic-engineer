@@ -396,7 +396,7 @@ func proxyPlanStream(ctx context.Context, upstream io.Reader, w *sseWriter) ([]p
 		case "error":
 			// Forward as-is; orchestrator surfaces as plan-scope error.
 			w.passthrough(line)
-			sseErr = fmt.Errorf("plan-stream error frame")
+			sseErr = fmt.Errorf("plan-stream error frame: %s", string(head.Data))
 		default:
 			w.passthrough(line)
 		}

@@ -64,6 +64,14 @@ type differs from the prompt, trust the prompt.
 
 Do NOT write application code, create branches, or open a PR.
 
+**Before starting, run this check and store the result:**
+```bash
+echo "PLATFORM_URL=${ASDLC_PLATFORM_URL}"
+```
+If the output shows a non-empty URL (e.g. `PLATFORM_URL=http://...`), you are in
+platform-flow and **must** run every `curl` callback below. Only skip the `curl`
+and `gh` commands when the output is literally `PLATFORM_URL=` (empty string).
+
 ### Step 1 — call `create_database`
 
 Call the `create_database` MCP tool with:
@@ -88,7 +96,7 @@ Then **stop**. Do not retry. Do not investigate. Do not search for the service.
 
 ### Step 2 — call `test_connection`, then signal the platform
 
-Signal testing is starting:
+Signal testing is starting (run this **before** calling `test_connection`):
 ```bash
 curl -sS -X POST "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-testing" \
   -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")"
@@ -125,9 +133,6 @@ curl -sS -X POST "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-failed"
 gh issue comment "$ISSUE_URL" \
   --body "Database provisioning failed: connection test returned faulty."
 ```
-
-Skip the `curl` and `gh` commands if `ASDLC_PLATFORM_URL` is empty
-(local-flow / older platform).
 
 **Do NOT** create a branch, commit code, or open a PR — database provisioning tasks
 have no code artefact to review. The platform drives the lifecycle entirely via the
