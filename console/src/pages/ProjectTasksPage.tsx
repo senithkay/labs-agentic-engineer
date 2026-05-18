@@ -25,6 +25,7 @@ export default function ProjectTasksPage() {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(SECTIONS.map(s => [s.key, s.key === 'todo' || s.key === 'inProgress']))
   );
+  const [hasArtifacts, setHasArtifacts] = useState(false);
   const prevCountsRef = useRef<Record<string, number>>({});
 
   const {
@@ -114,7 +115,12 @@ export default function ProjectTasksPage() {
 
   return (
     <PageContent fullWidth noPadding sx={{ display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 260px', alignItems: 'start' }}>
+      <Box sx={{
+        display: 'grid',
+        gridTemplateColumns: hasArtifacts ? '1fr 260px' : '1fr 0px',
+        alignItems: 'start',
+        transition: 'grid-template-columns 0.35s ease',
+      }}>
 
         {/* Left: tasks column — fills remaining space, shrinks when sidebar expands */}
         <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0, pl: 2, pr: 2, pt: 2 }}>
@@ -388,7 +394,7 @@ export default function ProjectTasksPage() {
         </Box>{/* end left tasks column */}
 
         {/* Right: database artifacts panel */}
-        <DatabaseArtifactsPanel orgId={orgId ?? ''} projectId={projectId ?? ''} />
+        <DatabaseArtifactsPanel orgId={orgId ?? ''} projectId={projectId ?? ''} onHasArtifacts={setHasArtifacts} />
 
       </Box>
     </PageContent>

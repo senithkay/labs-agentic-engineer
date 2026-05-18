@@ -12,10 +12,9 @@ import (
 // DatabaseController handles HTTP requests for database operations.
 type DatabaseController interface {
 	HealthCheck(w http.ResponseWriter, r *http.Request)
-	TestConnection(w http.ResponseWriter, r *http.Request)
-	CreateDatabase(w http.ResponseWriter, r *http.Request)
-	LookupDatabase(w http.ResponseWriter, r *http.Request)
+	RegisterDatabase(w http.ResponseWriter, r *http.Request)
 	ListProjectDatabases(w http.ResponseWriter, r *http.Request)
+	UpdateDatabaseStatus(w http.ResponseWriter, r *http.Request)
 }
 
 type databaseController struct {
@@ -51,111 +50,94 @@ func (c *databaseController) HealthCheck(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-type testConnectionRequest struct {
-	OrgID     string `json:"org_id"`
-	ProjectID string `json:"project_id"`
-	Component string `json:"component"`
+type registerDatabaseRequest struct {
+	ReferenceID   string `json:"referenceId"`
+	OrgID         string `json:"orgId"`
+	ProjectID     string `json:"projectId"`
+	DBType        string `json:"dbType"`
+	RequestedName string `json:"requestedName"`
+	ComponentName string `json:"componentName"`
 }
 
-type testConnectionResponse struct {
-	Status    string `json:"status"`
-	OrgID     string `json:"org_id"`
-	ProjectID string `json:"project_id"`
-	Component string `json:"component"`
-	Error     string `json:"error,omitempty"`
-}
-
-// TestConnection handles POST /api/v1/connections/test.
-// Looks up the provisioned credentials for the given (org, project, component) and
-// verifies the connection using those per-database user credentials — not root.
-func (c *databaseController) TestConnection(w http.ResponseWriter, r *http.Request) {
-	var req testConnectionRequest
+// RegisterDatabase handles POST /api/v1/databases/register.
+// Pre-registers a database in pending state. Called by the BFF after task generation.
+func (c *databaseController) RegisterDatabase(w http.ResponseWriter, r *http.Request) {
+	var req registerDatabaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.WriteErrorResponse(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if req.OrgID == "" || req.ProjectID == "" || req.Component == "" {
-		utils.WriteErrorResponse(w, http.StatusBadRequest, "org_id, project_id, and component are required")
+	if req.ReferenceID == "" || req.OrgID == "" || req.ProjectID == "" {
+		utils.WriteErrorResponse(w, http.StatusBadRequest, "referenceId, orgId, and projectId are required")
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	if err := c.svc.TestProvisionedDatabase(r.Context(), req.OrgID, req.ProjectID, req.Component); err != nil {
-		slog.DebugContext(r.Context(), "provisioned database connection test failed",
-			"org_id", req.OrgID, "project_id", req.ProjectID, "component", req.Component, "error", err)
-		json.NewEncoder(w).Encode(testConnectionResponse{ //nolint:errcheck
-			Status:    "failed",
-			OrgID:     req.OrgID,
-			ProjectID: req.ProjectID,
-			Component: req.Component,
-			Error:     err.Error(),
-		})
-		return
-	}
-
-	json.NewEncoder(w).Encode(testConnectionResponse{ //nolint:errcheck
-		Status:    "ok",
-		OrgID:     req.OrgID,
-		ProjectID: req.ProjectID,
-		Component: req.Component,
-	})
-}
-
-type createDatabaseRequest struct {
-	DBType    string `json:"db_type"`
-	Name      string `json:"name"`
-	OrgID     string `json:"org_id"`
-	ProjectID string `json:"project_id"`
-	Component string `json:"component"`
-}
-
-// CreateDatabase handles POST /api/v1/databases.
-// The caller provides the database name and the (org, project, component) key;
-// the service manages credentials and records the mapping.
-func (c *databaseController) CreateDatabase(w http.ResponseWriter, r *http.Request) {
-	var req createDatabaseRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.WriteErrorResponse(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
 	if req.DBType != string(services.DBTypeMySQL) && req.DBType != string(services.DBTypeMongoDB) {
-		utils.WriteErrorResponse(w, http.StatusBadRequest, "db_type must be 'mysql' or 'mongodb'")
+		utils.WriteErrorResponse(w, http.StatusBadRequest, "dbType must be 'mysql' or 'mongodb'")
 		return
 	}
-	if req.Name == "" {
-		utils.WriteErrorResponse(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	if req.OrgID == "" || req.ProjectID == "" || req.Component == "" {
-		utils.WriteErrorResponse(w, http.StatusBadRequest, "org_id, project_id, and component are required")
+	if req.RequestedName == "" || req.ComponentName == "" {
+		utils.WriteErrorResponse(w, http.StatusBadRequest, "requestedName and componentName are required")
 		return
 	}
 
-	creds, err := c.svc.CreateDatabase(r.Context(), services.CreateDatabaseRequest{
-		DBType:    services.DBType(req.DBType),
-		Name:      req.Name,
-		OrgID:     req.OrgID,
-		ProjectID: req.ProjectID,
-		Component: req.Component,
-	})
-	if err != nil {
-		slog.ErrorContext(r.Context(), "failed to create database",
-			"db_type", req.DBType, "name", req.Name, "error", err)
-		utils.WriteErrorResponse(w, http.StatusInternalServerError, "failed to create database")
+	if err := c.svc.RegisterDatabase(r.Context(), services.RegisterDatabaseRequest{
+		ReferenceID:   req.ReferenceID,
+		OrgID:         req.OrgID,
+		ProjectID:     req.ProjectID,
+		DBType:        services.DBType(req.DBType),
+		RequestedName: req.RequestedName,
+		ComponentName: req.ComponentName,
+	}); err != nil {
+		slog.ErrorContext(r.Context(), "failed to register database",
+			"reference_id", req.ReferenceID, "error", err)
+		utils.WriteErrorResponse(w, http.StatusInternalServerError, "failed to register database")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(creds) //nolint:errcheck
+	json.NewEncoder(w).Encode(map[string]string{"status": "pending"}) //nolint:errcheck
+}
+
+// UpdateDatabaseStatus handles PATCH /api/v1/databases/{referenceId}/status.
+// Called by the BFF to drive status transitions (e.g. pending → provisioning on dispatch).
+func (c *databaseController) UpdateDatabaseStatus(w http.ResponseWriter, r *http.Request) {
+	referenceID := r.PathValue("referenceId")
+	if referenceID == "" {
+		utils.WriteErrorResponse(w, http.StatusBadRequest, "referenceId path param is required")
+		return
+	}
+
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		utils.WriteErrorResponse(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	switch body.Status {
+	case "pending", "provisioning", "healthy", "faulty":
+		// valid
+	default:
+		utils.WriteErrorResponse(w, http.StatusBadRequest, "status must be one of: pending, provisioning, healthy, faulty")
+		return
+	}
+
+	if err := c.svc.UpdateDatabaseStatusByRef(r.Context(), referenceID, body.Status); err != nil {
+		slog.ErrorContext(r.Context(), "failed to update database status",
+			"reference_id", referenceID, "status", body.Status, "error", err)
+		utils.WriteErrorResponse(w, http.StatusInternalServerError, "failed to update database status")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": body.Status}) //nolint:errcheck
 }
 
 // ListProjectDatabases handles GET /api/v1/databases?org_id=&project_id=
-// Returns metadata (without credentials) for all databases provisioned under a project.
+// Returns all database artifacts for a project, including status from the mapping table.
 func (c *databaseController) ListProjectDatabases(w http.ResponseWriter, r *http.Request) {
 	orgID := r.URL.Query().Get("org_id")
 	projectID := r.URL.Query().Get("project_id")
@@ -182,32 +164,4 @@ func (c *databaseController) ListProjectDatabases(w http.ResponseWriter, r *http
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response{Databases: artifacts}) //nolint:errcheck
-}
-
-// LookupDatabase handles GET /api/v1/databases/lookup?org_id=&project_id=&component=
-func (c *databaseController) LookupDatabase(w http.ResponseWriter, r *http.Request) {
-	orgID := r.URL.Query().Get("org_id")
-	projectID := r.URL.Query().Get("project_id")
-	component := r.URL.Query().Get("component")
-
-	if orgID == "" || projectID == "" || component == "" {
-		utils.WriteErrorResponse(w, http.StatusBadRequest, "org_id, project_id, and component query params are required")
-		return
-	}
-
-	creds, err := c.svc.LookupDatabase(r.Context(), orgID, projectID, component)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "failed to lookup database",
-			"org_id", orgID, "project_id", projectID, "component", component, "error", err)
-		utils.WriteErrorResponse(w, http.StatusInternalServerError, "failed to lookup database")
-		return
-	}
-	if creds == nil {
-		utils.WriteErrorResponse(w, http.StatusNotFound, "no database found for the given org, project, and component")
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(creds) //nolint:errcheck
 }

@@ -18,18 +18,20 @@ import (
 	"github.com/wso2/asdlc/asdlc-service/repositories"
 )
 
-// DatabaseArtifactItem represents a database provisioned for a project, enriched
-// with the task lifecycle status so the UI can show health/provisioning/etc.
+// DatabaseArtifactItem represents a database record from the database-service mapping table.
+// Status is authoritative from the database table — not derived from task status.
 type DatabaseArtifactItem struct {
-	Component  string `json:"component"`
-	DBType     string `json:"dbType,omitempty"`
-	DBName     string `json:"dbName,omitempty"`
-	Host       string `json:"host,omitempty"`
-	Port       int    `json:"port,omitempty"`
-	Username   string `json:"username,omitempty"`
-	Password   string `json:"password,omitempty"`
-	TaskStatus string `json:"taskStatus"`
-	// Status is derived from TaskStatus: "pending" | "provisioning" | "healthy" | "unhealthy"
+	ID            string   `json:"id"`
+	ReferenceID   string   `json:"referenceId"`
+	Components    []string `json:"components"`
+	DBType        string   `json:"dbType,omitempty"`
+	RequestedName string   `json:"requestedName,omitempty"`
+	DBName        string   `json:"dbName,omitempty"`
+	Host          string   `json:"host,omitempty"`
+	Port          int      `json:"port,omitempty"`
+	Username      string   `json:"username,omitempty"`
+	Password      string   `json:"password,omitempty"`
+	// Status comes directly from the databases table: "pending" | "provisioning" | "healthy" | "faulty"
 	Status string `json:"status"`
 }
 
@@ -202,92 +204,30 @@ func (s *taskService) ListTasksByOrg(ctx context.Context, orgID string, f reposi
 }
 
 func (s *taskService) ListDatabaseArtifacts(ctx context.Context, orgID, projectID string) ([]DatabaseArtifactItem, error) {
-	// Build a task-status index for all tasks in the project. This is used to
-	// enrich database mappings with lifecycle status. Done regardless of
-	// component_type because that column was added late and may be empty on
-	// tasks generated before the Phase 6 migration populated it.
-	allTasks, err := s.taskRepo.ListByProjectID(ctx, orgID, projectID)
+	if s.dbClient == nil {
+		return []DatabaseArtifactItem{}, nil
+	}
+	infos, err := s.dbClient.ListByProject(ctx, orgID, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("list tasks: %w", err)
+		return nil, fmt.Errorf("list databases: %w", err)
 	}
-	taskByComponent := make(map[string]*models.ComponentTask, len(allTasks))
-	for i := range allTasks {
-		taskByComponent[allTasks[i].ComponentName] = &allTasks[i]
-	}
-
-	// Primary source: database-service mappings. These are created the moment
-	// create_database MCP succeeds, so a row here means the database exists.
-	// Tasks that haven't reached create_database yet (pending / early in_progress)
-	// are captured below via the componentType fallback.
-	var items []DatabaseArtifactItem
-	if s.dbClient != nil {
-		infos, err := s.dbClient.ListByProject(ctx, orgID, projectID)
-		if err != nil {
-			slog.WarnContext(ctx, "failed to list databases from database-service",
-				"org_id", orgID, "project_id", projectID, "error", err)
-		} else {
-			seen := make(map[string]bool, len(infos))
-			for _, info := range infos {
-				item := DatabaseArtifactItem{
-					Component: info.Component,
-					DBType:    info.DBType,
-					DBName:    info.DBName,
-					Host:      info.Host,
-					Port:      info.Port,
-					Username:  info.Username,
-					Password:  info.Password,
-				}
-				if task, ok := taskByComponent[info.Component]; ok {
-					item.TaskStatus = task.Status
-					item.Status = taskStatusToArtifactStatus(models.TaskStatus(task.Status))
-				} else {
-					// Mapping exists but no task row — treat as deployed.
-					item.TaskStatus = string(models.TaskStatusDeployed)
-					item.Status = "healthy"
-				}
-				items = append(items, item)
-				seen[info.Component] = true
-			}
-
-			// Secondary: include database tasks that don't have a mapping yet
-			// (agent hasn't called create_database yet). Fall back on
-			// component_type when present; ignore when empty.
-			for i := range allTasks {
-				t := &allTasks[i]
-				if seen[t.ComponentName] {
-					continue
-				}
-				if t.ComponentType != "database" {
-					continue
-				}
-				items = append(items, DatabaseArtifactItem{
-					Component:  t.ComponentName,
-					TaskStatus: t.Status,
-					Status:     taskStatusToArtifactStatus(models.TaskStatus(t.Status)),
-				})
-			}
-		}
-	}
-
-	if items == nil {
-		items = []DatabaseArtifactItem{}
+	items := make([]DatabaseArtifactItem, 0, len(infos))
+	for _, info := range infos {
+		items = append(items, DatabaseArtifactItem{
+			ID:            info.ID,
+			ReferenceID:   info.ReferenceID,
+			Components:    info.Components,
+			DBType:        info.DBType,
+			RequestedName: info.RequestedName,
+			DBName:        info.DBName,
+			Host:          info.Host,
+			Port:          info.Port,
+			Username:      info.Username,
+			Password:      info.Password,
+			Status:        info.Status,
+		})
 	}
 	return items, nil
-}
-
-// taskStatusToArtifactStatus maps a ComponentTask status to a UI-facing
-// database health status string.
-func taskStatusToArtifactStatus(status models.TaskStatus) string {
-	switch status {
-	case models.TaskStatusDeployed:
-		return "healthy"
-	case models.TaskStatusInProgress, models.TaskStatusTesting:
-		return "provisioning"
-	case models.TaskStatusFailed, models.TaskStatusRejected, models.TaskStatusAbandoned, models.TaskStatusVerificationFailed:
-		return "unhealthy"
-	default: // pending, pending_deps
-		return "pending"
-	}
 }
 
 // GenerateTasks is the legacy non-streaming entry point. The tech-lead
@@ -359,7 +299,9 @@ func topoSortComponents(components []models.DesignComponent) []models.DesignComp
 	}
 	return result
 }
-// ExecTask starts executing a task. For now, it just logs and doesn't perform any actions.
+// ExecTask is reserved for future use. Database provisioning tasks are now driven
+// entirely by the agent via MCP tools — pre-registration happens at task generation
+// time, and the agent calls create_database / test_connection via the MCP endpoint.
 func (s *taskService) ExecTask(ctx context.Context, taskID string) error {
 	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
@@ -368,50 +310,8 @@ func (s *taskService) ExecTask(ctx context.Context, taskID string) error {
 	if task == nil {
 		return ErrTaskNotFound
 	}
-
-	slog.InfoContext(ctx, "executing task",
-		"taskId", taskID,
-		"component", task.ComponentName,
-		"status", task.Status,
-		"title", task.Title)
-
-	if task.ExecType == "SYSTEM" {
-		slog.InfoContext(ctx, "Setting up environment for task execution",
-			"taskId", taskID, "title", task.Title)
-
-		if s.dbClient != nil {
-			// Provision database for the component
-			slog.InfoContext(ctx, "Provisioning database for component",
-				"taskId", taskID, "component", task.ComponentName)
-
-			dbCreds, err := s.dbClient.ProvisionDatabase(ctx, task.ProjectID)
-			if err != nil {
-				slog.ErrorContext(ctx, "failed to provision database",
-					"taskId", taskID, "component", task.ComponentName, "error", err)
-				return fmt.Errorf("provision database: %w", err)
-			}
-
-			slog.InfoContext(ctx, "Database provisioned successfully",
-				"taskId", taskID, "component", task.ComponentName,
-				"host", dbCreds.Host, "port", dbCreds.Port, "database", dbCreds.Database)
-
-			// Test the database connection
-			slog.InfoContext(ctx, "Testing database connection",
-				"taskId", taskID, "component", task.ComponentName)
-
-			if err := s.dbClient.TestConnection(ctx, dbCreds); err != nil {
-				slog.ErrorContext(ctx, "failed to test database connection",
-					"taskId", taskID, "component", task.ComponentName, "error", err)
-				return fmt.Errorf("test connection: %w", err)
-			}
-
-			slog.InfoContext(ctx, "Database connection test passed",
-				"taskId", taskID, "component", task.ComponentName)
-		} else {
-			slog.WarnContext(ctx, "Database client not configured, skipping database provisioning",
-				"taskId", taskID, "component", task.ComponentName)
-		}
-	}
+	slog.InfoContext(ctx, "exec_task called (no-op)",
+		"taskId", taskID, "component", task.ComponentName)
 	return nil
 }
 

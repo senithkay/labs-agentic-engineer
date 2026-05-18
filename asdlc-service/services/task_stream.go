@@ -214,6 +214,34 @@ func (s *taskService) StreamGenerateTasks(ctx context.Context, orgID, projectID 
 		return err
 	}
 
+	// T4b: pre-register databases. For each persisted database task, call the
+	// database-service to create a pending mapping record so the console can
+	// show the database immediately — before the agent has run.
+	// Non-blocking: log failures and continue.
+	if s.dbClient != nil {
+		compByName := make(map[string]models.DesignComponent, len(design.Components))
+		for _, c := range design.Components {
+			compByName[strings.ToLower(c.Name)] = c
+		}
+		for _, item := range persisted {
+			task := item.Task
+			if task.ComponentType != "database" {
+				continue
+			}
+			comp, ok := compByName[strings.ToLower(task.ComponentName)]
+			if !ok || comp.DbEngine == "" {
+				slog.WarnContext(ctx, "database task missing dbEngine in design; skipping pre-registration",
+					"component", task.ComponentName)
+				continue
+			}
+			if err := s.dbClient.RegisterDatabase(ctx, orgID, projectID, task.ID, task.ComponentName,
+				comp.DbEngine, task.ComponentName); err != nil {
+				slog.WarnContext(ctx, "failed to pre-register database",
+					"component", task.ComponentName, "error", err)
+			}
+		}
+	}
+
 	// T5: open Phase 2 over the surviving (issued) tasks.
 	survived := surviving(persisted)
 	slog.InfoContext(ctx, "tech-lead T5: phase 2 trigger",

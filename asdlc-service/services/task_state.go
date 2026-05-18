@@ -167,6 +167,10 @@ var allowedTransitions = []stateTransition{
 	{models.TaskStatusTesting, models.TaskStatusDeployed, TaskEventDbDeployed},
 	{models.TaskStatusInProgress, models.TaskStatusFailed, TaskEventDbFailed},
 	{models.TaskStatusTesting, models.TaskStatusFailed, TaskEventDbFailed},
+	// CodingAgentWatcher can observe a terminal pod failure while the task is
+	// still in `testing` (agent pod died between db-testing and db-deployed
+	// callbacks). Drive it to failed so it doesn't get stuck in testing forever.
+	{models.TaskStatusTesting, models.TaskStatusFailed, TaskEventCodingAgentFailed},
 }
 
 // ErrInvalidTransition is returned by Apply when the current status doesn't

@@ -11,10 +11,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
 
 // Phase 0 allowed-tools: git, gh, build/test/lint via Bash; standard file
-// tools. Database-service MCP tools are added dynamically when
-// ASDLC_DATABASE_SERVICE_URL is set (database provisioning tasks only).
+// tools. Database-service MCP tools are added whenever
+// ASDLC_DATABASE_SERVICE_URL is set — for both database provisioning tasks
+// (create_database, test_connection) and implementation tasks whose component
+// depends on a database (lookup_database to retrieve credentials at
+// implementation time).
 const BASE_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
 const DB_MCP_TOOLS = [
+  "mcp__database-service__get_pending_database",
   "mcp__database-service__create_database",
   "mcp__database-service__lookup_database",
   "mcp__database-service__test_connection",

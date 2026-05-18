@@ -20,7 +20,9 @@ export function useTaskAgentProgress(
     && taskStatus !== undefined
     && taskStatus !== 'pending'
     && taskStatus !== 'on_hold';
-  const isLive = taskStatus === 'in_progress';
+  // Keep polling during `testing` too — the DB agent pod is still running
+  // (waiting for test_connection to return) and will produce more log lines.
+  const isLive = taskStatus === 'in_progress' || taskStatus === 'testing';
 
   const { lines, phase, final, isLoading, error } = useCursorPolling({
     queryKey: ['taskAgentProgress', orgId, projectId, taskId],

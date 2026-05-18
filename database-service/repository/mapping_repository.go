@@ -6,28 +6,45 @@ import (
 	"fmt"
 )
 
-// DatabaseMapping records which database was provisioned for a given
-// (org, project, component) triple together with its connection credentials.
-type DatabaseMapping struct {
-	OrgID     string
-	ProjectID string
-	Component string
-	DBType    string
-	DBName    string
-	Host      string
-	Port      int
-	Username  string
-	Password  string
+// Database represents a pre-registered or provisioned database record.
+type Database struct {
+	ID            string
+	ReferenceID   string
+	OrgID         string
+	ProjectID     string
+	DBType        string
+	RequestedName string
+	ActualDBName  string
+	Host          string
+	Port          int
+	Username      string
+	Password      string
+	Status        string // pending | provisioning | healthy | faulty
 }
 
-// MappingRepository persists and retrieves database mappings.
+// DatabaseWithComponents extends Database with the list of component names
+// linked to it via database_component_links.
+type DatabaseWithComponents struct {
+	Database
+	Components []string
+}
+
+// MappingRepository persists and retrieves database records.
 type MappingRepository interface {
-	// Upsert stores or updates a mapping keyed on (org_id, project_id, component).
-	Upsert(ctx context.Context, m *DatabaseMapping) error
-	// Get retrieves the mapping for the given key. Returns (nil, nil) when not found.
-	Get(ctx context.Context, orgID, projectID, component string) (*DatabaseMapping, error)
-	// ListByProject retrieves all mappings for a given (org_id, project_id) pair.
-	ListByProject(ctx context.Context, orgID, projectID string) ([]*DatabaseMapping, error)
+	// RegisterDatabase creates a pending database record and a component link.
+	RegisterDatabase(ctx context.Context, db *Database, componentName string) error
+	// GetByReferenceID retrieves a database record by its reference_id.
+	// Returns (nil, nil) when not found.
+	GetByReferenceID(ctx context.Context, referenceID string) (*Database, error)
+	// ActivateDatabase populates the connection credentials and sets status to provisioning.
+	ActivateDatabase(ctx context.Context, id, actualDBName, host string, port int, username, password string) error
+	// UpdateStatus sets the status column for a database record.
+	UpdateStatus(ctx context.Context, id, status string) error
+	// ListByProject retrieves all database records for a project, each with its linked components.
+	ListByProject(ctx context.Context, orgID, projectID string) ([]*DatabaseWithComponents, error)
+	// GetByComponent retrieves the first database linked to a component (for lookup_database MCP compat).
+	// Returns (nil, nil) when not found.
+	GetByComponent(ctx context.Context, orgID, projectID, componentName string) (*Database, error)
 }
 
 type mappingRepository struct {
@@ -39,74 +56,170 @@ func NewMappingRepository(db *sql.DB) MappingRepository {
 	return &mappingRepository{db: db}
 }
 
-func (r *mappingRepository) Upsert(ctx context.Context, m *DatabaseMapping) error {
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO database_mappings
-			(org_id, project_id, component, db_type, db_name, host, port, username, password, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-		ON CONFLICT (org_id, project_id, component) DO UPDATE SET
-			db_type    = EXCLUDED.db_type,
-			db_name    = EXCLUDED.db_name,
-			host       = EXCLUDED.host,
-			port       = EXCLUDED.port,
-			username   = EXCLUDED.username,
-			password   = EXCLUDED.password,
-			updated_at = NOW()
-	`, m.OrgID, m.ProjectID, m.Component, m.DBType, m.DBName, m.Host, m.Port, m.Username, m.Password)
+func (r *mappingRepository) RegisterDatabase(ctx context.Context, d *Database, componentName string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("upsert mapping: %w", err)
+		return fmt.Errorf("begin tx: %w", err)
 	}
-	return nil
+	defer tx.Rollback() //nolint:errcheck
+
+	var id string
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO databases (reference_id, org_id, project_id, db_type, requested_name, status)
+		VALUES ($1, $2, $3, $4, $5, 'pending')
+		ON CONFLICT (reference_id) DO UPDATE SET updated_at = NOW()
+		RETURNING id
+	`, d.ReferenceID, d.OrgID, d.ProjectID, d.DBType, d.RequestedName).Scan(&id)
+	if err != nil {
+		return fmt.Errorf("insert database: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO database_component_links (database_id, org_id, project_id, component_name)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (database_id, component_name) DO NOTHING
+	`, id, d.OrgID, d.ProjectID, componentName)
+	if err != nil {
+		return fmt.Errorf("insert component link: %w", err)
+	}
+
+	return tx.Commit()
 }
 
-func (r *mappingRepository) ListByProject(ctx context.Context, orgID, projectID string) ([]*DatabaseMapping, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT org_id, project_id, component, db_type, db_name, host, port, username, password
-		FROM database_mappings
-		WHERE org_id = $1 AND project_id = $2
-		ORDER BY component
-	`, orgID, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("list mappings by project: %w", err)
-	}
-	defer rows.Close()
+func (r *mappingRepository) GetByReferenceID(ctx context.Context, referenceID string) (*Database, error) {
+	var d Database
+	var actualDBName, host, username, password sql.NullString
+	var port sql.NullInt64
 
-	var mappings []*DatabaseMapping
-	for rows.Next() {
-		var m DatabaseMapping
-		if err := rows.Scan(
-			&m.OrgID, &m.ProjectID, &m.Component,
-			&m.DBType, &m.DBName,
-			&m.Host, &m.Port,
-			&m.Username, &m.Password,
-		); err != nil {
-			return nil, fmt.Errorf("scan mapping row: %w", err)
-		}
-		mappings = append(mappings, &m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate mapping rows: %w", err)
-	}
-	return mappings, nil
-}
-
-func (r *mappingRepository) Get(ctx context.Context, orgID, projectID, component string) (*DatabaseMapping, error) {
-	var m DatabaseMapping
 	err := r.db.QueryRowContext(ctx, `
-		SELECT org_id, project_id, component, db_type, db_name, host, port, username, password
-		FROM database_mappings
-		WHERE org_id = $1 AND project_id = $2 AND component = $3
-	`, orgID, projectID, component).Scan(
-		&m.OrgID, &m.ProjectID, &m.Component,
-		&m.DBType, &m.DBName,
-		&m.Host, &m.Port,
-		&m.Username, &m.Password,
+		SELECT id, reference_id, org_id, project_id, db_type, requested_name,
+		       actual_db_name, host, port, username, password, status
+		FROM databases
+		WHERE reference_id = $1
+	`, referenceID).Scan(
+		&d.ID, &d.ReferenceID, &d.OrgID, &d.ProjectID, &d.DBType, &d.RequestedName,
+		&actualDBName, &host, &port, &username, &password, &d.Status,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get mapping: %w", err)
+		return nil, fmt.Errorf("get database by reference_id: %w", err)
 	}
-	return &m, nil
+	d.ActualDBName = actualDBName.String
+	d.Host = host.String
+	d.Port = int(port.Int64)
+	d.Username = username.String
+	d.Password = password.String
+	return &d, nil
+}
+
+func (r *mappingRepository) ActivateDatabase(ctx context.Context, id, actualDBName, host string, port int, username, password string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE databases
+		SET actual_db_name = $1, host = $2, port = $3, username = $4, password = $5,
+		    status = 'provisioning', updated_at = NOW()
+		WHERE id = $6
+	`, actualDBName, host, port, username, password, id)
+	if err != nil {
+		return fmt.Errorf("activate database: %w", err)
+	}
+	return nil
+}
+
+func (r *mappingRepository) UpdateStatus(ctx context.Context, id, status string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE databases SET status = $1, updated_at = NOW() WHERE id = $2
+	`, status, id)
+	if err != nil {
+		return fmt.Errorf("update database status: %w", err)
+	}
+	return nil
+}
+
+func (r *mappingRepository) ListByProject(ctx context.Context, orgID, projectID string) ([]*DatabaseWithComponents, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT d.id, d.reference_id, d.org_id, d.project_id, d.db_type, d.requested_name,
+		       d.actual_db_name, d.host, d.port, d.username, d.password, d.status,
+		       dcl.component_name
+		FROM databases d
+		JOIN database_component_links dcl ON d.id = dcl.database_id
+		WHERE d.org_id = $1 AND d.project_id = $2
+		ORDER BY d.created_at, dcl.component_name
+	`, orgID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list databases by project: %w", err)
+	}
+	defer rows.Close()
+
+	// Merge rows by database ID — one database may have multiple component links.
+	byID := make(map[string]*DatabaseWithComponents)
+	var order []string
+
+	for rows.Next() {
+		var d Database
+		var componentName string
+		var actualDBName, host, username, password sql.NullString
+		var port sql.NullInt64
+
+		if err := rows.Scan(
+			&d.ID, &d.ReferenceID, &d.OrgID, &d.ProjectID, &d.DBType, &d.RequestedName,
+			&actualDBName, &host, &port, &username, &password, &d.Status,
+			&componentName,
+		); err != nil {
+			return nil, fmt.Errorf("scan database row: %w", err)
+		}
+		d.ActualDBName = actualDBName.String
+		d.Host = host.String
+		d.Port = int(port.Int64)
+		d.Username = username.String
+		d.Password = password.String
+
+		if _, seen := byID[d.ID]; !seen {
+			entry := &DatabaseWithComponents{Database: d}
+			byID[d.ID] = entry
+			order = append(order, d.ID)
+		}
+		byID[d.ID].Components = append(byID[d.ID].Components, componentName)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate database rows: %w", err)
+	}
+
+	result := make([]*DatabaseWithComponents, 0, len(order))
+	for _, id := range order {
+		result = append(result, byID[id])
+	}
+	return result, nil
+}
+
+func (r *mappingRepository) GetByComponent(ctx context.Context, orgID, projectID, componentName string) (*Database, error) {
+	var d Database
+	var actualDBName, host, username, password sql.NullString
+	var port sql.NullInt64
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT d.id, d.reference_id, d.org_id, d.project_id, d.db_type, d.requested_name,
+		       d.actual_db_name, d.host, d.port, d.username, d.password, d.status
+		FROM databases d
+		JOIN database_component_links dcl ON d.id = dcl.database_id
+		WHERE dcl.org_id = $1 AND dcl.project_id = $2 AND dcl.component_name = $3
+		ORDER BY d.created_at DESC
+		LIMIT 1
+	`, orgID, projectID, componentName).Scan(
+		&d.ID, &d.ReferenceID, &d.OrgID, &d.ProjectID, &d.DBType, &d.RequestedName,
+		&actualDBName, &host, &port, &username, &password, &d.Status,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get database by component: %w", err)
+	}
+	d.ActualDBName = actualDBName.String
+	d.Host = host.String
+	d.Port = int(port.Int64)
+	d.Username = username.String
+	d.Password = password.String
+	return &d, nil
 }

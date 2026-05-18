@@ -61,6 +61,7 @@ function emptyMessageFor(status: TaskStatus | undefined, dispatchedAt: string | 
     }
     return 'Agent has started. Streaming activity will appear here as the agent works…';
   }
+  if (status === 'testing') return 'Database created. Testing connection…';
   if (status === 'building') return 'Build dispatched. Waiting for build steps…';
   return 'No activity recorded for this task.';
 }

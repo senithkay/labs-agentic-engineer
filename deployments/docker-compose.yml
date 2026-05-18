@@ -92,6 +92,7 @@ services:
       # ── Sister services on the asdlc compose network
       AGENTS_SERVICE_BASE_URL: "http://agents-service:3400"
       GIT_SERVICE_BASE_URL: "http://git-service:3300"
+      DATABASE_SERVICE_BASE_URL: "http://database-service:3500"
 
       # ── Coding-agent runner reach-back URLs. These are passed verbatim to
       # the WorkflowRun parameter the runner pod reads. The pod runs in
@@ -99,6 +100,7 @@ services:
       # compose services through k3d's host bridge.
       AGENT_GIT_SERVICE_URL: "http://host.k3d.internal:3300"
       AGENT_PLATFORM_URL: "http://host.k3d.internal:9090"
+      AGENT_DATABASE_SERVICE_URL: "http://host.k3d.internal:3500"
 
       # ── GitHub webhook validation + connect-state HMAC.
       GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET}"
@@ -286,6 +288,9 @@ services:
     networks:
       - asdlc
       - k3d-openchoreo
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     extra_hosts:
       - "host.docker.internal:host-gateway"
       - "thunder.openchoreo.localhost:host-gateway"

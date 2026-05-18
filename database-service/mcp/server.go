@@ -99,61 +99,58 @@ func (s *Server) handleToolsList(w http.ResponseWriter, req rpcRequest) {
 			},
 		},
 		{
-			"name":        "test_connection",
-			"description": "Verify that the database provisioned for a given org/project/component is reachable. Looks up the stored credentials and tests the connection using the per-database user — not root. Use this to confirm a provisioned database is still accessible.",
+			"name":        "get_pending_database",
+			"description": "Retrieve the pre-registered pending database record for this task. Call this first when executing a database provisioning task to get the database type and requested name. Use ASDLC_TASK_ID as the reference_id.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"org_id": map[string]any{
+					"reference_id": map[string]any{
 						"type":        "string",
-						"description": "Organization identifier",
-					},
-					"project_id": map[string]any{
-						"type":        "string",
-						"description": "Project identifier",
-					},
-					"component": map[string]any{
-						"type":        "string",
-						"description": "Component identifier within the project",
+						"description": "The task ID (ASDLC_TASK_ID). Used to look up the pre-registered database record.",
 					},
 				},
-				"required": []string{"org_id", "project_id", "component"},
+				"required": []string{"reference_id"},
 			},
 		},
 		{
 			"name":        "create_database",
-			"description": "Create a new database on the specified engine for a given org/project/component. The agent supplies the database name and the org, project, and component identifiers. The service manages credentials internally and records the mapping so it can be looked up later.",
+			"description": "Provision the pre-registered database for this task. Looks up the pending record by reference_id, creates the database on the appropriate engine, stores credentials, and returns them.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"db_type": map[string]any{
+					"reference_id": map[string]any{
 						"type":        "string",
-						"description": "Database engine: 'mysql' or 'mongodb'",
-						"enum":        []string{"mysql", "mongodb"},
-					},
-					"name": map[string]any{
-						"type":        "string",
-						"description": "Name of the database to create (e.g. 'my_project_db')",
+						"description": "The task ID (ASDLC_TASK_ID).",
 					},
 					"org_id": map[string]any{
 						"type":        "string",
-						"description": "Organization identifier",
+						"description": "Organization identifier (ASDLC_ORG_ID).",
 					},
 					"project_id": map[string]any{
 						"type":        "string",
-						"description": "Project identifier",
-					},
-					"component": map[string]any{
-						"type":        "string",
-						"description": "Component identifier within the project",
+						"description": "Project identifier (ASDLC_PROJECT_ID).",
 					},
 				},
-				"required": []string{"db_type", "name", "org_id", "project_id", "component"},
+				"required": []string{"reference_id", "org_id", "project_id"},
+			},
+		},
+		{
+			"name":        "test_connection",
+			"description": "Test the connection for the database provisioned for this task. Updates the database status to 'healthy' or 'faulty' and returns the status string. Call this after create_database.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"reference_id": map[string]any{
+						"type":        "string",
+						"description": "The task ID (ASDLC_TASK_ID).",
+					},
+				},
+				"required": []string{"reference_id"},
 			},
 		},
 		{
 			"name":        "lookup_database",
-			"description": "Retrieve the database name, type, and connection credentials for a previously provisioned database identified by org, project, and component. Credentials are returned directly so the caller can connect without knowing them in advance.",
+			"description": "Retrieve the database credentials for a component that depends on a provisioned database. Use this in service components (not database tasks) to obtain the connection details for a database that was provisioned by another task.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -167,7 +164,7 @@ func (s *Server) handleToolsList(w http.ResponseWriter, req rpcRequest) {
 					},
 					"component": map[string]any{
 						"type":        "string",
-						"description": "Component identifier within the project",
+						"description": "Database component name (e.g. 'order-service-db')",
 					},
 				},
 				"required": []string{"org_id", "project_id", "component"},
@@ -192,10 +189,12 @@ func (s *Server) handleToolsCall(w http.ResponseWriter, ctx context.Context, req
 	switch p.Name {
 	case "health_check":
 		s.toolHealthCheck(w, ctx, req.ID)
-	case "test_connection":
-		s.toolTestConnection(w, ctx, req.ID, p.Arguments)
+	case "get_pending_database":
+		s.toolGetPendingDatabase(w, ctx, req.ID, p.Arguments)
 	case "create_database":
 		s.toolCreateDatabase(w, ctx, req.ID, p.Arguments)
+	case "test_connection":
+		s.toolTestConnection(w, ctx, req.ID, p.Arguments)
 	case "lookup_database":
 		s.toolLookupDatabase(w, ctx, req.ID, p.Arguments)
 	default:
@@ -213,63 +212,48 @@ func (s *Server) toolHealthCheck(w http.ResponseWriter, ctx context.Context, id 
 	writeToolResult(w, id, text, false)
 }
 
-func (s *Server) toolTestConnection(w http.ResponseWriter, ctx context.Context, id json.RawMessage, args json.RawMessage) {
+func (s *Server) toolGetPendingDatabase(w http.ResponseWriter, ctx context.Context, id json.RawMessage, args json.RawMessage) {
 	var a struct {
-		OrgID     string `json:"org_id"`
-		ProjectID string `json:"project_id"`
-		Component string `json:"component"`
+		ReferenceID string `json:"reference_id"`
 	}
-	if err := json.Unmarshal(args, &a); err != nil {
-		writeToolResult(w, id, "invalid arguments", true)
-		return
-	}
-	if a.OrgID == "" || a.ProjectID == "" || a.Component == "" {
-		writeToolResult(w, id, "org_id, project_id, and component are required", true)
+	if err := json.Unmarshal(args, &a); err != nil || a.ReferenceID == "" {
+		writeToolResult(w, id, "reference_id is required", true)
 		return
 	}
 
-	if err := s.svc.TestProvisionedDatabase(ctx, a.OrgID, a.ProjectID, a.Component); err != nil {
-		writeToolResult(w, id, fmt.Sprintf("connection test failed: %v", err), true)
+	record, err := s.svc.GetPendingDatabase(ctx, a.ReferenceID)
+	if err != nil {
+		writeToolResult(w, id, fmt.Sprintf("failed to get pending database: %v", err), true)
+		return
+	}
+	if record == nil {
+		writeToolResult(w, id, fmt.Sprintf("no pending database found for reference_id=%s", a.ReferenceID), true)
 		return
 	}
 
-	writeToolResult(w, id, fmt.Sprintf(
-		"connection successful for org=%s project=%s component=%s",
-		a.OrgID, a.ProjectID, a.Component,
-	), false)
+	out, _ := json.MarshalIndent(record, "", "  ")
+	writeToolResult(w, id, string(out), false)
 }
 
 func (s *Server) toolCreateDatabase(w http.ResponseWriter, ctx context.Context, id json.RawMessage, args json.RawMessage) {
 	var a struct {
-		DBType    string `json:"db_type"`
-		Name      string `json:"name"`
-		OrgID     string `json:"org_id"`
-		ProjectID string `json:"project_id"`
-		Component string `json:"component"`
+		ReferenceID string `json:"reference_id"`
+		OrgID       string `json:"org_id"`
+		ProjectID   string `json:"project_id"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		writeToolResult(w, id, "invalid arguments", true)
 		return
 	}
-	if a.DBType != "mysql" && a.DBType != "mongodb" {
-		writeToolResult(w, id, "db_type must be 'mysql' or 'mongodb'", true)
-		return
-	}
-	if a.Name == "" {
-		writeToolResult(w, id, "name is required", true)
-		return
-	}
-	if a.OrgID == "" || a.ProjectID == "" || a.Component == "" {
-		writeToolResult(w, id, "org_id, project_id, and component are required", true)
+	if a.ReferenceID == "" || a.OrgID == "" || a.ProjectID == "" {
+		writeToolResult(w, id, "reference_id, org_id, and project_id are required", true)
 		return
 	}
 
 	creds, err := s.svc.CreateDatabase(ctx, services.CreateDatabaseRequest{
-		DBType:    services.DBType(a.DBType),
-		Name:      a.Name,
-		OrgID:     a.OrgID,
-		ProjectID: a.ProjectID,
-		Component: a.Component,
+		ReferenceID: a.ReferenceID,
+		OrgID:       a.OrgID,
+		ProjectID:   a.ProjectID,
 	})
 	if err != nil {
 		writeToolResult(w, id, fmt.Sprintf("failed to create database: %v", err), true)
@@ -278,6 +262,24 @@ func (s *Server) toolCreateDatabase(w http.ResponseWriter, ctx context.Context, 
 
 	out, _ := json.MarshalIndent(creds, "", "  ")
 	writeToolResult(w, id, string(out), false)
+}
+
+func (s *Server) toolTestConnection(w http.ResponseWriter, ctx context.Context, id json.RawMessage, args json.RawMessage) {
+	var a struct {
+		ReferenceID string `json:"reference_id"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil || a.ReferenceID == "" {
+		writeToolResult(w, id, "reference_id is required", true)
+		return
+	}
+
+	status, err := s.svc.TestDatabase(ctx, a.ReferenceID)
+	if err != nil {
+		writeToolResult(w, id, fmt.Sprintf("test_connection failed: %v", err), true)
+		return
+	}
+
+	writeToolResult(w, id, status, false)
 }
 
 func (s *Server) toolLookupDatabase(w http.ResponseWriter, ctx context.Context, id json.RawMessage, args json.RawMessage) {
@@ -302,7 +304,7 @@ func (s *Server) toolLookupDatabase(w http.ResponseWriter, ctx context.Context, 
 	}
 	if creds == nil {
 		writeToolResult(w, id, fmt.Sprintf(
-			"no database found for org=%s project=%s component=%s",
+			"no provisioned database found for org=%s project=%s component=%s",
 			a.OrgID, a.ProjectID, a.Component,
 		), true)
 		return

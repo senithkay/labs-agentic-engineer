@@ -161,6 +161,12 @@ func (s *boardService) GetBoard(ctx context.Context, orgID, projectID string) (*
 		case string(models.TaskStatusOnHold):
 			board.OnHold = append(board.OnHold, task)
 			continue
+		case string(models.TaskStatusDeployed):
+			// DB status is authoritative for deployed tasks. Database tasks
+			// never close a PR/issue, so the GitHub board item may still show
+			// "In Progress" — override it here so the console stays correct.
+			board.Done = append(board.Done, task)
+			continue
 		case string(models.TaskStatusFailed),
 			string(models.TaskStatusRejected),
 			string(models.TaskStatusAbandoned),

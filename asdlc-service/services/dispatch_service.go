@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	dbclient "github.com/wso2/asdlc/asdlc-service/clients/database"
 	"github.com/wso2/asdlc/asdlc-service/clients/gitservice"
 	"github.com/wso2/asdlc/asdlc-service/models"
 	"github.com/wso2/asdlc/asdlc-service/repositories"
@@ -91,6 +92,7 @@ type dispatchService struct {
 	gitServiceURL      string // URL the agent pod uses to reach git-service; cross-namespace FQDN in cluster
 	platformURL        string // URL the agent pod uses to call the BFF F3c verification-failed callback
 	databaseServiceURL string // URL the agent pod uses to reach the database-service MCP endpoint
+	dbClient           dbclient.Client
 }
 
 func NewDispatchService(
@@ -106,6 +108,7 @@ func NewDispatchService(
 	gitServiceURL string,
 	platformURL string,
 	databaseServiceURL string,
+	dbClient dbclient.Client,
 ) DispatchService {
 	return &dispatchService{
 		taskRepo:           taskRepo,
@@ -120,6 +123,7 @@ func NewDispatchService(
 		gitServiceURL:      gitServiceURL,
 		platformURL:        platformURL,
 		databaseServiceURL: databaseServiceURL,
+		dbClient:           dbClient,
 	}
 }
 
@@ -347,6 +351,15 @@ func (s *dispatchService) dispatchOne(
 			"task", task.ID, "error", err)
 	}
 
+	// For database tasks, immediately advance the mapping record to provisioning
+	// so the console panel reflects activity as soon as dispatch succeeds.
+	if task.ComponentType == "database" && s.dbClient != nil {
+		if err := s.dbClient.UpdateDatabaseStatus(ctx, task.ID, "provisioning"); err != nil {
+			slog.WarnContext(ctx, "failed to mark database provisioning on dispatch",
+				"task", task.ID, "error", err)
+		}
+	}
+
 	// Move the GitHub Project board item to "In Progress" so the console
 	// kanban reflects dispatch state immediately (GitHub does not do this
 	// automatically on WorkflowRun creation).
@@ -428,6 +441,16 @@ func (s *dispatchService) MarkDbDeployed(ctx context.Context, taskID string) err
 		return fmt.Errorf("apply db-deployed: %w", err)
 	}
 	slog.InfoContext(ctx, "db task marked deployed", "task", taskID)
+	// Sync the GitHub project board item to Done so it leaves the In Progress
+	// column. Database tasks never close a PR or issue, so the board won't
+	// move automatically — we must call MoveIssueToStatus explicitly.
+	if s.gitClient != nil && s.taskRepo != nil {
+		if task, err := s.taskRepo.GetByID(ctx, taskID); err == nil && task != nil && task.IssueURL != "" {
+			if err := s.gitClient.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "Done"); err != nil {
+				slog.WarnContext(ctx, "MarkDbDeployed: move board item to Done", "task", taskID, "error", err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -444,6 +467,16 @@ func (s *dispatchService) MarkDbFailed(ctx context.Context, taskID, diagnostic s
 		return fmt.Errorf("apply db-failed: %w", err)
 	}
 	slog.InfoContext(ctx, "db task marked failed", "task", taskID, "diagnostic", diagnostic)
+	// Sync the GitHub project board item to Failed. The BFF board API overrides
+	// this via DB status, but keeping the GitHub board in sync makes the
+	// github.com project view consistent too.
+	if s.gitClient != nil && s.taskRepo != nil {
+		if task, err := s.taskRepo.GetByID(ctx, taskID); err == nil && task != nil && task.IssueURL != "" {
+			if err := s.gitClient.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "Failed"); err != nil {
+				slog.WarnContext(ctx, "MarkDbFailed: move board item to Failed", "task", taskID, "error", err)
+			}
+		}
+	}
 	return nil
 }
 

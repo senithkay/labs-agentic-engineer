@@ -9,7 +9,7 @@ const STATUS_CONFIG: Record<DatabaseArtifactStatus, { label: string; color: stri
   pending:      { label: 'PENDING',      color: 'text.disabled' },
   provisioning: { label: 'PROVISIONING', color: 'warning.main'  },
   healthy:      { label: 'HEALTHY',      color: 'success.main'  },
-  unhealthy:    { label: 'UNHEALTHY',    color: 'error.main'    },
+  faulty:       { label: 'FAULTY',       color: 'error.main'    },
 };
 
 const DB_TYPE_COLORS: Record<string, string> = {
@@ -200,13 +200,13 @@ function DatabaseCard({ db }: { db: DatabaseArtifact }) {
               variant="body2"
               sx={{ fontWeight: 600, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
             >
-              {db.dbName || db.component}
+              {db.dbName || db.requestedName || (db.components?.[0] ?? 'database')}
             </Typography>
             <StatusBadge status={db.status} />
           </Box>
           <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', display: 'block' }}>
             {db.dbType ? db.dbType.charAt(0).toUpperCase() + db.dbType.slice(1) : 'Database'}
-            {db.component ? ` · ${db.component}` : ''}
+            {db.components?.length ? ` · ${db.components.join(', ')}` : ''}
           </Typography>
         </Box>
       </Box>
@@ -238,9 +238,10 @@ function DatabaseCard({ db }: { db: DatabaseArtifact }) {
 interface DatabaseArtifactsPanelProps {
   orgId: string;
   projectId: string;
+  onHasArtifacts?: (has: boolean) => void;
 }
 
-export function DatabaseArtifactsPanel({ orgId, projectId }: DatabaseArtifactsPanelProps) {
+export function DatabaseArtifactsPanel({ orgId, projectId, onHasArtifacts }: DatabaseArtifactsPanelProps) {
   const [databases, setDatabases] = useState<DatabaseArtifact[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -276,10 +277,15 @@ export function DatabaseArtifactsPanel({ orgId, projectId }: DatabaseArtifactsPa
 
   const healthy      = databases.filter(d => d.status === 'healthy').length;
   const provisioning = databases.filter(d => d.status === 'provisioning').length;
-  const unhealthy    = databases.filter(d => d.status === 'unhealthy').length;
+  const faulty       = databases.filter(d => d.status === 'faulty').length;
   const pending      = databases.filter(d => d.status === 'pending').length;
 
   const total = databases.length;
+  const visible = !loading && !apiError && total > 0;
+
+  useEffect(() => {
+    onHasArtifacts?.(visible);
+  }, [visible, onHasArtifacts]);
 
   return (
     <Box
@@ -295,7 +301,12 @@ export function DatabaseArtifactsPanel({ orgId, projectId }: DatabaseArtifactsPa
         pl: 2,
         pr: 1.5,
         pt: 2,
-        overflowY: 'auto',
+        overflowX: 'hidden',
+        overflowY: visible ? 'auto' : 'hidden',
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'translateX(0)' : 'translateX(16px)',
+        transition: 'opacity 0.3s ease, transform 0.35s ease',
+        pointerEvents: visible ? 'auto' : 'none',
       }}
     >
       {/* Header */}
@@ -326,9 +337,9 @@ export function DatabaseArtifactsPanel({ orgId, projectId }: DatabaseArtifactsPa
               {provisioning} provisioning
             </Typography>
           )}
-          {unhealthy > 0 && (
+          {faulty > 0 && (
             <Typography variant="caption" sx={{ color: 'error.main', fontWeight: 600, fontSize: '0.7rem' }}>
-              {unhealthy} unhealthy
+              {faulty} faulty
             </Typography>
           )}
           {pending > 0 && (
@@ -349,12 +360,8 @@ export function DatabaseArtifactsPanel({ orgId, projectId }: DatabaseArtifactsPa
           <Typography variant="caption" sx={{ color: 'error.main', display: 'block', mt: 2, wordBreak: 'break-word' }}>
             {apiError}
           </Typography>
-        ) : total === 0 ? (
-          <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mt: 2 }}>
-            No databases provisioned yet
-          </Typography>
         ) : (
-          databases.map(db => <DatabaseCard key={db.component} db={db} />)
+          databases.map(db => <DatabaseCard key={db.id} db={db} />)
         )}
       </Box>
     </Box>

@@ -230,6 +230,7 @@ type componentFrontmatter struct {
 	Buildpack  string   `yaml:"buildpack,omitempty"`
 	AppPath    string   `yaml:"appPath,omitempty"`
 	Entrypoint string   `yaml:"entrypoint,omitempty"`
+	DbEngine   string   `yaml:"dbEngine,omitempty"`
 }
 
 // splitFrontmatter separates the leading YAML frontmatter block (delimited
@@ -344,6 +345,7 @@ func assembleComponent(name, designMd string, files map[string]string) (models.D
 		Entrypoint:                 cfm.Entrypoint,
 		Buildpack:                  cfm.Buildpack,
 		AppPath:                    cfm.AppPath,
+		DbEngine:                   cfm.DbEngine,
 		OpenAPISpec:                openapi,
 		ComponentAgentInstructions: strings.TrimSpace(body),
 	}, nil
@@ -400,6 +402,7 @@ func SplitDesign(d *DesignFile) (map[string]string, error) {
 			Buildpack:  comp.Buildpack,
 			AppPath:    comp.AppPath,
 			Entrypoint: comp.Entrypoint,
+			DbEngine:   comp.DbEngine,
 		}
 		cfmBytes, err := marshalFrontmatter(cfm)
 		if err != nil {

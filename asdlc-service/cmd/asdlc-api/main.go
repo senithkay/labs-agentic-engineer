@@ -323,7 +323,7 @@ func main() {
 	if agentGitServiceURL == "" {
 		agentGitServiceURL = cfg.GitService.BaseURL
 	}
-	dispatchSvc := services.NewDispatchService(taskRepo, gitClient, componentService, configService, artifactStore, taskTokens, tokenInject, wfRunService, projector, agentGitServiceURL, cfg.AgentPlatformURL, cfg.AgentDatabaseServiceURL)
+	dispatchSvc := services.NewDispatchService(taskRepo, gitClient, componentService, configService, artifactStore, taskTokens, tokenInject, wfRunService, projector, agentGitServiceURL, cfg.AgentPlatformURL, cfg.AgentDatabaseServiceURL, dbClient)
 	slog.Info("Dispatch service", "agentGitServiceURL", agentGitServiceURL, "agentDatabaseServiceURL", cfg.AgentDatabaseServiceURL)
 
 	// F1 — wire the post-deploy dispatch cascade. The projector fires

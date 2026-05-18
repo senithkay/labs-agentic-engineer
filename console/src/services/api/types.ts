@@ -227,17 +227,19 @@ export interface ComponentTask {
 
 // -- Database Artifacts (provisioned databases for a project) ----------------
 
-export type DatabaseArtifactStatus = 'pending' | 'provisioning' | 'healthy' | 'unhealthy';
+export type DatabaseArtifactStatus = 'pending' | 'provisioning' | 'healthy' | 'faulty';
 
 export interface DatabaseArtifact {
-  component: string;
+  id: string;
+  referenceId: string;
+  components: string[];
   dbType?: string;
+  requestedName?: string;
   dbName?: string;
   host?: string;
   port?: number;
   username?: string;
   password?: string;
-  taskStatus: string;
   status: DatabaseArtifactStatus;
 }
 
