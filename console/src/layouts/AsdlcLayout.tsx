@@ -67,7 +67,21 @@ export default function AsdlcLayout() {
   const claimsOrgId = resolveOuHandle(claims);
   const claimsOrgName = claims?.ouName || claimsOrgId;
 
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('asdlc:sidebarCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('asdlc:sidebarCollapsed', collapsed ? '1' : '0');
+    } catch {
+      // ignore quota/access errors
+    }
+  }, [collapsed]);
   const [projectAnchorEl, setProjectAnchorEl] = useState<null | HTMLElement>(null);
   const [componentAnchorEl, setComponentAnchorEl] = useState<null | HTMLElement>(null);
   const projectMenuOpen = Boolean(projectAnchorEl);
@@ -598,13 +612,13 @@ export default function AsdlcLayout() {
                   <Sidebar.ItemIcon>
                     <Compass size={20} />
                   </Sidebar.ItemIcon>
-                  <Sidebar.ItemLabel>Architecture</Sidebar.ItemLabel>
+                  <Sidebar.ItemLabel>Design</Sidebar.ItemLabel>
                 </Sidebar.Item>
                 <Sidebar.Item id="tasks">
                   <Sidebar.ItemIcon>
                     <ClipboardList size={20} />
                   </Sidebar.ItemIcon>
-                  <Sidebar.ItemLabel>Tasks</Sidebar.ItemLabel>
+                  <Sidebar.ItemLabel>Implementation</Sidebar.ItemLabel>
                 </Sidebar.Item>
               </Sidebar.Category>
             )}
@@ -669,7 +683,7 @@ export default function AsdlcLayout() {
       <AppShell.Main>
         <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
           <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-            <Outlet context={{ setSidebarCollapsed: setCollapsed }} />
+            <Outlet />
           </Box>
           {inProjectLevel && (
             <Box

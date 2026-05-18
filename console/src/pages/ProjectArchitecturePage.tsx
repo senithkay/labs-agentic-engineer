@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -31,10 +31,6 @@ import {
   loadDesignDrafts,
   saveDesignDraft,
 } from '../lib/designDraftStorage';
-
-interface LayoutContext {
-  setSidebarCollapsed: (collapsed: boolean) => void;
-}
 
 const AUTO_SAVE_DEBOUNCE_MS = 1500;
 const DESIGN_ROOT_FILE = 'design.md';
@@ -69,9 +65,6 @@ function getArchitectureFileLabel(path: string): string | undefined {
 // ---------------------------------------------------------------------------
 
 export default function ProjectArchitecturePage() {
-  const { setSidebarCollapsed } = useOutletContext<LayoutContext>();
-  useEffect(() => setSidebarCollapsed(true), [setSidebarCollapsed]);
-
   const navigate = useNavigate();
   const { orgId, projectId } = useParams();
   const routeOrgId = orgId ?? 'default';
