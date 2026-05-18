@@ -93,7 +93,7 @@ export interface ComponentOpenAPI {
  * diagram + downstream code). Returned by `GET /design/bundle` and the
  * per-file mutation endpoints.
  *
- * Files keys are paths relative to `.asdlc/design/` with forward slashes
+ * Files keys are paths relative to `specs/design/` with forward slashes
  * (e.g. `design.md`, `components/user-api/design.md`,
  * `components/user-api/openapi.yaml`).
  */
@@ -189,7 +189,7 @@ export interface ComponentTask {
 
   // Tech-lead agent revamp — task-level data lives on the row; component
   // shape (OpenAPI, language, appPath, etc.) is read fresh from
-  // .asdlc/design.json on every dispatch.
+  // specs/design.json on every dispatch.
   title?: string;
   rationale?: string;
   body?: string;

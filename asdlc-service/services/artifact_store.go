@@ -33,7 +33,7 @@ func NewArtifactStore(gitClient gitservice.Client) *ArtifactStore {
 const RequirementsMainFile = "requirements.md"
 
 // ListRequirements returns the working-tree file map under
-// `.asdlc/requirements/`. A first-time project with no requirements yet
+// `specs/requirements/`. A first-time project with no requirements yet
 // returns an empty map (not an error).
 func (s *ArtifactStore) ListRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	files, err := s.gitClient.ListRequirements(ctx, orgID, projectID)
@@ -82,7 +82,7 @@ func (s *ArtifactStore) DeleteRequirementFile(ctx context.Context, orgID, projec
 
 // DesignFile is the BFF's in-memory representation of the multi-file design
 // artifact. It assembles from / splits to the working-tree layout under
-// `.asdlc/design/`:
+// `specs/design/`:
 //
 //	design.md                              # overview prose + sourceSpec frontmatter
 //	components/<name>/design.md            # frontmatter (type, language, dependsOn,
@@ -99,11 +99,11 @@ type DesignFile struct {
 // via the API.
 const DesignRootFile = "design.md"
 
-// componentDirPrefix is the path prefix under .asdlc/design/ for per-component
+// componentDirPrefix is the path prefix under specs/design/ for per-component
 // directories.
 const componentDirPrefix = "components/"
 
-// ListDesignFiles returns the working-tree file map under `.asdlc/design/`.
+// ListDesignFiles returns the working-tree file map under `specs/design/`.
 // Keys are paths relative to that directory, using forward slashes (e.g.
 // `design.md`, `components/user-api/design.md`).
 func (s *ArtifactStore) ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
@@ -127,7 +127,7 @@ func (s *ArtifactStore) ReadDesignFile(ctx context.Context, orgID, projectID, su
 }
 
 // WriteDesignFile creates or overwrites a single design file. The path is
-// relative to `.asdlc/design/` (forward slashes; nested components allowed).
+// relative to `specs/design/` (forward slashes; nested components allowed).
 func (s *ArtifactStore) WriteDesignFile(ctx context.Context, orgID, projectID, subPath, content string) (sha string, err error) {
 	res, err := s.gitClient.PutDesignFile(ctx, orgID, projectID, subPath, gitservice.PutFileRequest{Content: content})
 	if err != nil {
@@ -148,7 +148,7 @@ func (s *ArtifactStore) DeleteDesignFile(ctx context.Context, orgID, projectID, 
 	return nil
 }
 
-// DeleteDesignDirectory removes a directory under `.asdlc/design/` and all
+// DeleteDesignDirectory removes a directory under `specs/design/` and all
 // its contents (e.g. `components/user-api` to remove a component's whole
 // subtree).
 func (s *ArtifactStore) DeleteDesignDirectory(ctx context.Context, orgID, projectID, subPath string) error {
@@ -451,20 +451,20 @@ func SplitDesign(d *DesignFile) (map[string]string, error) {
 }
 
 // ComponentDesignPath returns the design.md path for a given component name
-// (relative to .asdlc/design/). Exported so callers (design_service stream
+// (relative to specs/design/). Exported so callers (design_service stream
 // handlers, controllers) don't recompute the format.
 func ComponentDesignPath(componentName string) string {
 	return path.Join(componentDirPrefix, componentName, "design.md")
 }
 
 // ComponentOpenAPIPath returns the openapi.yaml path for a given component
-// name (relative to .asdlc/design/).
+// name (relative to specs/design/).
 func ComponentOpenAPIPath(componentName string) string {
 	return path.Join(componentDirPrefix, componentName, "openapi.yaml")
 }
 
 // ComponentDirPath returns the directory path for a given component name
-// (relative to .asdlc/design/), used by DeleteDesignDirectory.
+// (relative to specs/design/), used by DeleteDesignDirectory.
 func ComponentDirPath(componentName string) string {
 	return path.Join(componentDirPrefix, componentName)
 }

@@ -101,7 +101,7 @@ export const ArchitectInput = z.object({
     "Existing design to evolve — preserve component names and structure where possible",
   ),
   // Wireframes / domain-models live alongside the spec under
-  // `.asdlc/requirements/`. The BFF passes the raw DSL keyed by canvas
+  // `specs/requirements/`. The BFF passes the raw DSL keyed by canvas
   // name (without extension); the architect calls `read_wireframe(name)`
   // on demand to pull in the DSL when a screen flow is relevant.
   wireframes: z

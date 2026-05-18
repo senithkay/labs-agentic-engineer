@@ -40,7 +40,7 @@ const AUTO_SAVE_DEBOUNCE_MS = 1500;
 const DESIGN_ROOT_FILE = 'design.md';
 
 // Tree-display tweaks for the design Explorer. The on-disk layout is
-// `.asdlc/design/components/<name>/{design.md,openapi.yaml}` but a "Components"
+// `specs/design/components/<name>/{design.md,openapi.yaml}` but a "Components"
 // folder row in the sidebar adds nothing the user cares about, so we collapse
 // it. Each component then renders at top level with a package icon.
 const ARCHITECTURE_TRANSPARENT_FOLDERS = new Set(['components']);
