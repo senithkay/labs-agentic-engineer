@@ -230,7 +230,7 @@ func (s *dispatchService) dispatchOne(
 		return failResult(res, task.ErrorMessage)
 	}
 
-	if s.componentSvc != nil {
+	if s.componentSvc != nil && task.ComponentType != "database" {
 		if err := s.ensureOCComponent(ctx, task, repoInfo); err != nil {
 			s.markFailed(ctx, task, fmt.Sprintf("ensure OC component: %v", err))
 			return failResult(res, task.ErrorMessage)

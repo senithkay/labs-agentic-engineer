@@ -18,11 +18,30 @@ import (
 	"github.com/wso2/asdlc/asdlc-service/repositories"
 )
 
+// DatabaseArtifactItem represents a database provisioned for a project, enriched
+// with the task lifecycle status so the UI can show health/provisioning/etc.
+type DatabaseArtifactItem struct {
+	Component  string `json:"component"`
+	DBType     string `json:"dbType,omitempty"`
+	DBName     string `json:"dbName,omitempty"`
+	Host       string `json:"host,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	Username   string `json:"username,omitempty"`
+	Password   string `json:"password,omitempty"`
+	TaskStatus string `json:"taskStatus"`
+	// Status is derived from TaskStatus: "pending" | "provisioning" | "healthy" | "unhealthy"
+	Status string `json:"status"`
+}
+
 type TaskService interface {
 	GetTask(ctx context.Context, taskID string) (*models.ComponentTask, error)
 	GetTasks(ctx context.Context, orgID, projectID string) (*models.Tasks, error)
 	GetTaskByComponent(ctx context.Context, orgID, projectID, componentName string) (*models.ComponentTask, error)
 	ListTasks(ctx context.Context, orgID, projectID string) ([]models.ComponentTask, error)
+	// ListDatabaseArtifacts returns metadata and health status for all database
+	// component tasks in the project. Enriches task status with provisioning
+	// metadata from the database-service when available.
+	ListDatabaseArtifacts(ctx context.Context, orgID, projectID string) ([]DatabaseArtifactItem, error)
 	// ListTasksByOrg lists tasks across every project in the org with
 	// optional status / cause / since filters. Used by the PR D
 	// ReachReconciliationBanner ({status: abandoned, cause: repo.unselected,
@@ -180,6 +199,95 @@ func (s *taskService) ListTasksByOrg(ctx context.Context, orgID string, f reposi
 		return nil, fmt.Errorf("list tasks by org: %w", err)
 	}
 	return tasks, nil
+}
+
+func (s *taskService) ListDatabaseArtifacts(ctx context.Context, orgID, projectID string) ([]DatabaseArtifactItem, error) {
+	// Build a task-status index for all tasks in the project. This is used to
+	// enrich database mappings with lifecycle status. Done regardless of
+	// component_type because that column was added late and may be empty on
+	// tasks generated before the Phase 6 migration populated it.
+	allTasks, err := s.taskRepo.ListByProjectID(ctx, orgID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	taskByComponent := make(map[string]*models.ComponentTask, len(allTasks))
+	for i := range allTasks {
+		taskByComponent[allTasks[i].ComponentName] = &allTasks[i]
+	}
+
+	// Primary source: database-service mappings. These are created the moment
+	// create_database MCP succeeds, so a row here means the database exists.
+	// Tasks that haven't reached create_database yet (pending / early in_progress)
+	// are captured below via the componentType fallback.
+	var items []DatabaseArtifactItem
+	if s.dbClient != nil {
+		infos, err := s.dbClient.ListByProject(ctx, orgID, projectID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to list databases from database-service",
+				"org_id", orgID, "project_id", projectID, "error", err)
+		} else {
+			seen := make(map[string]bool, len(infos))
+			for _, info := range infos {
+				item := DatabaseArtifactItem{
+					Component: info.Component,
+					DBType:    info.DBType,
+					DBName:    info.DBName,
+					Host:      info.Host,
+					Port:      info.Port,
+					Username:  info.Username,
+					Password:  info.Password,
+				}
+				if task, ok := taskByComponent[info.Component]; ok {
+					item.TaskStatus = task.Status
+					item.Status = taskStatusToArtifactStatus(models.TaskStatus(task.Status))
+				} else {
+					// Mapping exists but no task row — treat as deployed.
+					item.TaskStatus = string(models.TaskStatusDeployed)
+					item.Status = "healthy"
+				}
+				items = append(items, item)
+				seen[info.Component] = true
+			}
+
+			// Secondary: include database tasks that don't have a mapping yet
+			// (agent hasn't called create_database yet). Fall back on
+			// component_type when present; ignore when empty.
+			for i := range allTasks {
+				t := &allTasks[i]
+				if seen[t.ComponentName] {
+					continue
+				}
+				if t.ComponentType != "database" {
+					continue
+				}
+				items = append(items, DatabaseArtifactItem{
+					Component:  t.ComponentName,
+					TaskStatus: t.Status,
+					Status:     taskStatusToArtifactStatus(models.TaskStatus(t.Status)),
+				})
+			}
+		}
+	}
+
+	if items == nil {
+		items = []DatabaseArtifactItem{}
+	}
+	return items, nil
+}
+
+// taskStatusToArtifactStatus maps a ComponentTask status to a UI-facing
+// database health status string.
+func taskStatusToArtifactStatus(status models.TaskStatus) string {
+	switch status {
+	case models.TaskStatusDeployed:
+		return "healthy"
+	case models.TaskStatusInProgress, models.TaskStatusTesting:
+		return "provisioning"
+	case models.TaskStatusFailed, models.TaskStatusRejected, models.TaskStatusAbandoned, models.TaskStatusVerificationFailed:
+		return "unhealthy"
+	default: // pending, pending_deps
+		return "pending"
+	}
 }
 
 // GenerateTasks is the legacy non-streaming entry point. The tech-lead

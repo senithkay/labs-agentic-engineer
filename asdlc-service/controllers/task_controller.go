@@ -44,6 +44,10 @@ type TaskController interface {
 	// Progress endpoints — task-execution-progress.md §5.2.
 	GetTaskAgentProgress(w http.ResponseWriter, r *http.Request)
 	GetTaskBuildProgress(w http.ResponseWriter, r *http.Request)
+
+	// ListDatabaseArtifacts returns provisioned database metadata + health status
+	// for all database component tasks in the project.
+	ListDatabaseArtifacts(w http.ResponseWriter, r *http.Request)
 }
 
 type taskController struct {
@@ -68,6 +72,29 @@ func NewTaskController(
 		ocClient:    ocClient,
 		taskTokens:  taskTokens,
 	}
+}
+
+func (c *taskController) ListDatabaseArtifacts(w http.ResponseWriter, r *http.Request) {
+	org := r.PathValue("orgHandle")
+	project := r.PathValue("projectName")
+	if !requireOrgHandle(w, org) || !requireProjectName(w, project) {
+		return
+	}
+
+	items, err := c.service.ListDatabaseArtifacts(r.Context(), org, project)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "list database artifacts failed", "error", err, "org", org, "project", project)
+		utils.WriteErrorResponse(w, http.StatusInternalServerError, "failed to list database artifacts")
+		return
+	}
+	if items == nil {
+		items = []services.DatabaseArtifactItem{}
+	}
+
+	type response struct {
+		Databases []services.DatabaseArtifactItem `json:"databases"`
+	}
+	utils.WriteSuccessResponse(w, http.StatusOK, response{Databases: items})
 }
 
 func (c *taskController) ListTasks(w http.ResponseWriter, r *http.Request) {

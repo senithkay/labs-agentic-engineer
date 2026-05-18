@@ -15,6 +15,7 @@ type DatabaseController interface {
 	TestConnection(w http.ResponseWriter, r *http.Request)
 	CreateDatabase(w http.ResponseWriter, r *http.Request)
 	LookupDatabase(w http.ResponseWriter, r *http.Request)
+	ListProjectDatabases(w http.ResponseWriter, r *http.Request)
 }
 
 type databaseController struct {
@@ -151,6 +152,36 @@ func (c *databaseController) CreateDatabase(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(creds) //nolint:errcheck
+}
+
+// ListProjectDatabases handles GET /api/v1/databases?org_id=&project_id=
+// Returns metadata (without credentials) for all databases provisioned under a project.
+func (c *databaseController) ListProjectDatabases(w http.ResponseWriter, r *http.Request) {
+	orgID := r.URL.Query().Get("org_id")
+	projectID := r.URL.Query().Get("project_id")
+
+	if orgID == "" || projectID == "" {
+		utils.WriteErrorResponse(w, http.StatusBadRequest, "org_id and project_id query params are required")
+		return
+	}
+
+	artifacts, err := c.svc.ListProjectDatabases(r.Context(), orgID, projectID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to list project databases",
+			"org_id", orgID, "project_id", projectID, "error", err)
+		utils.WriteErrorResponse(w, http.StatusInternalServerError, "failed to list project databases")
+		return
+	}
+
+	type response struct {
+		Databases []*services.DatabaseArtifact `json:"databases"`
+	}
+	if artifacts == nil {
+		artifacts = []*services.DatabaseArtifact{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response{Databases: artifacts}) //nolint:errcheck
 }
 
 // LookupDatabase handles GET /api/v1/databases/lookup?org_id=&project_id=&component=

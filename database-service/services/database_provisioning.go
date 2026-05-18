@@ -48,6 +48,17 @@ type CreateDatabaseRequest struct {
 	Component string
 }
 
+// DatabaseArtifact holds the metadata and credentials for a provisioned database.
+type DatabaseArtifact struct {
+	Component string `json:"component"`
+	DBType    string `json:"dbType"`
+	DBName    string `json:"dbName"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+}
+
 // DatabaseService manages database provisioning across MySQL and MongoDB.
 type DatabaseService interface {
 	// HealthCheck returns the connectivity status of all database engines.
@@ -61,6 +72,9 @@ type DatabaseService interface {
 	// LookupDatabase retrieves the database credentials for the given (org, project, component) key.
 	// Returns (nil, nil) when no mapping exists.
 	LookupDatabase(ctx context.Context, orgID, projectID, component string) (*DatabaseCredentials, error)
+	// ListProjectDatabases returns metadata (without credentials) for all databases
+	// provisioned under the given (org, project) pair.
+	ListProjectDatabases(ctx context.Context, orgID, projectID string) ([]*DatabaseArtifact, error)
 }
 
 type databaseService struct {
@@ -163,6 +177,26 @@ func (s *databaseService) CreateDatabase(ctx context.Context, req CreateDatabase
 	}
 
 	return creds, nil
+}
+
+func (s *databaseService) ListProjectDatabases(ctx context.Context, orgID, projectID string) ([]*DatabaseArtifact, error) {
+	mappings, err := s.mappingRepo.ListByProject(ctx, orgID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list project databases: %w", err)
+	}
+	artifacts := make([]*DatabaseArtifact, 0, len(mappings))
+	for _, m := range mappings {
+		artifacts = append(artifacts, &DatabaseArtifact{
+			Component: m.Component,
+			DBType:    m.DBType,
+			DBName:    m.DBName,
+			Host:      m.Host,
+			Port:      m.Port,
+			Username:  m.Username,
+			Password:  m.Password,
+		})
+	}
+	return artifacts, nil
 }
 
 func (s *databaseService) LookupDatabase(ctx context.Context, orgID, projectID, component string) (*DatabaseCredentials, error) {

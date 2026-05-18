@@ -10,10 +10,23 @@ import (
 	"time"
 )
 
+// DatabaseInfo holds metadata and credentials for a provisioned database.
+type DatabaseInfo struct {
+	Component string `json:"component"`
+	DBType    string `json:"dbType"`
+	DBName    string `json:"dbName"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+}
+
 // Client calls the database-service.
 type Client interface {
 	ProvisionDatabase(ctx context.Context, projectName string) (*DatabaseCredentials, error)
 	TestConnection(ctx context.Context, creds *DatabaseCredentials) error
+	// ListByProject returns all provisioned database metadata for a given (orgID, projectID) pair.
+	ListByProject(ctx context.Context, orgID, projectID string) ([]*DatabaseInfo, error)
 }
 
 // DatabaseCredentials contains the database connection details.
@@ -112,6 +125,33 @@ func (c *client) ProvisionDatabase(ctx context.Context, projectName string) (*Da
 		Username: provResp.Username,
 		Password: provResp.Password,
 	}, nil
+}
+
+func (c *client) ListByProject(ctx context.Context, orgID, projectID string) ([]*DatabaseInfo, error) {
+	url := fmt.Sprintf("%s/api/v1/databases?org_id=%s&project_id=%s", c.baseURL, orgID, projectID)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("list databases request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list databases failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Databases []*DatabaseInfo `json:"databases"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+	return result.Databases, nil
 }
 
 func (c *client) TestConnection(ctx context.Context, creds *DatabaseCredentials) error {

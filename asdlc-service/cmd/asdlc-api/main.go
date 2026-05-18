@@ -193,11 +193,16 @@ func main() {
 		slog.Info("Git service", "baseURL", cfg.GitService.BaseURL)
 	}
 
-	// Database service client (optional — disabled when DATABASE_SERVICE_BASE_URL not set)
+	// Database service client. Prefers DATABASE_SERVICE_BASE_URL; falls back to
+	// AGENT_DATABASE_SERVICE_URL (already set for agent pods, same host).
 	var dbClient dbclient.Client
-	if cfg.DatabaseService.BaseURL != "" {
-		dbClient = dbclient.NewClient(cfg.DatabaseService.BaseURL)
-		slog.Info("Database service", "baseURL", cfg.DatabaseService.BaseURL)
+	dbServiceURL := cfg.DatabaseService.BaseURL
+	if dbServiceURL == "" {
+		dbServiceURL = cfg.AgentDatabaseServiceURL
+	}
+	if dbServiceURL != "" {
+		dbClient = dbclient.NewClient(dbServiceURL)
+		slog.Info("Database service", "baseURL", dbServiceURL)
 	}
 
 	// Artifact store — PR 2 of repo-storage-ownership: HTTP-backed via
