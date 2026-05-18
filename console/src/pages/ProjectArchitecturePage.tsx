@@ -19,6 +19,7 @@ import type { ArtifactVersion, Design, DesignComponent } from '../services/api';
 import { projectTasksPath } from '../lib/paths';
 import VersionSelector from '../components/VersionSelector';
 import LineageLabel from '../components/LineageLabel';
+import ComponentApiSecurityPanel from '../components/ComponentApiSecurityPanel';
 import {
   DESIGN_DOCUMENT_TYPES,
   componentDesignPath,
@@ -337,6 +338,22 @@ export default function ProjectArchitecturePage() {
     [handleFileChange],
   );
 
+  // ComponentApiSecurityPanel toggle handler — rewrites the component's
+  // design.md content (with new frontmatter) through the same auto-save
+  // pipeline so the BFF's trait_sync hook fires on the PUT.
+  const handleComponentSecurityChange = useCallback(
+    (componentName: string, newContent: string) => {
+      const path = componentDesignPath(componentName);
+      handleFileChange(path, newContent);
+    },
+    [handleFileChange],
+  );
+
+  const componentNames = useMemo(
+    () => effectiveComponents.map((c) => c.name),
+    [effectiveComponents],
+  );
+
   // The "Component Design" view rolls the cell diagram and the top-level
   // architecture markdown into one page — the cell diagram on top, the
   // narrative on the bottom — so the user navigates once and sees the
@@ -411,6 +428,12 @@ export default function ProjectArchitecturePage() {
                 >
                   <CellDiagramView components={effectiveComponents} />
                 </Box>
+                <ComponentApiSecurityPanel
+                  componentNames={componentNames}
+                  files={liveContents}
+                  onComponentSecurityChange={handleComponentSecurityChange}
+                  disabled={designReadOnly}
+                />
               </Box>
             </Box>
             <Box sx={{ flexShrink: 0 }}>
@@ -430,7 +453,15 @@ export default function ProjectArchitecturePage() {
         ),
       },
     ],
-    [effectiveComponents, designMdContent, handleDesignMdChange, designReadOnly],
+    [
+      effectiveComponents,
+      designMdContent,
+      handleDesignMdChange,
+      designReadOnly,
+      componentNames,
+      liveContents,
+      handleComponentSecurityChange,
+    ],
   );
 
   // Strip the root `design.md` from the file list passed to Explorer — its

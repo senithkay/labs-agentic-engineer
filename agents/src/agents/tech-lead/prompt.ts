@@ -291,42 +291,66 @@ Section rules:
     Reference / dependency-wiring sections). Do not invent dependencies that
     aren't in the plan.
 
-Auth endpoints — sample test user:
+Auth endpoints — IDP-delegated OIDC (default):
 
-If the target component's design (its \`componentAgentInstructions\` or its
-\`openapi.yaml\`) exposes username/password auth endpoints (e.g.
-\`/auth/register\`, \`/auth/login\`, \`/login\`, \`/signin\`), the build
-ships with no usable account and reviewers cannot exercise it. For those
-components only, the issue body must:
+If the target component's design indicates IDP-delegated auth — i.e. a
+\`service\` with \`api.security: required\` AND a sibling \`web-app\` with
+\`auth.kind: oidc-spa\` that names it as the upstream — the API does NOT
+own auth endpoints. The issue body must:
 
-  - Add a **Scope** bullet instructing the agent to seed a sample test
-    user on first start, idempotently (only seed if no user exists),
-    with concrete credentials. Use \`admin\` / \`admin123\` by default;
-    switch the username field to \`admin@example.com\` if the schema is
-    email-keyed. State the exact credentials in this bullet — the agent
-    will use them verbatim.
+  - For the \`service\` component:
+      * Add a **Scope** bullet: "Do NOT implement \`/auth/login\`,
+        \`/auth/register\`, or any token-issuance endpoint. The platform
+        gateway validates the JWT and the \`api-configuration\` trait's
+        \`jwt-auth\` policy injects \`X-User-Id\` (from JWT \`sub\` claim)
+        on every request. Read \`X-User-Id\`; reject (401) when missing.
+        Per-user records MUST be keyed on \`X-User-Id\`."
+      * Add a **Scope** bullet: "Do NOT validate JWTs in code; do NOT
+        add CORS middleware. The gateway handles both."
+      * Add an **Acceptance criteria** bullet: "Every protected endpoint
+        rejects requests missing \`X-User-Id\` with 401; with a valid
+        \`X-User-Id\`, returns only data owned by that subject. \`/health\`
+        is exempt and returns 200 without auth."
 
-  - Add a second **Scope** bullet instructing the agent, once the seed
-    code is in place and the PR is ready for review, to post a comment
-    on this issue via \`gh issue comment\` containing the credentials.
-    The comment must literally include the username and password
-    chosen above (e.g. "Sample test user — username: \`admin\`,
-    password: \`admin123\`. Sign in via \`POST /auth/login\` or the
-    equivalent endpoint to verify the build."). This is the canonical
-    way to surface test credentials to reviewers — credentials must
-    NOT live only in the PR body or commit messages; the issue comment
-    is the durable record.
+  - For the \`web-app\` component with \`auth.kind: oidc-spa\`:
+      * Add a **Scope** bullet: "Implement OIDC Authorization Code +
+        PKCE against the platform IDP. Read OIDC config from
+        \`window.__ENV__\` at runtime (rendered by nginx envsubst — see
+        the \`asdlc\` SKILL's OIDC-SPA section for the canonical
+        \`default.conf.template\` and PKCE flow snippet). NEVER bake
+        OIDC values into the bundle."
+      * Add a **Scope** bullet: "Token exchange MUST go through the
+        same-origin proxy at \`window.__ENV__.OIDC_TOKEN_URL\` (= the
+        relative path \`/oidc/token\`). DO NOT \`POST\` directly to
+        \`\${OIDC_ISSUER}/oauth2/token\` — kgateway's CORS filter drops
+        the response body on cross-origin POSTs. The authorize
+        REDIRECT uses absolute \`window.__ENV__.OIDC_ISSUER\` (top-level
+        navigation — no CORS)."
+      * Add a **Scope** bullet: "Attach \`Authorization: Bearer
+        <access_token>\` to every \`window.__ENV__.API_BASE_URL\` fetch.
+        On 401, restart the login flow. Do NOT write a \`/login\` form
+        that POSTs credentials anywhere."
+      * Add a **Scope** bullet: "\`workload.yaml\`'s \`configurations.env\`
+        block MUST declare FIVE env vars — \`OIDC_ISSUER\`,
+        \`OIDC_CLIENT_ID\`, \`OIDC_SCOPES\`, \`OIDC_HOST\` (copy verbatim
+        from this issue's \`## OIDC client provisioned\` comment), and
+        \`API_BASE_URL\` (copy from this issue's \`## Dependency
+        endpoint resolved\` comment for the upstream service). The
+        flat WorkloadDescriptor uses \`configurations.env: [{name,
+        value}]\` — NOT \`containers.main.env\` or \`container.env\`."
+      * Add an **Acceptance criteria** bullet: "Loading the webapp
+        unauthenticated redirects to the OIDC authorize endpoint;
+        after sign-in, the user lands back on the app with a token
+        in sessionStorage; subsequent API calls carry
+        \`Authorization: Bearer <token>\` and return per-user data;
+        reloading the page keeps the user signed in."
 
-  - Add an **Acceptance criteria** bullet that signing in as the sample
-    user returns the expected token / session and the token
-    authenticates against a protected endpoint, and a second bullet
-    that the credentials are posted as an issue comment per the Scope
-    instruction above.
-
-Skip the sample-user treatment for components that do not own auth
-endpoints (e.g. a web-app that calls a sibling service to log in) —
-seeding and the credentials comment belong only on the component that
-actually seeds the account.
+Skip the OIDC treatment when neither sibling is configured for it. The
+legacy username/password-in-API path remains supported for specs that
+explicitly opt out of the platform IDP — in that rare case only, fall
+back to the original sample-test-user pattern (seed \`admin\` /
+\`admin123\` on first start, post the credentials as an issue
+comment).
 
 Web-app upstream URL wiring — Setup subsection:
 
