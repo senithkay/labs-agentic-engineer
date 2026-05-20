@@ -14,7 +14,7 @@ export const DependentApi = z.object({
   url: z
     .string()
     .describe(
-      "Base URL the consuming component must call, e.g. 'http://development-default.openchoreoapis.localhost:19080/hr-app-employee-api-http/employees'.",
+      "Base URL the consuming component must call, e.g. 'http://development-default.openchoreoapis.localhost:19080/employee-app-employee-api-http/employees'.",
     ),
   description: z
     .string()

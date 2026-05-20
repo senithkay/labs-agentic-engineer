@@ -71,7 +71,7 @@ If the spec describes a **Secret Santa**, gift-exchange, employee-pairing, or an
 \`\`\`json
 {
   "name": "employee-api",
-  "url": "http://development-default.openchoreoapis.localhost:19080/hr-app-employee-api-http/employees",
+  "url": "http://development-default.openchoreoapis.localhost:19080/employee-app-employee-api-http/employees",
   "description": "Returns employee details — name, email, department — for the organisation. Used to fetch the participant pool and to look up email addresses for assignment notifications.",
   "authentication": "none"
 }
