@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-factory-mysql-pvc
+  namespace: wso2cloud
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-factory-mysql
+  namespace: wso2cloud
+type: Opaque
+stringData:
+  root-password: app_factory_root_pwd
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-factory-mysql
+  namespace: wso2cloud
+spec:
+  selector:
+    app: app-factory-mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-factory-mysql
+  namespace: wso2cloud
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-factory-mysql
+  template:
+    metadata:
+      labels:
+        app: app-factory-mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-factory-mysql
+                  key: root-password
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+          readinessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+                - -papp_factory_root_pwd
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: app-factory-mysql-pvc

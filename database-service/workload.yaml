@@ -1,14 +1,8 @@
-apiVersion: openchoreo.dev/v1alpha1
-kind: Workload
 metadata:
-  name: asdlc-database-service-workload
-spec:
-  owner:
-    projectName: core
-    componentName: asdlc-database-service
-  endpoints:
-    api:
-      port: 3500
-      type: HTTP
-      visibility:
-        - internal
+  name: app-factory-database-service
+endpoints:
+  - name: http
+    type: HTTP
+    port: 3500
+    visibility:
+      - internal

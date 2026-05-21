@@ -26,6 +26,7 @@ const STATUS_TONE: Record<TaskStatus, 'default' | 'primary' | 'success' | 'error
   pending: 'default',
   on_hold: 'default',
   in_progress: 'primary',
+  testing: 'primary',
   verification_failed: 'warning',
   ready_for_review: 'primary',
   merged: 'success',
@@ -60,6 +61,7 @@ function emptyMessageFor(status: TaskStatus | undefined, dispatchedAt: string | 
     }
     return 'Agent has started. Streaming activity will appear here as the agent works…';
   }
+  if (status === 'testing') return 'Database created. Testing connection…';
   if (status === 'building') return 'Build dispatched. Waiting for build steps…';
   return 'No activity recorded for this task.';
 }
@@ -144,7 +146,7 @@ export default function TaskDetailPage() {
 
         <Card variant="outlined">
           <CardContent>
-            <TaskPipelineStrip status={taskStatus} />
+            <TaskPipelineStrip status={taskStatus} componentType={task.componentType} />
           </CardContent>
         </Card>
 

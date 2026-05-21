@@ -4,7 +4,7 @@ import type { TaskStatus } from '../../services/api';
 // Pipeline cells per task-execution-progress.md §7. The cell that maps
 // to the current task status is highlighted; cells before it are marked
 // done; cells after are pending.
-const STAGES: { key: TaskStatus | 'dispatched'; label: string }[] = [
+const CODE_STAGES: { key: TaskStatus | 'dispatched'; label: string }[] = [
   { key: 'dispatched',       label: 'Dispatched' },
   { key: 'in_progress',      label: 'In Progress' },
   { key: 'ready_for_review', label: 'Ready' },
@@ -13,11 +13,20 @@ const STAGES: { key: TaskStatus | 'dispatched'; label: string }[] = [
   { key: 'deployed',         label: 'Deployed' },
 ];
 
+// Simplified 4-stage pipeline for database provisioning tasks.
+// The agent signals state directly via BFF callbacks — no GitHub PR or build.
+const DB_STAGES: { key: TaskStatus | 'dispatched'; label: string }[] = [
+  { key: 'dispatched',  label: 'Dispatched' },
+  { key: 'in_progress', label: 'In Progress' },
+  { key: 'testing',     label: 'Testing' },
+  { key: 'deployed',    label: 'Deployed' },
+];
+
 const FAILURE_STATUSES: TaskStatus[] = ['rejected', 'failed', 'abandoned'];
 // Terminal success statuses: all stages should render as done (green, no pulse).
 const TERMINAL_SUCCESS_STATUSES: TaskStatus[] = ['deployed'];
 
-function stageIndex(status: TaskStatus | undefined): number {
+function codeStageIndex(status: TaskStatus | undefined): number {
   if (!status) return 0;
   if (status === 'pending' || status === 'on_hold') return 0;
   if (status === 'in_progress') return 1;
@@ -29,15 +38,26 @@ function stageIndex(status: TaskStatus | undefined): number {
   return -1;
 }
 
-export function TaskPipelineStrip({ status }: { status: TaskStatus | undefined }) {
+function dbStageIndex(status: TaskStatus | undefined): number {
+  if (!status) return 0;
+  if (status === 'pending' || status === 'on_hold') return 0;
+  if (status === 'in_progress') return 1;
+  if (status === 'testing') return 2;
+  if (status === 'deployed') return 3;
+  return -1;
+}
+
+export function TaskPipelineStrip({ status, componentType }: { status: TaskStatus | undefined; componentType?: string }) {
   const theme = useTheme();
+  const isDb = componentType === 'database';
+  const stages = isDb ? DB_STAGES : CODE_STAGES;
   const failed = status && FAILURE_STATUSES.includes(status);
   const allDone = status !== undefined && TERMINAL_SUCCESS_STATUSES.includes(status);
-  const idx = stageIndex(status);
+  const idx = isDb ? dbStageIndex(status) : codeStageIndex(status);
 
   return (
     <Stack direction="row" spacing={0.75} alignItems="center" sx={{ py: 1 }}>
-      {STAGES.map((stage, i) => {
+      {stages.map((stage, i) => {
         const isCurrent = !allDone && i === idx;
         const isDone = allDone || i < idx;
         const tone = failed

@@ -1,0 +1,19 @@
+env:
+  - key: SERVER_PORT
+    value: "3500"
+  - key: LOG_LEVEL
+    value: "debug"
+  - key: DATABASE_URL
+    value: "postgres://app_factory:app_factory_pwd@app-factory-postgresql.wso2cloud:5432/app_factory?sslmode=disable"
+  - key: MYSQL_ROOT_URL
+    value: "root:app_factory_root_pwd@tcp(app-factory-mysql.wso2cloud:3306)/"
+  - key: MYSQL_HOST
+    value: "app-factory-mysql.wso2cloud"
+  - key: MYSQL_PORT
+    value: "3306"
+  - key: MONGO_ROOT_URL
+    value: "mongodb://root:app_factory_root_pwd@app-factory-mongodb.wso2cloud:27017"
+  - key: MONGO_HOST
+    value: "app-factory-mongodb.wso2cloud"
+  - key: MONGO_PORT
+    value: "27017"

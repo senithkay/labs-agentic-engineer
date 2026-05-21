@@ -20,6 +20,44 @@ services:
       retries: 5
     networks:
       - asdlc
+  db_mysql:
+    image: mysql:8.0
+    container_name: asdlc-db-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: asdlc
+      MYSQL_USER: asdlc
+      MYSQL_PASSWORD: asdlc
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - asdlc
+
+  db_mongo:
+    image: mongo:7.0
+    container_name: asdlc-db-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - asdlc
+
 
   # ---------------------------------------------------------------------------
   # asdlc-api — Go BFF + GitHub webhook receiver. Reaches OC via the k3d
@@ -54,6 +92,7 @@ services:
       # ── Sister services on the asdlc compose network
       AGENTS_SERVICE_BASE_URL: "http://agents-service:3400"
       GIT_SERVICE_BASE_URL: "http://git-service:3300"
+      DATABASE_SERVICE_BASE_URL: "http://database-service:3500"
 
       # ── Coding-agent runner reach-back URLs. These are passed verbatim to
       # the WorkflowRun parameter the runner pod reads. The pod runs in
@@ -61,6 +100,7 @@ services:
       # compose services through k3d's host bridge.
       AGENT_GIT_SERVICE_URL: "http://host.k3d.internal:3300"
       AGENT_PLATFORM_URL: "http://host.k3d.internal:9090"
+      AGENT_DATABASE_SERVICE_URL: "http://host.k3d.internal:3500"
 
       # ── GitHub webhook validation + connect-state HMAC.
       GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET}"
@@ -267,9 +307,40 @@ services:
     networks:
       - asdlc
       - k3d-openchoreo
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     extra_hosts:
       - "host.docker.internal:host-gateway"
       - "thunder.openchoreo.localhost:host-gateway"
+  database-service:
+    build:
+      context: ../database-service
+    container_name: asdlc-database-service
+    ports:
+      - "3500:3500"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db_mysql:
+        condition: service_healthy
+      db_mongo:
+        condition: service_healthy
+    environment:
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "3500"
+      LOG_LEVEL: "debug"
+      # Internal mapping store — uses the shared PostgreSQL instance.
+      DATABASE_URL: "postgres://asdlc:asdlc@postgres:5432/asdlc?sslmode=disable"
+      MYSQL_ROOT_URL: "root:root@tcp(db_mysql:3306)/"
+      MYSQL_HOST: "db_mysql"
+      MYSQL_PORT: "3306"
+      MONGO_ROOT_URL: "mongodb://root:root@db_mongo:27017"
+      MONGO_HOST: "db_mongo"
+      MONGO_PORT: "27017"
+    networks:
+      - asdlc
+
 
   # ---------------------------------------------------------------------------
   # smee-client — forwards GitHub webhook events from the public smee.io
@@ -313,6 +384,8 @@ services:
 
 volumes:
   pgdata:
+  mysqldata:
+  mongodata:
 
 networks:
   asdlc:

@@ -230,6 +230,7 @@ type componentFrontmatter struct {
 	Buildpack     string               `yaml:"buildpack,omitempty"`
 	AppPath       string               `yaml:"appPath,omitempty"`
 	Entrypoint    string               `yaml:"entrypoint,omitempty"`
+	DbEngine      string               `yaml:"dbEngine,omitempty"`
 	Api           *apiConfig           `yaml:"api,omitempty"`
 	Auth          *authConfig          `yaml:"auth,omitempty"`
 	DependentApis []dependentApiConfig `yaml:"dependentApis,omitempty"`
@@ -397,6 +398,7 @@ func assembleComponent(name, designMd string, files map[string]string) (models.D
 		Entrypoint:                 cfm.Entrypoint,
 		Buildpack:                  cfm.Buildpack,
 		AppPath:                    cfm.AppPath,
+		DbEngine:                   cfm.DbEngine,
 		OpenAPISpec:                openapi,
 		ComponentAgentInstructions: strings.TrimSpace(body),
 		Api:                        api,
@@ -456,6 +458,13 @@ func SplitDesign(d *DesignFile) (map[string]string, error) {
 			Buildpack:  comp.Buildpack,
 			AppPath:    comp.AppPath,
 			Entrypoint: comp.Entrypoint,
+			DbEngine:   comp.DbEngine,
+		}
+		if comp.Api != nil && comp.Api.Security != "" {
+			cfm.Api = &apiConfig{Security: comp.Api.Security}
+		}
+		if comp.Auth != nil && comp.Auth.Kind != "" {
+			cfm.Auth = &authConfig{Kind: comp.Auth.Kind, Upstream: comp.Auth.Upstream}
 		}
 		if comp.Api != nil && comp.Api.Security != "" {
 			cfm.Api = &apiConfig{Security: comp.Api.Security}

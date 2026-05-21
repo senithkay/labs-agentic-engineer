@@ -73,8 +73,9 @@ func Load() (Config, error) {
 		AgentsService: AgentsServiceConfig{
 			BaseURL: r.readOptionalString("AGENTS_SERVICE_BASE_URL", ""),
 		},
-		AgentGitServiceURL: r.readOptionalString("AGENT_GIT_SERVICE_URL", ""),
-		AgentPlatformURL:   r.readOptionalString("AGENT_PLATFORM_URL", ""),
+		AgentGitServiceURL:      r.readOptionalString("AGENT_GIT_SERVICE_URL", ""),
+		AgentPlatformURL:        r.readOptionalString("AGENT_PLATFORM_URL", ""),
+		AgentDatabaseServiceURL: r.readOptionalString("AGENT_DATABASE_SERVICE_URL", ""),
 		ServiceAuth: ServiceAuthConfig{
 			TokenURL:     r.readOptionalString("SERVICE_AUTH_TOKEN_URL", ""),
 			ClientID:     r.readOptionalString("SERVICE_AUTH_CLIENT_ID", ""),

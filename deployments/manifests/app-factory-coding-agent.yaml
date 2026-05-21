@@ -57,6 +57,13 @@ spec:
           required: [url]
           properties:
             url: { type: string }
+        databaseService:
+          type: object
+          default: {}
+          properties:
+            url:
+              type: string
+              default: ""
         anthropic:
           type: object
           required: [secretRef]
@@ -106,6 +113,8 @@ spec:
             value: ${parameters.bff.platformUrl}
           - name: git-service-url
             value: ${parameters.gitService.url}
+          - name: database-service-url
+            value: ${parameters.databaseService.url}
           # Per-org K8s Secret in workflows-<orgID> that carries
           # ANTHROPIC_API_KEY. Materialised by git-service in the dispatch
           # pre-flight (no per-WorkflowRun ESO sync).
@@ -167,6 +176,8 @@ spec:
                 value: '{{workflow.parameters.bearer}}'
               - name: ASDLC_PLATFORM_URL
                 value: '{{workflow.parameters.platform-url}}'
+              - name: ASDLC_DATABASE_SERVICE_URL
+                value: '{{workflow.parameters.database-service-url}}'
               - name: ASDLC_CORRELATION_ID
                 value: '{{workflow.parameters.correlation-id}}'
               - name: WORKSPACE_BASE_PATH

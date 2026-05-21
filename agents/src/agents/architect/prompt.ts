@@ -79,6 +79,28 @@ If the spec describes a **Secret Santa**, gift-exchange, employee-pairing, or an
 
 Do NOT create a sibling \`employee-api\` component of your own. The directory already exists outside the project.
 
+# Rules for database components
+  - When a service needs persistent storage, add a componentType "database" component alongside it.
+  - Naming convention: <service-name>-db (e.g. order-service → order-service-db).
+  - Call add_component with componentType "database" and no entrypoint, buildpack, appPath, or componentAgentInstructions.
+  - Immediately after add_component, call set_db_engine to set the engine:
+      - "mysql" for relational/transactional workloads (structured data, joins, ACID).
+      - "mongodb" for document/flexible-schema workloads (unstructured or varying schemas, high write throughput).
+  - The service that uses the database declares it in dependsOn (e.g. order-service dependsOn order-service-db).
+  - Do NOT call set_openapi for database components — they have no HTTP contract.
+  - Database components need NO language, buildpack, appPath, entrypoint, or componentAgentInstructions. Omit those fields when calling add_component.
+
+# Rules for database components
+  - When a service needs persistent storage, add a componentType "database" component alongside it.
+  - Naming convention: <service-name>-db (e.g. order-service → order-service-db).
+  - Call add_component with componentType "database" and no entrypoint, buildpack, appPath, or componentAgentInstructions.
+  - Immediately after add_component, call set_db_engine to set the engine:
+      - "mysql" for relational/transactional workloads (structured data, joins, ACID).
+      - "mongodb" for document/flexible-schema workloads (unstructured or varying schemas, high write throughput).
+  - The service that uses the database declares it in dependsOn (e.g. order-service dependsOn order-service-db).
+  - Do NOT call set_openapi for database components — they have no HTTP contract.
+  - Database components need NO language, buildpack, appPath, entrypoint, or componentAgentInstructions. Omit those fields when calling add_component.
+
 # API security classification (api.security)
 
 Set \`api.security: "required"\` on a "service" component when the spec **or** the embedded auth surface implies caller authentication is needed. Otherwise omit the \`api\` block entirely (which the platform reads as public).

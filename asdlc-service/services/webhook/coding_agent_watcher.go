@@ -73,13 +73,17 @@ func (w *CodingAgentWatcher) sweep(ctx context.Context) {
 
 	var batch []models.ComponentTask
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Monitor both in_progress AND testing tasks. Database provisioning
+		// tasks transition in_progress → testing → deployed; if the agent pod
+		// fails while in testing the watcher must detect it and drive the task
+		// to failed (testing → failed via TaskEventCodingAgentFailed).
 		return tx.Raw(`
 			SELECT * FROM component_tasks
-			WHERE status = ? AND last_coding_agent_run_name <> ''
+			WHERE status IN (?, ?) AND last_coding_agent_run_name <> ''
 			ORDER BY last_event_at NULLS FIRST
 			LIMIT 50
 			FOR UPDATE SKIP LOCKED
-		`, string(models.TaskStatusInProgress)).
+		`, string(models.TaskStatusInProgress), string(models.TaskStatusTesting)).
 			Scan(&batch).Error
 	})
 	if err != nil {

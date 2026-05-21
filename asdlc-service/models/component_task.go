@@ -57,6 +57,12 @@ const (
 	// shows on the board, and the operator clicks Retry to re-dispatch
 	// (transition back to in_progress).
 	TaskStatusVerificationFailed TaskStatus = "verification_failed"
+	// TaskStatusTesting is an intermediate state for database provisioning
+	// tasks. The agent has successfully called create_database and is now
+	// running test_connection against the provisioned database. Transitions:
+	// in_progress → testing (db.testing), testing → deployed (db.deployed),
+	// testing → failed (db.failed).
+	TaskStatusTesting TaskStatus = "testing"
 )
 
 // IsTerminal reports whether the status is a terminal state. Terminal states
@@ -124,6 +130,12 @@ type ComponentTask struct {
 	Status        string `gorm:"default:pending;index" json:"status"`
 	WorkspacePath string `json:"workspacePath"`
 	ExecType      string `json:"execType"` // "SYSTEM","WORKER"
+	// ComponentType mirrors the componentType field from .asdlc/design.json
+	// at task-generation time. Used by the frontend to render the correct
+	// pipeline strip (database tasks show a 4-stage view; coding tasks show
+	// the full 6-stage GitHub+build view). Also used by dispatch to skip the
+	// external-URL invariant check for database dependencies.
+	ComponentType string `json:"componentType,omitempty"`
 
 	// GitHub artifacts (1:1 with this task) — set at dispatch.
 	IssueURL          string      `gorm:"type:text;index" json:"issueUrl,omitempty"`

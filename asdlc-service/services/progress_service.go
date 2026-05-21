@@ -361,7 +361,11 @@ func pickStepTs(step models.WorkflowRunTask) string {
 }
 
 func isAgentActive(task *models.ComponentTask) bool {
-	return task.Status == string(models.TaskStatusInProgress)
+	// For database provisioning tasks the agent pod is still running during
+	// the `testing` phase (it is waiting for test_connection to return).
+	// Keep Final=false until the task leaves both in_progress and testing.
+	return task.Status == string(models.TaskStatusInProgress) ||
+		task.Status == string(models.TaskStatusTesting)
 }
 
 func isBuildActive(task *models.ComponentTask) bool {

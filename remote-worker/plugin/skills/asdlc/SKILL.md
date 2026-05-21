@@ -51,6 +51,97 @@ gh issue list --label asdlc --label implementation --state open \
   --json number,title,url
 ```
 
+## Database provisioning tasks
+
+If your prompt explicitly says **"This is a database provisioning task"**, follow
+this section exclusively. Skip all other sections of this skill.
+
+To double-check: `head -5 ".asdlc/design/components/$ASDLC_COMPONENT_NAME/design.md"`
+should contain `type: database` in the frontmatter. If the file is missing or the
+type differs from the prompt, trust the prompt.
+
+**This task has exactly two steps. Do nothing else.**
+
+Do NOT write application code, create branches, or open a PR.
+
+**Before starting, run this check and store the result:**
+```bash
+echo "PLATFORM_URL=${ASDLC_PLATFORM_URL}"
+```
+If the output shows a non-empty URL (e.g. `PLATFORM_URL=http://...`), you are in
+platform-flow and **must** run every `curl` callback below. Only skip the `curl`
+and `gh` commands when the output is literally `PLATFORM_URL=` (empty string).
+
+### Step 1 — call `create_database`
+
+Call the `create_database` MCP tool with:
+- `reference_id`: `$ASDLC_TASK_ID`
+- `org_id`: `$ASDLC_ORG_ID`
+- `project_id`: `$ASDLC_PROJECT_ID`
+
+If the tool call succeeds, proceed to Step 2.
+
+If the tool call fails for **any reason** (tool not found, error returned,
+exception, timeout — anything):
+```bash
+# ISSUE_URL is the GitHub issue URL from your prompt (e.g. https://github.com/org/repo/issues/N)
+curl -sS -X POST "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-failed" \
+  -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")" \
+  -H "Content-Type: application/json" \
+  -d "{\"diagnostic\":\"create_database failed: <error text>\"}"
+gh issue comment "$ISSUE_URL" \
+  --body "Database provisioning failed: create_database: <error text>"
+```
+Then **stop**. Do not retry. Do not investigate. Do not search for the service.
+
+### Step 2 — call `test_connection`, then signal the platform
+
+Signal testing is starting (run this **before** calling `test_connection`):
+```bash
+curl -sS -X POST "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-testing" \
+  -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")"
+```
+
+Call the `test_connection` MCP tool with:
+- `reference_id`: `$ASDLC_TASK_ID`
+
+If the tool call fails for **any reason**:
+```bash
+curl -sS -X POST "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-failed" \
+  -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")" \
+  -H "Content-Type: application/json" \
+  -d "{\"diagnostic\":\"test_connection failed: <error text>\"}"
+gh issue comment "$ISSUE_URL" \
+  --body "Database provisioning failed: test_connection: <error text>"
+```
+Then **stop**.
+
+If the tool returned **`"healthy"`**:
+```bash
+curl -sS -X POST "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-deployed" \
+  -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")"
+gh issue close "$ISSUE_URL" \
+  --comment "Database provisioned and connection verified successfully."
+```
+
+If the tool returned **`"faulty"`**:
+```bash
+curl -sS -X POST "${ASDLC_PLATFORM_URL}/api/v1/tasks/${ASDLC_TASK_ID}/db-failed" \
+  -H "Authorization: Bearer $(cat "$ASDLC_BEARER_FILE")" \
+  -H "Content-Type: application/json" \
+  -d '{"diagnostic":"test_connection returned faulty"}'
+gh issue comment "$ISSUE_URL" \
+  --body "Database provisioning failed: connection test returned faulty."
+```
+
+**Do NOT** create a branch, commit code, or open a PR — database provisioning tasks
+have no code artefact to review. The platform drives the lifecycle entirely via the
+callback endpoints above.
+
+Services that depend on this database retrieve credentials during their own
+implementation via the `lookup_database` MCP tool — see "Database dependency
+credentials" in the Workflow section below.
+
 ## Workflow
 
 1. **Read the issue with its comments** (`gh issue view <url> --comments`).
@@ -71,6 +162,10 @@ gh issue list --label asdlc --label implementation --state open \
    blocks**, bake each URL into your component as a **build-time
    constant** (see "Dependency endpoints" below). Do this before you
    write any code that calls the upstream.
+4a. **If any of this task's dependencies is a database component**, call the
+   `lookup_database` MCP tool to retrieve the credentials before writing
+   any code that connects to the database (see "Database dependency
+   credentials" below).
 5. **Edit, commit, push.** Standard `git add`, `git commit -m "..."`,
    `git push -u origin HEAD`. The committer identity is already set in
    `.git/config` — don't override it. The first push creates the remote
@@ -170,6 +265,81 @@ section below for the canonical pattern.
 > env variable set at deploy time would have no effect on the served
 > bundle. Baking the URL at build time is the only correct option for
 > Web App components in v1.
+
+## Database dependency credentials
+
+If your component depends on a database component (i.e., the issue's
+**Task dependencies** section lists a component whose type is `database`),
+you must call the `lookup_database` MCP tool to retrieve the live
+credentials before writing any code that connects to the database.
+
+Database dependencies do **not** produce a `## Dependency endpoint resolved`
+comment — they have no external HTTP URL. Their credentials are stored in
+the database-service and retrieved via MCP.
+
+### How to identify a database dependency
+
+1. Read the issue body's **Task dependencies** section — it names each
+   upstream component this task depends on.
+2. For each dependency, read its design file to determine its type:
+   ```bash
+   cat .asdlc/design/components/<dep-name>/design.md | head -10
+   ```
+   If the frontmatter contains `componentType: database` (or the body
+   clearly describes it as a database provisioning component), it is a
+   database dependency.
+
+### Retrieving credentials
+
+Call the `lookup_database` MCP tool — this is a **true MCP tool call via
+the SDK, never a curl command to the MCP endpoint**:
+
+- `org_id`: `$ASDLC_ORG_ID`
+- `project_id`: `$ASDLC_PROJECT_ID`
+- `component`: the database component name exactly as listed in the
+  dependencies (e.g. `order-service-db`)
+
+The tool returns a `DatabaseCredentials` object with:
+- `host` — database host
+- `port` — database port
+- `database` — database name
+- `username` — database user
+- `password` — database password
+
+### Using the credentials in implementation
+
+Use the returned credentials to configure the database connection in your
+code. **Do not hardcode credentials** — read them from environment variables
+with the returned values as the baked-in default:
+
+**Go example** (connection string assembled from env vars defaulting to
+credentials from `lookup_database`):
+```go
+host     := getEnv("DB_HOST",     "<host from lookup_database>")
+port     := getEnv("DB_PORT",     "<port from lookup_database>")
+dbName   := getEnv("DB_NAME",     "<database from lookup_database>")
+user     := getEnv("DB_USER",     "<username from lookup_database>")
+password := getEnv("DB_PASSWORD", "<password from lookup_database>")
+```
+
+**Node/TypeScript example**:
+```ts
+const DB_HOST     = process.env.DB_HOST     ?? "<host from lookup_database>";
+const DB_PORT     = process.env.DB_PORT     ?? "<port from lookup_database>";
+const DB_NAME     = process.env.DB_NAME     ?? "<database from lookup_database>";
+const DB_USER     = process.env.DB_USER     ?? "<username from lookup_database>";
+const DB_PASSWORD = process.env.DB_PASSWORD ?? "<password from lookup_database>";
+```
+
+Substitute the actual values returned by `lookup_database` as the defaults.
+The platform will override these via env vars at deploy time if needed.
+
+> **Never call curl against the MCP server directly.** The database-service
+> MCP endpoint (`/mcp`) speaks JSON-RPC 2.0 over HTTP and is only callable
+> through the SDK's MCP client — the same mechanism that backs
+> `create_database` and `test_connection` in the database provisioning
+> workflow. Using curl to replicate that protocol is fragile and prohibited.
+> Always use the named MCP tool via a proper tool call.
 
 ## Build verification
 

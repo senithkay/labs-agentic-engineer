@@ -70,7 +70,12 @@ func (s *taskService) StreamGenerateTasks(ctx context.Context, orgID, projectID 
 	committed := false
 	defer func() {
 		if !committed {
-			tx.Rollback()
+			// Use a detached context so a canceled request context (client
+			// disconnect / gateway timeout) doesn't prevent the ROLLBACK from
+			// reaching PostgreSQL. Without this, the advisory lock leaks into
+			// the connection pool and blocks the next generate request until
+			// pgx eventually closes the bad connection.
+			tx.WithContext(context.Background()).Rollback()
 		}
 	}()
 	if lockErr := tx.Exec(`SELECT pg_advisory_xact_lock(?)`, hashTechLeadKey(projectID)).Error; lockErr != nil {
@@ -207,6 +212,34 @@ func (s *taskService) StreamGenerateTasks(ctx context.Context, orgID, projectID 
 	persisted, err := s.persistAndIssue(ctx, w, orgID, projectID, batchID, currentSpecVersion, currentDesignVersion, planItems, design, repoURL, repoSlug)
 	if err != nil {
 		return err
+	}
+
+	// T4b: pre-register databases. For each persisted database task, call the
+	// database-service to create a pending mapping record so the console can
+	// show the database immediately — before the agent has run.
+	// Non-blocking: log failures and continue.
+	if s.dbClient != nil {
+		compByName := make(map[string]models.DesignComponent, len(design.Components))
+		for _, c := range design.Components {
+			compByName[strings.ToLower(c.Name)] = c
+		}
+		for _, item := range persisted {
+			task := item.Task
+			if task.ComponentType != "database" {
+				continue
+			}
+			comp, ok := compByName[strings.ToLower(task.ComponentName)]
+			if !ok || comp.DbEngine == "" {
+				slog.WarnContext(ctx, "database task missing dbEngine in design; skipping pre-registration",
+					"component", task.ComponentName)
+				continue
+			}
+			if err := s.dbClient.RegisterDatabase(ctx, orgID, projectID, task.ID, task.ComponentName,
+				comp.DbEngine, task.ComponentName); err != nil {
+				slog.WarnContext(ctx, "failed to pre-register database",
+					"component", task.ComponentName, "error", err)
+			}
+		}
 	}
 
 	// T5: open Phase 2 over the surviving (issued) tasks.
@@ -363,7 +396,7 @@ func proxyPlanStream(ctx context.Context, upstream io.Reader, w *sseWriter) ([]p
 		case "error":
 			// Forward as-is; orchestrator surfaces as plan-scope error.
 			w.passthrough(line)
-			sseErr = fmt.Errorf("plan-stream error frame")
+			sseErr = fmt.Errorf("plan-stream error frame: %s", string(head.Data))
 		default:
 			w.passthrough(line)
 		}
@@ -449,6 +482,7 @@ func (s *taskService) persistAndIssue(
 			Status:              string(models.TaskStatusPending),
 			LifecycleStatus:     string(models.TaskLifecycleGhIssueWaiting),
 			ExecType:            "WORKER",
+			ComponentType:       comp.ComponentType,
 		}
 		if err := s.taskRepo.Create(ctx, task); err != nil {
 			return nil, fmt.Errorf("create task row %d: %w", i, err)
@@ -804,6 +838,7 @@ func buildPlanRequest(
 			ComponentType: c.ComponentType,
 			Language:      c.Language,
 			DependsOn:     dep,
+			DbEngine:      c.DbEngine,
 		}
 	}
 
@@ -897,6 +932,7 @@ func buildDetailRequest(
 				ComponentType: dep.ComponentType,
 				Language:      dep.Language,
 				DependsOn:     depDeps,
+				DbEngine:      dep.DbEngine,
 			})
 		}
 

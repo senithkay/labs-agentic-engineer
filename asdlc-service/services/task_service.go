@@ -18,11 +18,32 @@ import (
 	"github.com/wso2/asdlc/asdlc-service/repositories"
 )
 
+// DatabaseArtifactItem represents a database record from the database-service mapping table.
+// Status is authoritative from the database table — not derived from task status.
+type DatabaseArtifactItem struct {
+	ID            string   `json:"id"`
+	ReferenceID   string   `json:"referenceId"`
+	Components    []string `json:"components"`
+	DBType        string   `json:"dbType,omitempty"`
+	RequestedName string   `json:"requestedName,omitempty"`
+	DBName        string   `json:"dbName,omitempty"`
+	Host          string   `json:"host,omitempty"`
+	Port          int      `json:"port,omitempty"`
+	Username      string   `json:"username,omitempty"`
+	Password      string   `json:"password,omitempty"`
+	// Status comes directly from the databases table: "pending" | "provisioning" | "healthy" | "faulty"
+	Status string `json:"status"`
+}
+
 type TaskService interface {
 	GetTask(ctx context.Context, taskID string) (*models.ComponentTask, error)
 	GetTasks(ctx context.Context, orgID, projectID string) (*models.Tasks, error)
 	GetTaskByComponent(ctx context.Context, orgID, projectID, componentName string) (*models.ComponentTask, error)
 	ListTasks(ctx context.Context, orgID, projectID string) ([]models.ComponentTask, error)
+	// ListDatabaseArtifacts returns metadata and health status for all database
+	// component tasks in the project. Enriches task status with provisioning
+	// metadata from the database-service when available.
+	ListDatabaseArtifacts(ctx context.Context, orgID, projectID string) ([]DatabaseArtifactItem, error)
 	// ListTasksByOrg lists tasks across every project in the org with
 	// optional status / cause / since filters. Used by the PR D
 	// ReachReconciliationBanner ({status: abandoned, cause: repo.unselected,
@@ -182,6 +203,33 @@ func (s *taskService) ListTasksByOrg(ctx context.Context, orgID string, f reposi
 	return tasks, nil
 }
 
+func (s *taskService) ListDatabaseArtifacts(ctx context.Context, orgID, projectID string) ([]DatabaseArtifactItem, error) {
+	if s.dbClient == nil {
+		return []DatabaseArtifactItem{}, nil
+	}
+	infos, err := s.dbClient.ListByProject(ctx, orgID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list databases: %w", err)
+	}
+	items := make([]DatabaseArtifactItem, 0, len(infos))
+	for _, info := range infos {
+		items = append(items, DatabaseArtifactItem{
+			ID:            info.ID,
+			ReferenceID:   info.ReferenceID,
+			Components:    info.Components,
+			DBType:        info.DBType,
+			RequestedName: info.RequestedName,
+			DBName:        info.DBName,
+			Host:          info.Host,
+			Port:          info.Port,
+			Username:      info.Username,
+			Password:      info.Password,
+			Status:        info.Status,
+		})
+	}
+	return items, nil
+}
+
 // GenerateTasks is the legacy non-streaming entry point. The tech-lead
 // agent revamp (docs/design/tech-lead-agent.md) replaces this with the
 // SSE-streaming orchestrator wired to the two-phase agent. The HTTP
@@ -251,7 +299,9 @@ func topoSortComponents(components []models.DesignComponent) []models.DesignComp
 	}
 	return result
 }
-// ExecTask starts executing a task. For now, it just logs and doesn't perform any actions.
+// ExecTask is reserved for future use. Database provisioning tasks are now driven
+// entirely by the agent via MCP tools — pre-registration happens at task generation
+// time, and the agent calls create_database / test_connection via the MCP endpoint.
 func (s *taskService) ExecTask(ctx context.Context, taskID string) error {
 	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
@@ -260,50 +310,8 @@ func (s *taskService) ExecTask(ctx context.Context, taskID string) error {
 	if task == nil {
 		return ErrTaskNotFound
 	}
-
-	slog.InfoContext(ctx, "executing task",
-		"taskId", taskID,
-		"component", task.ComponentName,
-		"status", task.Status,
-		"title", task.Title)
-
-	if task.ExecType == "SYSTEM" {
-		slog.InfoContext(ctx, "Setting up environment for task execution",
-			"taskId", taskID, "title", task.Title)
-
-		if s.dbClient != nil {
-			// Provision database for the component
-			slog.InfoContext(ctx, "Provisioning database for component",
-				"taskId", taskID, "component", task.ComponentName)
-
-			dbCreds, err := s.dbClient.ProvisionDatabase(ctx, task.ProjectID)
-			if err != nil {
-				slog.ErrorContext(ctx, "failed to provision database",
-					"taskId", taskID, "component", task.ComponentName, "error", err)
-				return fmt.Errorf("provision database: %w", err)
-			}
-
-			slog.InfoContext(ctx, "Database provisioned successfully",
-				"taskId", taskID, "component", task.ComponentName,
-				"host", dbCreds.Host, "port", dbCreds.Port, "database", dbCreds.Database)
-
-			// Test the database connection
-			slog.InfoContext(ctx, "Testing database connection",
-				"taskId", taskID, "component", task.ComponentName)
-
-			if err := s.dbClient.TestConnection(ctx, dbCreds); err != nil {
-				slog.ErrorContext(ctx, "failed to test database connection",
-					"taskId", taskID, "component", task.ComponentName, "error", err)
-				return fmt.Errorf("test connection: %w", err)
-			}
-
-			slog.InfoContext(ctx, "Database connection test passed",
-				"taskId", taskID, "component", task.ComponentName)
-		} else {
-			slog.WarnContext(ctx, "Database client not configured, skipping database provisioning",
-				"taskId", taskID, "component", task.ComponentName)
-		}
-	}
+	slog.InfoContext(ctx, "exec_task called (no-op)",
+		"taskId", taskID, "component", task.ComponentName)
 	return nil
 }
 
