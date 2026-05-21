@@ -14,6 +14,8 @@ import (
 	"github.com/wso2/asdlc/database-service/config"
 	"github.com/wso2/asdlc/database-service/controllers"
 	"github.com/wso2/asdlc/database-service/services"
+
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -32,12 +34,32 @@ func main() {
 		cfg.MySQLPort,
 	)
 
+	// PostgreSQL-backed registry (required for BFF list/register/status endpoints)
+	pg, err := services.OpenPostgres(cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to connect to postgres: %v\n", err)
+		os.Exit(1)
+	}
+	defer pg.Close()
+
+	registryService := services.NewDatabaseRegistryService(pg)
+	if err := registryService.Migrate(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to migrate databases table: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Composite DatabaseService used by the MCP server.
+	dbService := services.NewDatabaseService(registryService, dbProvisioningService, cfg.MySQLHost, cfg.MySQLPort)
+
 	// Controllers
 	dbCtrl := controllers.NewDatabaseController(dbProvisioningService)
+	regCtrl := controllers.NewRegistryController(registryService)
 
 	// Handler
 	handler := api.NewHandler(api.AppParams{
 		DatabaseCtrl: dbCtrl,
+		RegistryCtrl: regCtrl,
+		DatabaseSvc:  dbService,
 	})
 
 	server := &http.Server{

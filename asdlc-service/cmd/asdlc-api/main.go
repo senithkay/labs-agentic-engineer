@@ -111,6 +111,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Phase 6 DB tasks — adds `component_type` column to component_tasks so
+	// database-type tasks can be distinguished from service/web-app tasks.
+	if err := migrations.RunPhase6DbTasks(db); err != nil {
+		slog.Error("phase6_db_tasks migration failed", "error", err)
+		os.Exit(1)
+	}
+
 	// Repositories — only task and config remain
 	taskRepo := repositories.NewTaskRepository(db)
 	configRepo := repositories.NewConfigRepository(db)
@@ -194,11 +201,19 @@ func main() {
 		slog.Info("Git service", "baseURL", cfg.GitService.BaseURL)
 	}
 
-	// Database service client (optional — disabled when DATABASE_SERVICE_BASE_URL not set)
+	// Database service client (optional — disabled when neither DATABASE_SERVICE_BASE_URL
+	// nor AGENT_DATABASE_SERVICE_URL is set). DATABASE_SERVICE_BASE_URL is preferred
+	// (direct in-cluster URL); AGENT_DATABASE_SERVICE_URL is the fallback used by the
+	// coding-agent pod and doubles as the BFF's own database-service address when the
+	// two share the same endpoint.
 	var dbClient dbclient.Client
-	if cfg.DatabaseService.BaseURL != "" {
-		dbClient = dbclient.NewClient(cfg.DatabaseService.BaseURL)
-		slog.Info("Database service", "baseURL", cfg.DatabaseService.BaseURL)
+	dbServiceURL := cfg.DatabaseService.BaseURL
+	if dbServiceURL == "" {
+		dbServiceURL = cfg.AgentDatabaseServiceURL
+	}
+	if dbServiceURL != "" {
+		dbClient = dbclient.NewClient(dbServiceURL)
+		slog.Info("Database service", "baseURL", dbServiceURL)
 	}
 
 	// Artifact store — PR 2 of repo-storage-ownership: HTTP-backed via
@@ -370,7 +385,7 @@ func main() {
 	if agentGitServiceURL == "" {
 		agentGitServiceURL = cfg.GitService.BaseURL
 	}
-	dispatchSvc := services.NewDispatchService(taskRepo, gitClient, componentService, configService, artifactStore, taskTokens, tokenInject, wfRunService, projector, agentGitServiceURL, cfg.AgentPlatformURL)
+	dispatchSvc := services.NewDispatchService(taskRepo, gitClient, componentService, configService, artifactStore, taskTokens, tokenInject, wfRunService, projector, agentGitServiceURL, cfg.AgentPlatformURL, cfg.AgentDatabaseServiceURL, dbClient)
 	if hook, ok := dispatchSvc.(services.DispatchServiceWithTraitSync); ok {
 		hook.SetTraitSync(traitSyncService)
 	}
@@ -406,7 +421,7 @@ func main() {
 			slog.Info("Thunder admin client wired into dispatch (auto-register webapp redirect URIs on deploy)")
 		}
 	}
-	slog.Info("Dispatch service", "agentGitServiceURL", agentGitServiceURL)
+	slog.Info("Dispatch service", "agentGitServiceURL", agentGitServiceURL, "agentDatabaseServiceURL", cfg.AgentDatabaseServiceURL)
 
 	// F1 — wire the post-deploy dispatch cascade. The projector fires
 	// OnTaskDeployed whenever ApplyBuildResult lands a task in `deployed`;

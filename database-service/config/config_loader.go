@@ -21,12 +21,20 @@ func Load() (*Config, error) {
 		}
 	}
 
+	mysqlHost := getEnv("MYSQL_HOST", "mysql")
+	mysqlRootUser := getEnv("MYSQL_ROOT_USER", "root")
+	mysqlRootPassword := getEnv("MYSQL_ROOT_PASSWORD", "root")
+	// Build the root DSN from individual env vars so MYSQL_HOST/MYSQL_ROOT_USER/
+	// MYSQL_ROOT_PASSWORD (as provided by docker-compose) are honoured.
+	// Fall back to a MYSQL_ROOT_URL override if explicitly set.
+	defaultRootURL := mysqlRootUser + ":" + mysqlRootPassword + "@tcp(" + mysqlHost + ":" + strconv.Itoa(mysqlPort) + ")/"
 	return &Config{
 		ServerHost:   getEnv("SERVER_HOST", "0.0.0.0"),
 		ServerPort:   serverPort,
 		LogLevel:     getEnv("LOG_LEVEL", "info"),
-		MySQLRootURL: getEnv("MYSQL_ROOT_URL", "root:root@tcp(mysql:3306)/"),
-		MySQLHost:    getEnv("MYSQL_HOST", "mysql"),
+		DatabaseURL:  getEnv("DATABASE_URL", ""),
+		MySQLRootURL: getEnv("MYSQL_ROOT_URL", defaultRootURL),
+		MySQLHost:    mysqlHost,
 		MySQLPort:    mysqlPort,
 	}, nil
 }

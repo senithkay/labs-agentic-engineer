@@ -182,6 +182,7 @@ export type TaskStatus =
   | 'pending'
   | 'on_hold'
   | 'in_progress'
+  | 'testing'
   | 'verification_failed'
   | 'ready_for_review'
   | 'merged'
@@ -403,4 +404,22 @@ export interface Deployment {
   endpointUrl: string;
   createdAt: string;
   status: string;
+}
+
+// -- Database Artifacts (provisioned databases for a project) ----------------
+
+export type DatabaseArtifactStatus = 'pending' | 'provisioning' | 'healthy' | 'faulty';
+
+export interface DatabaseArtifact {
+  id: string;
+  referenceId: string;
+  components: string[];
+  dbType?: string;
+  requestedName?: string;
+  dbName?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  status: DatabaseArtifactStatus;
 }

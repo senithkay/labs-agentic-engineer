@@ -39,6 +39,8 @@ services:
         condition: service_started
       agents-service:
         condition: service_started
+      asdlc-database-service:
+        condition: service_started
     environment:
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "9090"
@@ -61,6 +63,10 @@ services:
       # compose services through k3d's host bridge.
       AGENT_GIT_SERVICE_URL: "http://host.k3d.internal:3300"
       AGENT_PLATFORM_URL: "http://host.k3d.internal:9090"
+      AGENT_DATABASE_SERVICE_URL: "http://host.k3d.internal:8082"
+
+      # ── Database service — MCP endpoint for database provisioning tasks.
+      DATABASE_SERVICE_BASE_URL: "http://asdlc-database-service:8082"
 
       # ── GitHub webhook validation + connect-state HMAC.
       GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET}"
@@ -311,8 +317,98 @@ services:
     networks:
       - asdlc
 
+  # ---------------------------------------------------------------------------
+  # db_mysql — MySQL 8 for local dev database provisioning.
+  # Used by the database-service to provision MySQL databases.
+  # ---------------------------------------------------------------------------
+  db_mysql:
+    image: mysql:8
+    container_name: asdlc-db-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-rootpassword}"
+      MYSQL_DATABASE: asdlc_dev
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - asdlc
+
+  # ---------------------------------------------------------------------------
+  # db_mongo — MongoDB for local dev database provisioning.
+  # Used by the database-service to provision MongoDB databases.
+  # ---------------------------------------------------------------------------
+  db_mongo:
+    image: mongo:7
+    container_name: asdlc-db-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_ROOT_USERNAME:-root}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_ROOT_PASSWORD:-rootpassword}"
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - asdlc
+
+  # ---------------------------------------------------------------------------
+  # asdlc-database-service — MCP server for database provisioning tasks.
+  # Exposes /mcp (JSON-RPC 2.0 MCP) and /api (REST callbacks).
+  # ---------------------------------------------------------------------------
+  asdlc-database-service:
+    build:
+      context: ../database-service
+    container_name: asdlc-database-service
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db_mysql:
+        condition: service_healthy
+      db_mongo:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: "8082"
+      LOG_LEVEL: "debug"
+      DATABASE_URL: "postgres://asdlc:asdlc@postgres:5432/asdlc?sslmode=disable"
+      DEPLOYMENT_TIER: "${DEPLOYMENT_TIER:-dev}"
+
+      # ── MySQL provisioning backend
+      MYSQL_HOST: "db_mysql"
+      MYSQL_PORT: "3306"
+      MYSQL_ROOT_USER: "root"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-rootpassword}"
+
+      # ── MongoDB provisioning backend
+      MONGO_HOST: "db_mongo"
+      MONGO_PORT: "27017"
+      MONGO_ROOT_USER: "${MONGO_ROOT_USERNAME:-root}"
+      MONGO_ROOT_PASSWORD: "${MONGO_ROOT_PASSWORD:-rootpassword}"
+
+      # ── Inbound bearer verification (task JWTs from asdlc-api)
+      BFF_JWKS_URL: "http://asdlc-api:9090/auth/external/jwks.json"
+      TASK_JWT_ISSUER: "asdlc-bff"
+      TASK_JWT_AUDIENCE: "database-service"
+    networks:
+      - asdlc
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   pgdata:
+  mysqldata:
+  mongodata:
 
 networks:
   asdlc:

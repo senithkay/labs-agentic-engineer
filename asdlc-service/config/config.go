@@ -102,6 +102,10 @@ type Config struct {
 	// GitHub issue.
 	AgentPlatformURL string
 
+	// AgentDatabaseServiceURL is the URL the coding-agent runner pod uses to
+	// reach the database-service MCP endpoint.
+	AgentDatabaseServiceURL string
+
 	// JWKS settings for inbound JWT verification — Thunder publishes the
 	// User JWT and Service JWT signing key at JWKSURL; verifiers refresh
 	// on kid miss. Issuer and audience configure RFC 7519 claim checks.

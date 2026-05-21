@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/wso2/asdlc/git-service/models"
 	"github.com/wso2/asdlc/git-service/pkg/credentials"
@@ -61,7 +62,23 @@ func (s *issueService) CreateIssue(ctx context.Context, projectID string, req Cr
 		}
 	}
 
-	issue, err := s.github.CreateIssue(ctx, owner, repoName, cred, req)
+	// Retry GitHub issue creation with exponential back-off. GitHub's
+	// secondary-rate-limit on content creation (30 per minute, burst
+	// of ~10) occasionally rejects the first attempt during high-volume
+	// task generation. Three attempts with 2s → 4s back-off stay within
+	// the minute window while handling transient 422/403 responses.
+	var issue *IssueResult
+	for attempt := 1; attempt <= 3; attempt++ {
+		issue, err = s.github.CreateIssue(ctx, owner, repoName, cred, req)
+		if err == nil {
+			break
+		}
+		if attempt < 3 {
+			slog.WarnContext(ctx, "create github issue failed; retrying",
+				"project", projectID, "attempt", attempt, "error", err)
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -110,13 +127,36 @@ func (s *issueService) ensureBoard(ctx context.Context, gitRepo *models.GitRepos
 	return githubProjectID, nil
 }
 
+// addIssueToProject adds the issue to the GitHub Project board with up to 3
+// attempts and exponential backoff. GitHub's secondary rate limit throttles
+// rapid addProjectV2ItemById mutations (common when generating many tasks at
+// once), so retrying with a short pause recovers most failures without user
+// intervention.
 func (s *issueService) addIssueToProject(ctx context.Context, githubProjectID string, issue *IssueResult, token string) {
 	if issue.NodeID == "" || s.githubV2 == nil || githubProjectID == "" {
 		slog.WarnContext(ctx, "skipping board add: missing project id or issue node id", "issue", issue.URL)
 		return
 	}
-	if err := s.githubV2.AddIssueToProject(ctx, githubProjectID, issue.NodeID, token); err != nil {
-		slog.WarnContext(ctx, "failed to add issue to GitHub project board", "issue", issue.URL, "error", err)
+	const maxAttempts = 3
+	delay := time.Second
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err := s.githubV2.AddIssueToProject(ctx, githubProjectID, issue.NodeID, token)
+		if err == nil {
+			return
+		}
+		if attempt == maxAttempts {
+			slog.WarnContext(ctx, "failed to add issue to GitHub project board after retries",
+				"issue", issue.URL, "attempts", attempt, "error", err)
+			return
+		}
+		slog.WarnContext(ctx, "add issue to board failed, retrying",
+			"issue", issue.URL, "attempt", attempt, "delay", delay, "error", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		delay *= 2
 	}
 }
 

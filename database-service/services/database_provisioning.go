@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 )
 
 // DatabaseCredentials holds the connection details for a provisioned database.
@@ -107,10 +107,16 @@ func (s *databaseProvisioningService) ProvisionDatabase(ctx context.Context, pro
 
 // TestConnection verifies that the provided credentials can connect to the database.
 func (s *databaseProvisioningService) TestConnection(ctx context.Context, creds *DatabaseCredentials) error {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
-		creds.Username, creds.Password, creds.Host, creds.Port, creds.Database)
-
-	conn, err := sql.Open("mysql", dsn)
+	cfg := mysql.Config{
+		User:      creds.Username,
+		Passwd:    creds.Password,
+		Net:       "tcp",
+		Addr:      fmt.Sprintf("%s:%d", creds.Host, creds.Port),
+		DBName:    creds.Database,
+		ParseTime: true,
+		Loc:       time.Local,
+	}
+	conn, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
 		return fmt.Errorf("open connection: %w", err)
 	}
