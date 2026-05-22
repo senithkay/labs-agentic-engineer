@@ -426,7 +426,7 @@ func (c *githubClient) CreateIssue(ctx context.Context, owner, repo string, cred
 		return &IssueResult{Number: created.Number, URL: created.HTMLURL, NodeID: created.NodeID}, nil
 	}
 
-	return nil, fmt.Errorf("github issue create failed (status %d): %s", resp.StatusCode, string(respBody))
+	return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Body: string(respBody), URL: url}
 }
 
 func (c *githubClient) EnsureLabel(ctx context.Context, owner, repo string, cred credentials.Credential, name, color string) error {

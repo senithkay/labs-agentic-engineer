@@ -236,6 +236,10 @@ export interface ComponentTask {
   // Error tracking
   errorMessage?: string;
 
+  // Component type this task targets (e.g. 'service', 'web-app', 'database').
+  // Used by TaskPipelineStrip to render the correct pipeline variant.
+  componentType?: string;
+
   dispatchedAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -345,6 +349,9 @@ export interface Task {
   // Component name this task targets — used by the Pending Deps column to
   // map this task back to the dep graph.
   componentName?: string;
+  // Component type this task targets (e.g. 'service', 'web-app', 'database').
+  // Used by TaskPipelineStrip to render the correct pipeline variant.
+  componentType?: string;
   // F4 — list of component names this task is waiting to be deployed.
   // The Pending Deps column renders "Waiting for: …" from this. Empty
   // for unblocked tasks.

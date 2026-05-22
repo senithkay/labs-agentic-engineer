@@ -125,11 +125,13 @@ later comment resolves the same component, use the most recent.
    oldest-first.
 2. Scan all comments for two heading types:
    - `## Dependency endpoint resolved` — upstream HTTP service URL.
-   - `## Database credentials resolved` — upstream database is ready; call
-     `mcp__database-service__lookup_database` with the `org_id`, `project_id`,
-     and `component` values listed in the comment body to get host, port,
-     username, password, and dbName. Bake them into your component's config
-     as hardcoded defaults or build-time constants.
+   - `## Database credentials resolved` — upstream database is ready. Use the
+     `org_id`, `project_id`, and `component` values listed in the comment body
+     to call `mcp__database-service__lookup_database(org_id, project_id, component)`
+     at implementation time. Write the returned host, port, username, password,
+     and dbName into your component's env/config (e.g. `.env`, a config file, or
+     the framework's idiomatic build-time constant mechanism). Do **not** copy
+     the raw credential values as hardcoded literals in source code.
 3. For each upstream component name, keep the values from the **most recent
    matching comment** — if the upstream redeployed, an earlier comment
    may carry stale values. The freshest comment always wins.
@@ -996,6 +998,6 @@ database-service MCP endpoint. The MCP is available under the `database-service`
 ### Credentials at implementation time
 
 Services that depend on this database retrieve credentials by calling
-`mcp__database-service__lookup_database` with the component name. They MUST NOT hardcode
-credentials — the lookup returns host, port, username, password, and dbName at implementation
-time so the coding agent can bake them into the service's env/config.
+`mcp__database-service__lookup_database(org_id, project_id, component)`. They MUST NOT hardcode
+credentials — the lookup returns host, port, username, password, and dbName so the coding
+agent can bake them into the service's env/config.

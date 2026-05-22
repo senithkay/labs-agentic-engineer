@@ -146,7 +146,7 @@ export default function TaskDetailPage() {
 
         <Card variant="outlined">
           <CardContent>
-            <TaskPipelineStrip status={taskStatus} componentType={(task as any).componentType} />
+            <TaskPipelineStrip status={taskStatus} componentType={task.componentType} />
           </CardContent>
         </Card>
 

@@ -465,13 +465,19 @@ application code. Instead, write the issue body to instruct the agent to:
    - Arguments: \`{ db_type: <dbEngine>, name: <component-name>,
      org_id: $ASDLC_ORG_ID, project_id: $ASDLC_PROJECT_ID,
      component: <component-name> }\`
-3. Write \`databases/<component-name>.json\` to the repo with only
-   \`{ "component": "<name>", "db_type": "<dbEngine>" }\` — NO credentials.
+3. Write \`databases/<component-name>.json\` to the repo containing ONLY
+   \`{ "component": "<name>", "db_type": "<dbEngine>" }\`. This file MUST NOT
+   contain any secrets. Forbidden keys include (but are not limited to):
+   username, password, host, port, uri, token, cert, private_key, or any
+   other credential or connection detail. Violating this rule is a security
+   incident: if any secret is accidentally committed, remove it from git
+   history and rotate it before continuing.
 4. Commit and open a PR normally (same workflow as any other task).
 
-Services that depend on this database retrieve credentials at implementation
-time by calling \`lookup_database\` on the same database-service MCP with the
-same org/project/component key.
+ALL credential retrieval MUST go through the database-service MCP
+\`lookup_database\` call (same org/project/component key). Services MUST NOT
+read, hard-code, or store database credentials anywhere in the repository —
+not in source files, config files, environment templates, or comments.
 
 Use the same five ## headings (Overview / Scope / Acceptance criteria /
 References / Task dependencies) for database task bodies.`;

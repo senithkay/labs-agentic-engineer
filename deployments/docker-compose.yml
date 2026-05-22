@@ -332,7 +332,7 @@ services:
     volumes:
       - mysqldata:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p\"${MYSQL_ROOT_PASSWORD}\""]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -96,15 +96,43 @@ function EyeIcon({ open }: { open: boolean }) {
 function CredentialRow({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(value).then(() => {
+  const handleCopy = async () => {
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(value);
+        ok = true;
+      } else {
+        // Fallback for non-secure contexts or browsers without Clipboard API.
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    } catch {
+      ok = false;
+    }
+    if (ok) {
       setCopied(true);
+      setCopyError(false);
       setTimeout(() => setCopied(false), 1500);
-    });
+    } else {
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 2000);
+    }
   };
 
   const display = secret && !visible ? '••••••••••••••' : value;
+
+  const copyTooltip = copied ? 'Copied!' : copyError ? 'Copy failed' : 'Copy';
+  const copyColor = copied ? 'success.main' : copyError ? 'error.main' : 'text.secondary';
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, py: 0.5 }}>
@@ -135,8 +163,8 @@ function CredentialRow({ label, value, secret }: { label: string; value: string;
           </IconButton>
         </Tooltip>
       )}
-      <Tooltip title={copied ? 'Copied!' : 'Copy'}>
-        <IconButton size="small" onClick={handleCopy} sx={{ p: 0.25, color: 'text.secondary' }}>
+      <Tooltip title={copyTooltip}>
+        <IconButton size="small" onClick={handleCopy} sx={{ p: 0.25, color: copyColor }}>
           <CopyIcon />
         </IconButton>
       </Tooltip>

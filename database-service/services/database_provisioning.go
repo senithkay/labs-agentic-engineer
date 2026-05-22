@@ -25,6 +25,9 @@ type DatabaseCredentials struct {
 type DatabaseProvisioningService interface {
 	ProvisionDatabase(ctx context.Context, projectName string) (*DatabaseCredentials, error)
 	TestConnection(ctx context.Context, creds *DatabaseCredentials) error
+	// PingRoot opens a connection to the root MySQL DSN and pings it.
+	// Used for health checks — does not create any databases or users.
+	PingRoot(ctx context.Context) error
 }
 
 type databaseProvisioningService struct {
@@ -103,6 +106,20 @@ func (s *databaseProvisioningService) ProvisionDatabase(ctx context.Context, pro
 		Username: username,
 		Password: password,
 	}, nil
+}
+
+// PingRoot opens a connection to the root MySQL DSN and pings it without
+// creating any databases or users. Used by HealthCheck.
+func (s *databaseProvisioningService) PingRoot(ctx context.Context) error {
+	conn, err := sql.Open("mysql", s.mysqlRootURL)
+	if err != nil {
+		return fmt.Errorf("open root connection: %w", err)
+	}
+	defer conn.Close()
+	if err := conn.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping root connection: %w", err)
+	}
+	return nil
 }
 
 // TestConnection verifies that the provided credentials can connect to the database.

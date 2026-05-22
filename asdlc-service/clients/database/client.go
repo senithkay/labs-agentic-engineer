@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -116,8 +117,15 @@ func (c *client) UpdateDatabaseStatus(ctx context.Context, referenceID, status s
 }
 
 func (c *client) ListByProject(ctx context.Context, orgID, projectID string) ([]*DatabaseInfo, error) {
-	url := fmt.Sprintf("%s/api/v1/databases?org_id=%s&project_id=%s", c.baseURL, orgID, projectID)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	base, err := url.Parse(c.baseURL + "/api/v1/databases")
+	if err != nil {
+		return nil, fmt.Errorf("parse base url: %w", err)
+	}
+	q := url.Values{}
+	q.Set("org_id", orgID)
+	q.Set("project_id", projectID)
+	base.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, "GET", base.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

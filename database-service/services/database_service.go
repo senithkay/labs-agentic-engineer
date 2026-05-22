@@ -64,16 +64,10 @@ func NewDatabaseService(registry DatabaseRegistryService, provisioner DatabasePr
 
 func (s *databaseService) HealthCheck(ctx context.Context) HealthStatus {
 	status := HealthStatus{}
-	// Probe MySQL by attempting a trivial provision (connection test only).
-	// We use a well-known no-op: try opening a connection, then close it.
-	creds, err := s.provisioner.ProvisionDatabase(ctx, "_health_check_probe_")
-	if err == nil {
-		// Immediately clean up the probe DB if it got created.
-		_ = creds
-		status.MySQL = EngineHealth{OK: true}
-	} else {
-		// A connection-level error means MySQL is unreachable.
+	if err := s.provisioner.PingRoot(ctx); err != nil {
 		status.MySQL = EngineHealth{OK: false, Message: err.Error()}
+	} else {
+		status.MySQL = EngineHealth{OK: true}
 	}
 	// MongoDB not configured in this deployment — report as not applicable.
 	status.MongoDB = EngineHealth{OK: false, Message: "not configured"}
