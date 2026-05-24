@@ -2,6 +2,20 @@
 
 Status: proposal · Author: anjana · Date: 2026-05-23
 
+## Implementation status (as of 2026-05-24)
+
+What has actually landed on `cleanup-auth` is **all of PR 1 + the runner-side half of PR 3**. The four built-ins flow end-to-end with all four auto-attached (architect inlines → tech-lead inlines → snapshot → runner pulls → SDK preloads), but the **tenant-facing surface (PR 2) and the architect's agency over skills (PR 3 front-half) are not built**. Concretely:
+
+| PR | Scope | Status | Notes |
+|---|---|---|---|
+| **0a** | Architect golden fixtures (`tests/fixtures/architect/`, `architect-golden.spec.ts`, `normalize.ts`, `architect-shadow.ts`, `ARCHITECT_GOLDEN_TEMPERATURE`) | ❌ not started | No automated proof the extraction preserved architect output. |
+| **0b** | SDK plugin-discovery spike (`remote-worker/src/lib/runner.test.ts`) | ❌ not started | Two-plugin name-collision behaviour assumed (later-wins) but unproven by test. |
+| **1** | Built-in files + `skills`/`skill_audit_events`/`design_version_skill_snapshots` tables + bootstrap + architect/tech-lead inlining + snapshot UPSERT + slimmed base `asdlc` SKILL.md | ✅ done | Missing only `skill_service_test.go` + `skill_bootstrap_test.go`. `exposesAPI.userContext` deleted from the architect schema (legacy read-strip retained in `artifact_store.go`/`models/design.go` per design). `seedDefaultSkillsApplied` present (correct PR-1 interim). |
+| **2** | Custom + imported REST API + console UI | ❌ not started | `skill_mutation_service.go`, `skill_import_service.go`, `skill_routes.go`, the `/api/v1/orgs/:orgId/skills(+/import)` endpoints, and **all** console pages (`Skills.tsx`, `SkillEditor.tsx`, `SkillViewer.tsx`, `SkillImportDialog.tsx`, `api/skills.ts`) are absent. Orgs cannot author, import, or even view skills. |
+| **3** | Architect tools + runner pull + materialisation + issue-body bullets | ⏳ partial | **Done:** `GET /api/v1/tasks/:taskId/skills` + `task_skills_service.go`, `skills_pull.ts`, `skills_materializer.ts`, `oneshot.ts` pull-at-init, `runner.ts` preload array. **Missing:** `read_skill`/`attach_skill`/`detach_skill` in `architect/tools.ts`, `doc.ts` attach/detach mutators, issue-body defence-in-depth skill bullets in `issue_body.go`, and the one-shot backfill migration for legacy designs. |
+
+**Hybrid-state coherence note.** The architect *prompt* already carries PR-3 language — it instructs the architect to call `read_skill(name)` / `attach_skill(name)` — but **those tools are not registered in `tools.ts`**. This is currently harmless *only* because `orgSkills` is always empty (no PR 2), so the `if (orgSkills.length > 0)` block that renders that instruction never fires. The moment PR 2 ships custom/imported skills, the architect would be told to call tools that don't exist. Attachment is therefore still automatic (`seedDefaultSkillsApplied` stamps all four built-ins), not LLM-driven — exactly PR 1's documented interim behaviour, but it means the "architect attaches the skills it judges relevant" goal is not yet live. **Implication for sequencing:** shipping PR 2 (REST + console) without PR 3's architect tools gives orgs a way to *author* skills that the architect still can't *attach* — useful for the editing/viewing surface, but the attach loop stays closed until PR 3's front-half lands.
+
 ## Problem
 
 Today the platform's domain knowledge — *how to use the API Management gateway*, *how a React SPA reads `window._env_`*, *how a Go service avoids the CGO SQLite trap*, *what Thunder OIDC keys land in a SPA's runtime config* — is hand-stitched into three places:
