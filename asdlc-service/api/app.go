@@ -30,6 +30,7 @@ type AppParams struct {
 	WebhookController      controllers.WebhookController
 	OrgGitHubController    controllers.OrgGitHubController
 	OrgAnthropicController controllers.OrgAnthropicController
+	SkillController        controllers.SkillController
 	OrganizationController controllers.OrganizationController
 	IDPController          controllers.IDPController
 	JWKSController         controllers.JWKSController
@@ -99,6 +100,9 @@ func NewHandler(params AppParams) http.Handler {
 	}
 	if params.OrgAnthropicController != nil {
 		registerOrgAnthropicRoutes(apiMux, params.OrgAnthropicController)
+	}
+	if params.SkillController != nil {
+		registerSkillRoutes(apiMux, params.SkillController)
 	}
 	if params.IDPController != nil {
 		registerIDPRoutes(apiMux, params.IDPController)

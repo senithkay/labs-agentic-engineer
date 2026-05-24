@@ -127,6 +127,8 @@ func main() {
 		slog.Warn("skill bootstrap failed — continuing", "error", err)
 	}
 	skillSvc := services.NewSkillService(db)
+	skillMutationSvc := services.NewSkillMutationService(db, skillSvc)
+	skillImportSvc := services.NewSkillImportService(db, skillSvc)
 
 	// Repositories — only task and config remain
 	taskRepo := repositories.NewTaskRepository(db)
@@ -515,6 +517,7 @@ func main() {
 		ConfigRepo:             configRepo,
 		OrgGitHubController:    orgGitHubCtrl,
 		OrgAnthropicController: orgAnthropicCtrl,
+		SkillController:        controllers.NewSkillController(skillSvc, skillMutationSvc, skillImportSvc),
 		IDPController:          controllers.NewIDPController(idpService),
 		JWKSController:         controllers.NewJWKSController(taskTokens),
 		ThunderJWKS:            thunderJWKS,

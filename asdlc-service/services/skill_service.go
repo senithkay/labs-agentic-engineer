@@ -242,32 +242,46 @@ func versionFromMetadata(s skillFrontmatter) int {
 	if s.Metadata == nil {
 		return 1
 	}
-	asdlcAny, ok := s.Metadata["asdlc"]
-	if !ok {
-		return 1
+	// Flat dotted-key form — the documented AgentSkills string→string
+	// representation: `metadata: { "asdlc.version": "2" }`. YAML does not
+	// treat the dot as nesting, so this is a single literal key. This is
+	// the form every bundled built-in uses.
+	if v, ok := s.Metadata["asdlc.version"]; ok {
+		return coerceVersion(v)
 	}
-	asdlcMap, ok := asdlcAny.(map[string]interface{})
-	if !ok {
-		return 1
+	// Nested form — `metadata: { asdlc: { version: "2" } }`.
+	if asdlcAny, ok := s.Metadata["asdlc"]; ok {
+		if asdlcMap, ok := asdlcAny.(map[string]interface{}); ok {
+			if verAny, ok := asdlcMap["version"]; ok {
+				return coerceVersion(verAny)
+			}
+		}
 	}
-	verAny, ok := asdlcMap["version"]
-	if !ok {
-		return 1
-	}
-	switch v := verAny.(type) {
+	return 1
+}
+
+// coerceVersion maps an int/float/string YAML scalar to a positive version
+// integer, defaulting to 1.
+func coerceVersion(v any) int {
+	switch t := v.(type) {
 	case int:
-		return v
+		if t > 0 {
+			return t
+		}
 	case int64:
-		return int(v)
+		if t > 0 {
+			return int(t)
+		}
 	case float64:
-		return int(v)
+		if t > 0 {
+			return int(t)
+		}
 	case string:
 		var n int
-		_, _ = fmt.Sscanf(v, "%d", &n)
-		if n <= 0 {
-			n = 1
+		_, _ = fmt.Sscanf(t, "%d", &n)
+		if n > 0 {
+			return n
 		}
-		return n
 	}
 	return 1
 }
