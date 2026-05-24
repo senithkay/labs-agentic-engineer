@@ -34,20 +34,11 @@ Call finalize() to end the session. If finalize returns validation issues, addre
     - "service" → "deployment/service"
     - "web-app" → "deployment/web-application"
   - buildpack is always "docker".
-  - Backend services prefer Go + net/http on port 9090.
-  - Every service exposes GET /health.
-  - All deployable components declare \`visibility: external\` on their workload.yaml endpoints. The platform's gateway attaches an Envoy CORS filter automatically to every external HTTPRoute via the ClusterComponentType, so **backend service code must NOT include CORS middleware** (no \`corsMiddleware\` function, no \`cors.New(...)\`, no manual \`Access-Control-Allow-*\` headers). Doubled CORS headers break browsers. Call this out in service-component \`componentAgentInstructions\`.
-  - For every backend in a web-app's \`dependsOn\`, the web-app's \`componentAgentInstructions\` must contain EXACTLY this line (substitute the literal upstream name + UPPER_SNAKE form):
-    \`Upstream <name>: read the URL from \\\`window._env_.<NAME_UPPER_SNAKE>_URL\\\` via \\\`src/env.ts\\\`. Throw (no \\\`?? ""\\\` fallback) on missing.\`
-    Do NOT write anything about \`VITE_*\`, \`REACT_APP_*\`, \`NEXT_PUBLIC_*\`, \`.env\` files, build-time substitution, or "Dependency endpoint resolved" comments. Those mechanisms are deprecated — runtime config is the ONLY supported path.
+  - Stack-specific code, port, layout, Dockerfile, runtime-config, CORS, auth, persistence patterns live in the Platform skills below — apply them.
   - dependsOn names must reference other components verbatim.
   - Prefer fewer components over many.
-  - **Authentication is delegated to the platform IDP — DO NOT introduce a separate auth / identity / login / session component, and DO NOT implement \`/auth/login\` or \`/auth/register\` in any service.** When the spec implies users sign in:
-      * Set \`exposesAPI: { auth: end-user-required, userContext: X-User-Id }\` on the API service that owns user-scoped data (see "API security classification" below).
-      * Set \`callerIdentity: { mode: end-user }\` on the web-app that signs the user in. The platform's BFF supplies OIDC config + sibling API URLs to the SPA at runtime via \`window._env_\` (BFF writes \`env-config.js\` into the web-app's ReleaseBinding at \`/usr/share/nginx/html/\`; the agent's \`index.html\` loads it synchronously before the bundle). The agent never sees client IDs, redirect URIs, or upstream URLs.
-      * The protected service's \`componentAgentInstructions\` MUST say: "No \`/auth/*\` endpoints. The API Platform gateway validates the JWT and the \`api-configuration\` trait's \`jwt-auth\` policy injects \`X-User-Id\` (from JWT \`sub\` claim) on every request. Read \`X-User-Id\` to identify the caller; reject (401) when missing. Per-user records (e.g. todos) MUST be keyed on \`X-User-Id\`. Do NOT validate JWTs yourself; do NOT add CORS middleware (the gateway handles CORS)."
-      * The web-app's \`componentAgentInstructions\` MUST say: "OIDC Authorization Code + PKCE against the platform IDP using \`oidc-client-ts\`. Read OIDC + upstream URLs from \`window._env_.THUNDER_*\` / \`window._env_.<UPSTREAM>_URL\` — typed via \`src/env.ts\`. Attach \`Authorization: Bearer <access_token>\` to every API call. DO NOT write a \`.env\` file. DO NOT read environment variables at build time (no \`import.meta.env\`). DO NOT use envsubst, \`/etc/nginx/templates/\`, or any custom nginx entrypoint — stock \`nginx:alpine\` serves the static bundle + \`env-config.js\`. See the \`asdlc\` SKILL's 'Runtime config via window._env_' section for the reference \`index.html\`, \`src/env.ts\`, \`src/auth.ts\`, and \`src/api.ts\`." NEVER write a \`/login\` form that POSTs credentials to the API.
-  - **Do NOT introduce a separate storage / database / persistence component.** Persistence belongs inside the component that owns the data, using an embedded SQLite database stored on the component's local filesystem. Call this out in that component's componentAgentInstructions (which file/table, what it stores). Do not add a "db" or "storage-service" component.
+  - **Authentication is delegated to the platform IDP — DO NOT introduce a separate auth / identity / login / session component, and DO NOT implement \`/auth/login\` or \`/auth/register\` in any service.** See the \`thunder-authentication\` and \`api-management\` skills below for how sign-in and protected-API design plays out.
+  - **Do NOT introduce a separate storage / database / persistence component.** Persistence belongs inside the component that owns the data. Stack-specific guidance lives in the relevant Platform skill (e.g. the \`go\` skill says use embedded SQLite for per-user data).
   - **No scheduled-task / cronjob components.** If the spec calls for periodic / cron / batch work, fold it into the owning service (e.g. a background goroutine kicked off at startup, or an HTTP endpoint that a future scheduler can poke). Call this out in that service's componentAgentInstructions.
 
 # Dependent APIs (external upstreams — NOT siblings)
@@ -60,10 +51,7 @@ Each dependent API has:
   - \`description\` (one line — what it returns / does)
   - \`authentication\` (\`"none"\`, \`"bearer"\`, or \`"api-key"\` — default to \`"none"\` when not stated)
 
-When you declare a dependent API on a component:
-  - Add a line to that component's \`componentAgentInstructions\` of the form:
-    \`Upstream external API \`<name>\`: env var \`<NAME_UPPER_SNAKE>_URL\` (auth: <authentication>). <description>. Read via os.Getenv / process.env, call with standard HTTP client.\`
-  - The platform supplies the URL via the component's ReleaseBinding env block — the coding agent never sees the URL literal, just the variable name.
+The exact instruction lines a component must carry when it consumes an external dependent API are spelled out in the \`api-management\` Platform skill below — follow them verbatim.
 
 ## Cross-project external APIs (declare by name only)
 
@@ -88,7 +76,7 @@ Known catalog entries (use the exact \`name\`):
 
 # API security classification (\`exposesAPI\`)
 
-Set \`exposesAPI: { auth: end-user-required, userContext: X-User-Id }\` on a "service" component when the spec **or** the embedded auth surface implies caller authentication is needed. Otherwise omit the \`exposesAPI\` block entirely (which the platform reads as public).
+Set \`exposesAPI: { auth: end-user-required }\` on a "service" component when the spec **or** the embedded auth surface implies caller authentication is needed. Otherwise omit the \`exposesAPI\` block entirely (which the platform reads as public).
 
 **Default \`end-user-required\` when the description contains any of:**
   - explicit auth verbs: "login", "sign in", "sign-in", "authenticate", "authentication", "session"
@@ -107,13 +95,12 @@ When the rubric flips a service to \`exposesAPI.auth: end-user-required\` AND a 
 
 **Edge cases:**
   - When uncertain, default to **omit** (public). The user can flip it from the console; failing closed (making everything protected) breaks the dev-loop for hello-worlds.
-  - A backend that exposes BOTH public health/status AND protected user endpoints is still \`exposesAPI.auth: end-user-required\` — the toggle is per-component, not per-route. The "no per-endpoint granularity" rule is enforced by the platform's v1 trait. Document this in componentAgentInstructions so the coding agent knows which endpoints are exposed-but-authn-checked.
+  - A backend that exposes BOTH public health/status AND protected user endpoints is still \`exposesAPI.auth: end-user-required\` — the toggle is per-component, not per-route.
 
 **Shape:**
 \`\`\`yaml
 exposesAPI:
   auth: end-user-required
-  userContext: X-User-Id
 \`\`\`
 Omit \`exposesAPI\` entirely for public services. Set \`auth: end-user-required\` when the spec implies callers are signed-in users; the platform's gateway validates the JWT and injects \`X-User-Id\` before forwarding upstream.
 
@@ -151,8 +138,9 @@ Failing this check produces a broken deployment, not a "minor omission". Treat i
   - To wholesale-rewrite a component, call remove_component + add_component + set_openapi. The destructive intent is then visible.`;
 
 // User prompt — emits the skeleton view (no YAML bodies, just hasOpenApi flags)
-// per design doc §8. Saves ~30K tokens vs the previous full-design-with-YAMLs
-// format on a typical 5-component design.
+// per design doc §8. Also inlines built-in skill bodies under "Platform skills
+// — MUST consult" and lists org skills as a manifest. See
+// docs/design/skills-system.md > "Per-agent integration > Architect".
 export function buildUserPrompt(input: ArchitectInput, doc: DesignDoc): string {
   let prompt = `Project: ${input.projectName}
 
@@ -173,6 +161,47 @@ ${input.spec}
       })),
     };
     prompt += "```json\n" + JSON.stringify(skeleton, null, 2) + "\n```\n";
+  }
+
+  // ── Platform skills — full bodies, MUST consult ─────────────────────────
+  const builtins = input.builtinSkills ?? [];
+  if (builtins.length > 0) {
+    prompt += `
+## Platform skills — MUST consult before designing
+
+The following encode ASDLC platform best practices, contracts, and pitfalls. Apply them to every component where their concern is relevant. Their full content is below — you do not need to load them.
+
+`;
+    for (const sk of builtins) {
+      prompt += `### ${sk.name}\n\n${sk.body.trim()}\n\n---\n\n`;
+    }
+  }
+
+  // ── Org skills — manifest only, body via read_skill (PR 3) ──────────────
+  const orgSkills = input.orgSkills ?? [];
+  if (orgSkills.length > 0) {
+    prompt += `
+## Org skills — load if relevant
+
+The following are authored by your organization or imported from the AgentSkills ecosystem. Call \`read_skill(name)\` when a description suggests relevance, then \`attach_skill(name)\` to mark the skill active on this project.
+
+`;
+    for (const sk of orgSkills) {
+      prompt += `- \`${sk.name}\` — ${sk.description}\n`;
+    }
+    prompt += "\n";
+  }
+
+  // ── Currently-attached skills (for context) ─────────────────────────────
+  const attached = input.skillsApplied ?? [];
+  if (attached.length > 0) {
+    prompt += `## Currently attached skills (on this project)
+
+The following skills are attached to this project's design. These propagate to the tech-lead and the coding agent on every dispatch.
+
+${attached.map((n) => `- ${n}`).join("\n")}
+
+`;
   }
 
   const wfNames = input.availableWireframes ?? Object.keys(input.wireframes ?? {});

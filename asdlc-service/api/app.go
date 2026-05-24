@@ -119,6 +119,11 @@ func NewHandler(params AppParams) http.Handler {
 	// handler with the per-task RS256 bearer the runner already holds.
 	if params.TaskController != nil {
 		mux.HandleFunc("POST /api/v1/tasks/{taskId}/verification-failed", params.TaskController.VerificationFailed)
+		// Per-task skills pull endpoint — runner pod fetches its
+		// snapshotted SKILL.md bodies at init time. Outside the Thunder
+		// JWT path, authenticated inside the handler with the per-task
+		// RS256 bearer the runner already holds.
+		mux.HandleFunc("GET /api/v1/tasks/{taskId}/skills", params.TaskController.Skills)
 	}
 
 	// App-mode connect callback — outside JWT. The signed connect-state JWT

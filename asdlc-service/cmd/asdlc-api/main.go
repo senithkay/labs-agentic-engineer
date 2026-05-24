@@ -111,6 +111,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Phase 7 — Skills system tables (skills, skill_audit_events,
+	// design_version_skill_snapshots). See docs/design/skills-system.md.
+	if err := migrations.RunPhase7Skills(db); err != nil {
+		slog.Error("phase7_skills migration failed", "error", err)
+		os.Exit(1)
+	}
+
+	// Skill bootstrap — UPSERT the four bundled built-in skills into
+	// the `skills` table, prune any built-ins removed between releases.
+	// Best-effort: log + warn on failure rather than refusing to start
+	// (BFF stays functional with an empty skills table).
+	skillBootstrap := services.NewSkillBootstrap(db)
+	if err := skillBootstrap.Run(context.Background()); err != nil {
+		slog.Warn("skill bootstrap failed — continuing", "error", err)
+	}
+	skillSvc := services.NewSkillService(db)
+
 	// Repositories — only task and config remain
 	taskRepo := repositories.NewTaskRepository(db)
 	configRepo := repositories.NewConfigRepository(db)
@@ -237,6 +254,20 @@ func main() {
 	if hook, ok := designService.(services.DesignServiceWithTaskHook); ok {
 		hook.SetTaskService(taskService)
 	}
+	// Wire the skills catalogue into design + task services so the
+	// architect input ships builtin/org skills, and the tech-lead detail
+	// phase ships full bodies of every attached skill.
+	if setter, ok := designService.(services.DesignServiceWithSkills); ok {
+		setter.SetSkillService(skillSvc)
+	}
+	if setter, ok := taskService.(interface {
+		SetSkillService(*services.SkillService)
+	}); ok {
+		setter.SetSkillService(skillSvc)
+	}
+	// TaskSkillsService backs GET /api/v1/tasks/:taskId/skills which
+	// the runner pod calls at init to fetch its frozen SKILL.md bodies.
+	taskSkillsSvc := services.NewTaskSkillsService(db, taskRepo)
 
 	// Phase 2 (api-platform-integration) — trait_sync is the single shared
 	// emitter that reconciles the `api-configuration` ClusterTrait on a
@@ -461,13 +492,21 @@ func main() {
 		RequirementsController:     controllers.NewRequirementsController(requirementsService),
 		RequirementsChatController: controllers.NewRequirementsChatController(requirementsChatService),
 		DesignController:       controllers.NewDesignController(designService),
-		TaskController: controllers.NewTaskController(
-			taskService,
-			dispatchSvc,
-			services.NewProgressService(taskService, componentClient, observerClient),
-			componentClient,
-			taskTokens,
-		),
+		TaskController: func() controllers.TaskController {
+			tc := controllers.NewTaskController(
+				taskService,
+				dispatchSvc,
+				services.NewProgressService(taskService, componentClient, observerClient),
+				componentClient,
+				taskTokens,
+			)
+			if setter, ok := tc.(interface {
+				SetSkillsService(*services.TaskSkillsService)
+			}); ok {
+				setter.SetSkillsService(taskSkillsSvc)
+			}
+			return tc
+		}(),
 		BoardController:        controllers.NewBoardController(boardService),
 		ConfigController:       controllers.NewConfigController(configService),
 		CollabController:       controllers.NewCollabController(projectService),

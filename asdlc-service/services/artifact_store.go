@@ -113,9 +113,10 @@ func (s *ArtifactStore) DeleteRequirementFile(ctx context.Context, orgID, projec
 //	                                       # (componentAgentInstructions)
 //	components/<name>/openapi.yaml         # OpenAPI 3.0.3 (service components only)
 type DesignFile struct {
-	Overview   string                   `json:"overview"`
-	Components []models.DesignComponent `json:"components"`
-	SourceSpec string                   `json:"sourceSpec,omitempty"`
+	Overview       string                   `json:"overview"`
+	Components     []models.DesignComponent `json:"components"`
+	SourceSpec     string                   `json:"sourceSpec,omitempty"`
+	SkillsApplied  []string                 `json:"skillsApplied,omitempty"`
 }
 
 // DesignRootFile is the canonical root design document. It cannot be deleted
@@ -273,7 +274,8 @@ func designFilesEqual(a, b map[string]string) bool {
 
 // rootFrontmatter is the YAML frontmatter we accept on the root `design.md`.
 type rootFrontmatter struct {
-	SourceSpec string `yaml:"sourceSpec,omitempty"`
+	SourceSpec    string   `yaml:"sourceSpec,omitempty"`
+	SkillsApplied []string `yaml:"skillsApplied,omitempty"`
 }
 
 // componentFrontmatter is the YAML frontmatter we accept on each
@@ -378,8 +380,9 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 		}
 	}
 	out := &DesignFile{
-		Overview:   strings.TrimSpace(body),
-		SourceSpec: rfm.SourceSpec,
+		Overview:      strings.TrimSpace(body),
+		SourceSpec:    rfm.SourceSpec,
+		SkillsApplied: append([]string(nil), rfm.SkillsApplied...),
 	}
 
 	// Iterate component dirs in deterministic order.
@@ -499,11 +502,25 @@ func SplitDesign(d *DesignFile) (map[string]string, error) {
 	}
 	out := make(map[string]string, 1+2*len(d.Components))
 
-	// Root design.md — body only. SourceSpec is encoded in the design tag
-	// name (`v<N>-<M>`) and recovered at read time from `gitClient.ListDesignVersions`,
-	// so we don't write it to the file. This keeps the markdown editor's
-	// view clean (no visible YAML frontmatter as a stray heading).
-	out[DesignRootFile] = strings.TrimSpace(d.Overview) + "\n"
+	// Root design.md — body + optional frontmatter. SourceSpec is encoded
+	// in the design tag name (`v<N>-<M>`); we only write it to the file
+	// frontmatter when there is some other field that requires the block
+	// (currently: skillsApplied per docs/design/skills-system.md). The
+	// console's markdown preview strips frontmatter via splitFrontmatter,
+	// so the visible Overview prose is unchanged.
+	if len(d.SkillsApplied) > 0 {
+		// Sorted copy for stable diffs.
+		sortedSkills := append([]string(nil), d.SkillsApplied...)
+		sort.Strings(sortedSkills)
+		rfm := rootFrontmatter{SkillsApplied: sortedSkills}
+		rfmBytes, err := marshalFrontmatter(rfm)
+		if err != nil {
+			return nil, fmt.Errorf("encode root frontmatter: %w", err)
+		}
+		out[DesignRootFile] = joinFrontmatter(string(rfmBytes), strings.TrimSpace(d.Overview)+"\n")
+	} else {
+		out[DesignRootFile] = strings.TrimSpace(d.Overview) + "\n"
+	}
 
 	for _, comp := range d.Components {
 		if comp.Name == "" {

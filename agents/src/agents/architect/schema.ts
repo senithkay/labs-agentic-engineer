@@ -82,12 +82,6 @@ export const SlimComponent = z.object({
         .describe(
           "Caller authentication policy. 'end-user-required' = the gateway validates an end-user JWT and injects X-User-Id. 'service-required' = the gateway validates a service-to-service JWT (no end-user). 'none' = public.",
         ),
-      userContext: z
-        .string()
-        .optional()
-        .describe(
-          "Header name the gateway injects upstream when 'auth' is end-user-required. Default 'X-User-Id'.",
-        ),
     })
     .optional()
     .describe(
@@ -138,12 +132,57 @@ export const ArchitectOutput = z.object({
 
 export type ArchitectOutput = z.infer<typeof ArchitectOutput>;
 
+// SkillDescription is the lightweight per-skill catalog row shipped on
+// the architect input — name + description only (no body). The architect
+// uses these to decide whether to read the full body (org skills) or
+// already has the body inlined (built-ins, via SkillRecord).
+export const SkillDescription = z.object({
+  name: z.string(),
+  description: z.string(),
+});
+export type SkillDescription = z.infer<typeof SkillDescription>;
+
+// SkillRecord is name + description + full SKILL.md body. Used by the
+// architect input for built-ins (inlined under "Platform skills — MUST
+// consult") and by the tech-lead detail input for every attached skill.
+export const SkillRecord = SkillDescription.extend({
+  body: z.string(),
+});
+export type SkillRecord = z.infer<typeof SkillRecord>;
+
 export const ArchitectInput = z.object({
   projectName: z.string(),
   spec: z.string().describe("Specification document to design against"),
   previousDesign: ArchitectOutput.optional().describe(
     "Existing design to evolve — preserve component names and structure where possible",
   ),
+  // Platform skills — full bodies inlined into the prompt under "MUST
+  // consult" framing. The architect sees these regardless of project
+  // state because they encode best practices the platform requires.
+  builtinSkills: z
+    .array(SkillRecord)
+    .optional()
+    .describe(
+      "Built-in platform skills — bodies are inlined into the prompt under 'Platform skills — MUST consult'.",
+    ),
+  // Org skills — manifest-only (name + description). The architect
+  // loads bodies on demand via read_skill (PR 3) if any apply.
+  orgSkills: z
+    .array(SkillDescription)
+    .optional()
+    .describe(
+      "Org-authored skills (custom + imported) — manifest only; bodies load via read_skill on demand.",
+    ),
+  // Currently-attached skill names on the project's design.md root
+  // frontmatter. Optional; surfaced so the architect can decide to
+  // attach / detach via tools (PR 3). PR 1 sets this from
+  // seedDefaultSkillsApplied on every finalize.
+  skillsApplied: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Skill names currently attached to the project. The architect may keep or change this set in the design.",
+    ),
   // Wireframes / domain-models live alongside the spec under
   // `specs/requirements/`. The BFF passes the raw DSL keyed by canvas
   // name (without extension); the architect calls `read_wireframe(name)`
