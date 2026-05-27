@@ -533,7 +533,7 @@ func main() {
 	requirementsChatService := services.NewRequirementsChatService(artifactStore, agentsClient, artifactSvcGit, requirementsDirLocker)
 	designService := services.NewDesignService(artifactStore, agentsClient, artifactSvcGit)
 
-	taskService := services.NewTaskService(db, taskRepo, artifactStore, componentService, tokenProvider, configService, gitClient, agentsClient, dbClient)
+	taskService := services.NewTaskService(db, taskRepo, artifactStore, componentService, tokenProvider, configService, issueService, artifactSvcGit, repoService, agentsClient, dbClient)
 	boardService := services.NewBoardService(repoBoardService, taskRepo)
 
 	if hook, ok := designService.(services.DesignServiceWithTaskHook); ok {
