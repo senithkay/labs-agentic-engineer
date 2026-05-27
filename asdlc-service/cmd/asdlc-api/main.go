@@ -512,16 +512,11 @@ func main() {
 	// the OC Component's workflow params.
 	projectService := services.NewProjectService(projectClient, gitClient, artifactStore, taskRepo)
 	organizationService := services.NewOrganizationService(db, namespaceClient)
-	// componentService.WithGitClient wires git-service in so TriggerBuild
-	// can pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
+	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
+	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
 	// before the WorkflowRun is created (see
 	// docs/design/build-credential-injection.md).
-	componentService := services.NewComponentService(componentClient, observClient, artifactStore)
-	if cs, ok := componentService.(interface {
-		WithGitClient(gitservice.Client) services.ComponentService
-	}); ok && gitClient != nil {
-		componentService = cs.WithGitClient(gitClient)
-	}
+	componentService := services.NewComponentService(componentClient, observClient, artifactStore, repoService, buildCredService)
 	configService := services.NewConfigService(configRepo, componentService)
 	requirementsDirLocker := services.NewRequirementsDirLocker(db)
 	requirementsService := services.NewRequirementsService(artifactStore, agentsClient, artifactSvcGit)
