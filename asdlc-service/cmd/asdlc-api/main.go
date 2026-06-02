@@ -266,15 +266,31 @@ func main() {
 		slog.Info("Service auth configured", "tokenURL", cfg.ServiceAuth.TokenURL, "clientID", cfg.ServiceAuth.ClientID)
 	}
 
+	// orgUUIDResolver maps an OC namespace (the org handle the BFF puts in the
+	// request URL) to the org's UUID, for the X-Impersonate-Org header on M2M
+	// OC calls. Reads the local organizations side-car; prefers the
+	// Thunder-issued ouId.
+	orgUUIDResolver := func(ctx context.Context, namespace string) (string, error) {
+		var org models.Organization
+		if err := db.WithContext(ctx).Where("name = ?", namespace).First(&org).Error; err != nil {
+			return "", fmt.Errorf("resolve impersonation org for namespace %q: %w", namespace, err)
+		}
+		if org.ThunderOrgUUID != nil {
+			return org.ThunderOrgUUID.String(), nil
+		}
+		return org.UUID.String(), nil
+	}
+
 	// OpenChoreo clients. Each one resolves the OC namespace as the OC
 	// org handle directly (== ouHandle); there is no override map. Migrated
 	// clients (namespace, project) take an openchoreo.Config; the still-hand-
 	// rolled clients (component, secretref) keep the legacy positional args
 	// until they migrate too.
 	ocConfig := openchoreo.Config{
-		BaseURL:      cfg.PlatformAPI.BaseURL,
-		HostHeader:   cfg.PlatformAPI.HostHeader,
-		AuthProvider: tokenProvider,
+		BaseURL:                cfg.PlatformAPI.BaseURL,
+		HostHeader:             cfg.PlatformAPI.HostHeader,
+		AuthProvider:           tokenProvider,
+		ImpersonateOrgResolver: orgUUIDResolver,
 	}
 	projectClient := openchoreo.NewProjectClient(ocConfig)
 	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
@@ -781,13 +797,13 @@ func main() {
 
 	// Controllers
 	params := api.AppParams{
-		Config:                 cfg,
-		ProjectController:      controllers.NewProjectController(projectService),
-		OrganizationController: controllers.NewOrganizationController(organizationService),
-		ComponentController:    controllers.NewComponentController(componentService, taskService),
+		Config:                     cfg,
+		ProjectController:          controllers.NewProjectController(projectService),
+		OrganizationController:     controllers.NewOrganizationController(organizationService),
+		ComponentController:        controllers.NewComponentController(componentService, taskService),
 		RequirementsController:     controllers.NewRequirementsController(requirementsService),
 		RequirementsChatController: controllers.NewRequirementsChatController(requirementsChatService),
-		DesignController:       controllers.NewDesignController(designService),
+		DesignController:           controllers.NewDesignController(designService),
 		TaskController: func() controllers.TaskController {
 			tc := controllers.NewTaskController(
 				taskService,

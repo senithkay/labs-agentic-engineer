@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/wso2/asdlc/asdlc-service/clients/httpx"
 	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"
 	"github.com/wso2/asdlc/asdlc-service/clients/requests"
+	"github.com/wso2/asdlc/asdlc-service/middleware"
 )
 
 // AuthProvider is the auth-token contract the OC client depends on. Lets us
@@ -28,16 +30,25 @@ type Config struct {
 	HostHeader   string
 	AuthProvider AuthProvider
 	RetryConfig  requests.RequestRetryConfig
+
+	// ImpersonateOrgResolver, when set, maps the namespace in a request URL
+	// (".../namespaces/{namespace}/...") to the org UUID sent as the
+	// X-Impersonate-Org header on M2M (service-token) requests, so platform-api
+	// routes and bills the target org rather than the service identity's own.
+	// Only consulted when no inbound user JWT is being forwarded. nil disables
+	// the header (e.g. local k3d, which talks to OpenChoreo directly and reads
+	// the namespace from the URL path).
+	ImpersonateOrgResolver func(ctx context.Context, namespace string) (string, error)
 }
 
 // newGenClient builds a *gen.ClientWithResponses with the three-layer
 // transport stack:
 //
-//	1. httpx.WrapTransport (innermost) — stamps X-Correlation-ID for tracing
-//	2. RetryableHTTPClient (middle) — jittered exponential backoff on
-//	   transient codes; 401 invalidates the cached service token and retries
-//	3. RequestEditorFn (outermost, oapi-codegen hook) — sets Authorization,
-//	   Host, and X-Use-OpenAPI on every request
+//  1. httpx.WrapTransport (innermost) — stamps X-Correlation-ID for tracing
+//  2. RetryableHTTPClient (middle) — jittered exponential backoff on
+//     transient codes; 401 invalidates the cached service token and retries
+//  3. RequestEditorFn (outermost, oapi-codegen hook) — sets Authorization,
+//     Host, and X-Use-OpenAPI on every request
 //
 // Auth lives in the editor (not a RoundTripper) so the retry middleware sees
 // a fresh token after invalidation: the editor runs on every attempt and
@@ -74,6 +85,23 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 			req.Host = cfg.HostHeader
 		}
 		req.Header.Set("X-Use-OpenAPI", "true")
+		// On the M2M path (no inbound user JWT) the service token's own org is
+		// not the caller's, so impersonate the target org — taken from the
+		// namespace in the request URL — and platform-api routes and bills that
+		// org. User-initiated requests forward the user JWT instead (see
+		// authToken), where platform-api derives the org from the JWT's ouId, so
+		// no impersonation header is set.
+		if cfg.ImpersonateOrgResolver != nil && middleware.GetAuthToken(ctx) == "" {
+			if ns := namespaceFromPath(req.URL.Path); ns != "" {
+				orgUUID, err := cfg.ImpersonateOrgResolver(ctx, ns)
+				if err != nil {
+					return fmt.Errorf("openchoreo: resolve impersonation org for namespace %q: %w", ns, err)
+				}
+				if orgUUID != "" {
+					req.Header.Set("X-Impersonate-Org", orgUUID)
+				}
+			}
+		}
 		tok, err := authToken(ctx, cfg.AuthProvider)
 		if err != nil {
 			return err
@@ -95,24 +123,27 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 	return c, nil
 }
 
-// authToken returns the M2M service token used to authenticate against the
-// OpenChoreo REST API. The BFF acts as a platform orchestrator: it identifies
-// itself by a single service-credentials subject that holds a
-// ClusterAuthzRoleBinding on the OC control plane (see
-// `wso2cloud-deployement-main/dataplane/.../layer-2/openchoreo/controlplane.yaml`,
-// binding name `app-factory-bff-binding`). The target namespace is supplied
-// explicitly in the request URL path — OC honors it, unlike platform-api
-// which derived NS from the JWT's `ouId` claim and routed BFF calls to the
-// Admin tenant. See `docs/superpowers/plans/2026-05-29-bff-oc-rest-direct.md`.
+// authToken picks the credential the OpenChoreo REST call authenticates with.
 //
-// Returns `("", nil)` when no provider is configured (local k3d — OC accepts
-// unauthenticated calls in the OSS default; caller emits the request without
-// an Authorization header). Returns a non-nil error when the provider is
+// For user-initiated requests it forwards the inbound user JWT (stashed in ctx
+// by the auth middleware). platform-api derives the target namespace from the
+// JWT's `ouId` claim, so forwarding it keeps reads and writes in the caller's
+// org — listing orgs, creating a project, dispatching a task the user clicked.
+//
+// For async paths where no user is present — webhook handlers, status watchers,
+// the on-hold / cascade re-dispatch — it falls back to the M2M service token.
+//
+// Returns `("", nil)` when neither is available (local k3d — OC accepts
+// unauthenticated calls in the OSS default; caller emits the request without an
+// Authorization header). Returns a non-nil error when the M2M provider is
 // configured but cannot mint a token — the request is then aborted by the
-// editor instead of being sent unauthenticated, so callers see the actual
-// auth failure rather than a downstream 401 generated by `RetryableHTTPClient`
+// editor instead of being sent unauthenticated, so callers see the actual auth
+// failure rather than a downstream 401 generated by `RetryableHTTPClient`
 // resending the same request without re-running the editor.
-func authToken(_ context.Context, ap AuthProvider) (string, error) {
+func authToken(ctx context.Context, ap AuthProvider) (string, error) {
+	if tok := middleware.GetAuthToken(ctx); tok != "" {
+		return tok, nil
+	}
 	if ap == nil {
 		return "", nil
 	}
@@ -121,4 +152,18 @@ func authToken(_ context.Context, ap AuthProvider) (string, error) {
 		return "", fmt.Errorf("openchoreo: service token fetch failed: %w", err)
 	}
 	return tok, nil
+}
+
+// namespaceFromPath extracts the {namespace} segment from an OpenChoreo REST
+// path of the form ".../namespaces/{namespace}/...". Returns "" when the path
+// has no namespace segment (e.g. the namespaces collection endpoint), where no
+// single org applies.
+func namespaceFromPath(p string) string {
+	segs := strings.Split(p, "/")
+	for i, s := range segs {
+		if s == "namespaces" && i+1 < len(segs) && segs[i+1] != "" {
+			return segs[i+1]
+		}
+	}
+	return ""
 }
