@@ -99,6 +99,8 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 				}
 				if orgUUID != "" {
 					req.Header.Set("X-Impersonate-Org", orgUUID)
+					slog.DebugContext(ctx, "openchoreo: impersonating org on M2M call",
+						"namespace", ns, "orgUUID", orgUUID, "method", req.Method, "path", req.URL.Path)
 				}
 			}
 		}

@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -348,6 +349,8 @@ func (c *Client) StreamPodLog(ctx context.Context, namespace, podName string, op
 	if err != nil {
 		return nil, fmt.Errorf("clustergatewayproxy: GET %s: %w", url, err)
 	}
+	slog.DebugContext(ctx, "cluster-gateway-proxy stream",
+		"url", url, "status", resp.StatusCode)
 	if resp.StatusCode == http.StatusNotFound {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
@@ -465,10 +468,14 @@ func (c *Client) do(ctx context.Context, method, k8sPath string, body any) (*htt
 	req.Header.Set("X-Correlation-ID", middleware.GetCorrelationID(ctx))
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.DebugContext(ctx, "cluster-gateway-proxy request failed",
+			"method", method, "url", url, "error", err)
 		return nil, nil, fmt.Errorf("clustergatewayproxy: %s %s: %w", method, url, err)
 	}
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
+	slog.DebugContext(ctx, "cluster-gateway-proxy request",
+		"method", method, "url", url, "status", resp.StatusCode)
 	return resp, out, nil
 }
 
