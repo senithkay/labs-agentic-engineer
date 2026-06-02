@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/wso2/asdlc/asdlc-service/clients/clustergatewayproxy"
 )
@@ -114,6 +115,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, in Inputs) (string, error) {
 		return "", err
 	}
 
+	slog.InfoContext(ctx, "coding-agent proxy dispatch: start",
+		"orgUUID", in.OrgUUID, "namespace", ns, "runName", in.Job.RunName)
+
 	// 1) Namespace.
 	if err := d.proxy.EnsureNamespace(ctx, clustergatewayproxy.NamespaceMeta{
 		Name: ns,
@@ -169,6 +173,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, in Inputs) (string, error) {
 	if err := d.proxy.ApplyJob(ctx, ns, manifest); err != nil {
 		return "", fmt.Errorf("dispatcher: apply Job: %w", err)
 	}
+	slog.InfoContext(ctx, "coding-agent proxy dispatch: complete",
+		"namespace", ns, "runName", runName)
 	return runName, nil
 }
 
