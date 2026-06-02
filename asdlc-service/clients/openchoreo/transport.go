@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/wso2/asdlc/asdlc-service/clients/httpx"
 	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"
@@ -29,16 +30,25 @@ type Config struct {
 	HostHeader   string
 	AuthProvider AuthProvider
 	RetryConfig  requests.RequestRetryConfig
+
+	// ImpersonateOrgResolver, when set, maps the namespace in a request URL
+	// (".../namespaces/{namespace}/...") to the org UUID sent as the
+	// X-Impersonate-Org header on M2M (service-token) requests, so platform-api
+	// routes and bills the target org rather than the service identity's own.
+	// Only consulted when no inbound user JWT is being forwarded. nil disables
+	// the header (e.g. local k3d, which talks to OpenChoreo directly and reads
+	// the namespace from the URL path).
+	ImpersonateOrgResolver func(ctx context.Context, namespace string) (string, error)
 }
 
 // newGenClient builds a *gen.ClientWithResponses with the three-layer
 // transport stack:
 //
-//	1. httpx.WrapTransport (innermost) — stamps X-Correlation-ID for tracing
-//	2. RetryableHTTPClient (middle) — jittered exponential backoff on
-//	   transient codes; 401 invalidates the cached service token and retries
-//	3. RequestEditorFn (outermost, oapi-codegen hook) — sets Authorization,
-//	   Host, and X-Use-OpenAPI on every request
+//  1. httpx.WrapTransport (innermost) — stamps X-Correlation-ID for tracing
+//  2. RetryableHTTPClient (middle) — jittered exponential backoff on
+//     transient codes; 401 invalidates the cached service token and retries
+//  3. RequestEditorFn (outermost, oapi-codegen hook) — sets Authorization,
+//     Host, and X-Use-OpenAPI on every request
 //
 // Auth lives in the editor (not a RoundTripper) so the retry middleware sees
 // a fresh token after invalidation: the editor runs on every attempt and
@@ -75,6 +85,23 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 			req.Host = cfg.HostHeader
 		}
 		req.Header.Set("X-Use-OpenAPI", "true")
+		// On the M2M path (no inbound user JWT) the service token's own org is
+		// not the caller's, so impersonate the target org — taken from the
+		// namespace in the request URL — and platform-api routes and bills that
+		// org. User-initiated requests forward the user JWT instead (see
+		// authToken), where platform-api derives the org from the JWT's ouId, so
+		// no impersonation header is set.
+		if cfg.ImpersonateOrgResolver != nil && middleware.GetAuthToken(ctx) == "" {
+			if ns := namespaceFromPath(req.URL.Path); ns != "" {
+				orgUUID, err := cfg.ImpersonateOrgResolver(ctx, ns)
+				if err != nil {
+					return fmt.Errorf("openchoreo: resolve impersonation org for namespace %q: %w", ns, err)
+				}
+				if orgUUID != "" {
+					req.Header.Set("X-Impersonate-Org", orgUUID)
+				}
+			}
+		}
 		tok, err := authToken(ctx, cfg.AuthProvider)
 		if err != nil {
 			return err
@@ -125,4 +152,18 @@ func authToken(ctx context.Context, ap AuthProvider) (string, error) {
 		return "", fmt.Errorf("openchoreo: service token fetch failed: %w", err)
 	}
 	return tok, nil
+}
+
+// namespaceFromPath extracts the {namespace} segment from an OpenChoreo REST
+// path of the form ".../namespaces/{namespace}/...". Returns "" when the path
+// has no namespace segment (e.g. the namespaces collection endpoint), where no
+// single org applies.
+func namespaceFromPath(p string) string {
+	segs := strings.Split(p, "/")
+	for i, s := range segs {
+		if s == "namespaces" && i+1 < len(segs) && segs[i+1] != "" {
+			return segs[i+1]
+		}
+	}
+	return ""
 }
