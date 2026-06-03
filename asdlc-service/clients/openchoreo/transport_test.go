@@ -110,6 +110,44 @@ func TestImpersonateOrgHeader_UserJWTPath_NoHeader(t *testing.T) {
 	}
 }
 
+func TestImpersonateOrgHeader_ServiceIdentity_OverridesUserJWT(t *testing.T) {
+	var impersonate, auth string
+	srv := captureServer(t, &impersonate, &auth)
+	defer srv.Close()
+
+	c, err := newGenClient(Config{
+		BaseURL:      srv.URL,
+		AuthProvider: fakeAuthProvider{tok: "m2m-token"},
+		ImpersonateOrgResolver: func(_ context.Context, ns string) (string, error) {
+			if ns == "wc-abc" {
+				return "org-uuid-123", nil
+			}
+			return "", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A user JWT is present in ctx (the call runs inside the user's HTTP
+	// request), but the call is explicitly marked service-identity — an
+	// orchestration write (dispatch/cascade). The user JWT must NOT be
+	// forwarded; instead the M2M token is attached and the impersonation
+	// header is set. This is the dispatch-path regression: without the
+	// override the user JWT (or an injected service token) suppressed the
+	// header and the write mis-routed to the wrong org.
+	ctx := middleware.WithServiceIdentity(middleware.WithAuthToken(context.Background(), "user-jwt"))
+	if _, err := c.GetNamespaceWithResponse(ctx, "wc-abc"); err != nil {
+		t.Fatal(err)
+	}
+	if impersonate != "org-uuid-123" {
+		t.Errorf("service-identity call must set X-Impersonate-Org, got %q", impersonate)
+	}
+	if auth != "Bearer m2m-token" {
+		t.Errorf("service-identity call must use the M2M token, got %q", auth)
+	}
+}
+
 func TestImpersonateOrgHeader_ResolverError_AbortsRequest(t *testing.T) {
 	var impersonate, auth string
 	srv := captureServer(t, &impersonate, &auth)

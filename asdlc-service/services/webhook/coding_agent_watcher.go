@@ -29,25 +29,25 @@ import (
 // observed but not acted on (the pod exited 0; the webhook will arrive
 // shortly or has already arrived).
 type CodingAgentWatcher struct {
-	db          *gorm.DB
-	ocClient    openchoreo.ComponentClient
-	projector   *Projector
-	tokenInject func(ctx context.Context) context.Context
-	tick        time.Duration
+	db                *gorm.DB
+	ocClient          openchoreo.ComponentClient
+	projector         *Projector
+	asServiceIdentity func(ctx context.Context) context.Context
+	tick              time.Duration
 }
 
 func NewCodingAgentWatcher(
 	db *gorm.DB,
 	ocClient openchoreo.ComponentClient,
 	projector *Projector,
-	tokenInject func(ctx context.Context) context.Context,
+	asServiceIdentity func(ctx context.Context) context.Context,
 ) *CodingAgentWatcher {
 	return &CodingAgentWatcher{
-		db:          db,
-		ocClient:    ocClient,
-		projector:   projector,
-		tokenInject: tokenInject,
-		tick:        10 * time.Second,
+		db:                db,
+		ocClient:          ocClient,
+		projector:         projector,
+		asServiceIdentity: asServiceIdentity,
+		tick:              10 * time.Second,
 	}
 }
 
@@ -67,8 +67,8 @@ func (w *CodingAgentWatcher) Run(ctx context.Context) {
 }
 
 func (w *CodingAgentWatcher) sweep(ctx context.Context) {
-	if w.tokenInject != nil {
-		ctx = w.tokenInject(ctx)
+	if w.asServiceIdentity != nil {
+		ctx = w.asServiceIdentity(ctx)
 	}
 
 	var batch []models.ComponentTask
