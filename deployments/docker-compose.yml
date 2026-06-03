@@ -44,6 +44,11 @@ services:
       DATABASE_URL: "postgres://asdlc:asdlc@postgres:5432/asdlc?sslmode=disable"
       DEPLOYMENT_TIER: "${DEPLOYMENT_TIER:-dev}"
       TEST_MODE: "true"
+      # Gates the /_test/sm-api-resync endpoint, which emits decrypted
+      # per-org plaintext to repair OpenBao after a local cluster reseed.
+      # Local-only by design — cloud release bindings never set this.
+      # See deployments/scripts/repair-secrets.sh.
+      LOCAL_OPENBAO_REPAIR: "true"
 
       # ── OpenChoreo platform API (reached via k3d loadbalancer + Host header)
       PLATFORM_API_SERVICE_BASE_URL: "${PLATFORM_API_SERVICE_BASE_URL}"

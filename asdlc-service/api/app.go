@@ -151,12 +151,16 @@ func NewHandler(params AppParams) http.Handler {
 	}
 
 	// Local-dev secret repair — outside the User JWT path so
-	// deployments/scripts/repair-secrets.sh can call it without an
-	// admin token. TestMode gates registration (off in production); the
-	// shell script's kubectl-context check is the second safety net.
-	// Re-mirrors per-org PAT + Anthropic key from the cred store into
-	// SM-API after an OpenBao reseed (cluster teardown, volume wipe).
-	if params.Config.TestMode {
+	// deployments/scripts/repair-secrets.sh can call it without an admin
+	// token. Gated on the DISTINCT LocalOpenBaoRepairEnabled flag (read
+	// from LOCAL_OPENBAO_REPAIR), NOT on TestMode alone, because TestMode
+	// is already set on the wso2cloud dev release binding for the existing
+	// _test/reset route. Splitting them means cloud release bindings have
+	// to explicitly opt in to expose this surface (and they don't), so the
+	// route never registers on deployed environments. The handler emits
+	// decrypted plaintext per-org credentials — second gating is essential.
+	// The shell script's kubectl-context check is the third safety net.
+	if params.Config.TestMode && params.Config.LocalOpenBaoRepairEnabled {
 		mux.HandleFunc("POST /api/v1/_test/sm-api-resync", testSMAPIResyncHandler(params))
 	}
 

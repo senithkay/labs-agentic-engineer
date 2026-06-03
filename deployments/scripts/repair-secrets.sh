@@ -63,7 +63,7 @@ HTTP_CODE="$(echo "$RESP" | tail -n1)"
 BODY="$(echo "$RESP" | sed '$d')"
 
 if [ "$HTTP_CODE" = "404" ]; then
-    echo "ℹ️  /_test/sm-api-resync not mounted (TEST_MODE off?) — skipping."
+    echo "ℹ️  /_test/sm-api-resync not mounted — needs TEST_MODE=true AND LOCAL_OPENBAO_REPAIR=true on asdlc-api. Skipping."
     exit 0
 fi
 if [ "$HTTP_CODE" != "200" ]; then
