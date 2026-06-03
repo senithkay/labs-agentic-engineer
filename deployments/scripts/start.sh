@@ -165,6 +165,19 @@ echo "🐳 Starting Docker services..."
 docker compose up --build -d
 echo "✅ Docker services started"
 
+# 7. Repair per-org secrets in OpenBao. When the local cluster (or just the
+#    OpenBao volume) has been torn down since the last credential connect,
+#    the SM-API metadata rows still point at OpenBao paths that no longer
+#    exist. Without this stage every coding-agent dispatch hangs in
+#    CreateContainerConfigError. Best-effort: failure here doesn't fail
+#    start.sh. Safe in remote envs because repair-secrets.sh refuses to
+#    run unless the kubectl context matches the local k3d cluster.
+echo ""
+if [ -x "$SCRIPT_DIR/repair-secrets.sh" ]; then
+    bash "$SCRIPT_DIR/repair-secrets.sh" || \
+        echo "⚠️  repair-secrets did not complete cleanly — see output above."
+fi
+
 echo ""
 echo "============================================"
 echo "  ✅ All services running!"
