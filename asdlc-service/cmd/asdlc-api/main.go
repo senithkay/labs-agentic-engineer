@@ -32,6 +32,7 @@ import (
 	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
 	"github.com/wso2/asdlc/asdlc-service/internal/seed"
 	"github.com/wso2/asdlc/asdlc-service/middleware"
+	"github.com/wso2/asdlc/asdlc-service/middleware/jwt"
 	"github.com/wso2/asdlc/asdlc-service/middleware/jwtassertion"
 	"github.com/wso2/asdlc/asdlc-service/middleware/logger"
 	"github.com/wso2/asdlc/asdlc-service/models"
@@ -271,6 +272,17 @@ func main() {
 	// OC calls. Reads the local organizations side-car; prefers the
 	// Thunder-issued ouId.
 	orgUUIDResolver := func(ctx context.Context, namespace string) (string, error) {
+		// Authoritative path: a user-initiated request carries the caller's
+		// Thunder org UUID in the JWT (ouId). When the JWT's handle matches the
+		// namespace we're about to impersonate, use ouId directly — no DB
+		// dependency, and it's the same value Thunder embeds. Async paths
+		// (webhooks, watchers) have no JWT and fall through to the side-car.
+		if claims := jwt.ClaimsFromContext(ctx); claims != nil && claims.OuId != "" && jwt.ResolveOuHandle(claims) == namespace {
+			return claims.OuId, nil
+		}
+		// Side-car path: the organizations row is keyed by the org handle (the
+		// same value the BFF puts in OC URLs). orgensure backfills it with the
+		// Thunder UUID on the first authed request from the org.
 		var org models.Organization
 		if err := db.WithContext(ctx).Where("name = ?", namespace).First(&org).Error; err != nil {
 			return "", fmt.Errorf("resolve impersonation org for namespace %q: %w", namespace, err)

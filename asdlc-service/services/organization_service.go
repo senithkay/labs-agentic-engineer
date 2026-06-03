@@ -113,7 +113,7 @@ func (s *organizationService) List(ctx context.Context) (*models.OrganizationLis
 	for i, v := range views {
 		row, ok := byName[v.Name]
 		if !ok {
-			row = s.backfillRow(ctx, v, "")
+			row = s.backfillRow(ctx, v.Name, v, "")
 			if row.UUID == uuid.Nil {
 				continue
 			}
@@ -200,7 +200,13 @@ func (s *organizationService) verifyForOuHandle(ctx context.Context, ouHandle, t
 		return translateHTTPError(err)
 	}
 
-	s.backfillRow(ctx, *view, thunderOrgUUID)
+	// Key the row by the handle, not view.Name: platform-api returns the
+	// canonical namespace name (e.g. "wc-<uuid8>-<hash8>") in metadata.name,
+	// but every per-org lookup — this verify path, ensureThunderUUID, the
+	// dispatch org-UUID lookup, and the OC-client impersonation resolver — keys
+	// by the handle the BFF puts in OC URLs. Storing view.Name made those
+	// lookups miss forever (and re-backfill on every request).
+	s.backfillRow(ctx, ouHandle, *view, thunderOrgUUID)
 	return nil
 }
 
@@ -233,20 +239,22 @@ func (s *organizationService) ensureThunderUUID(ctx context.Context, ouHandle, t
 	}
 }
 
-// backfillRow inserts a local row for an OC namespace we just discovered.
-// Returns the resulting (possibly racing) row; on hard failure returns a
-// zero row and logs.
-func (s *organizationService) backfillRow(ctx context.Context, view models.OrganizationView, thunderOrgUUID string) models.Organization {
+// backfillRow inserts a local row for an org we just discovered, keyed by
+// `name`. Callers choose the key deliberately: the verify/ensure path keys by
+// the org handle (the identifier the BFF puts in OC URLs and every per-org
+// lookup), while List keys by the OC namespace name it enumerated. Returns the
+// resulting (possibly racing) row; on hard failure returns a zero row and logs.
+func (s *organizationService) backfillRow(ctx context.Context, name string, view models.OrganizationView, thunderOrgUUID string) models.Organization {
 	row := models.Organization{
 		UUID:        uuid.New(),
-		Name:        view.Name,
+		Name:        name,
 		DisplayName: view.DisplayName,
 	}
 	if thunderOrgUUID != "" {
 		if parsed, perr := uuid.Parse(thunderOrgUUID); perr == nil {
 			row.ThunderOrgUUID = &parsed
 		} else {
-			slog.WarnContext(ctx, "backfillRow: invalid Thunder UUID in JWT — leaving column NULL", "name", view.Name, "thunderOrgUUID", thunderOrgUUID, "error", perr)
+			slog.WarnContext(ctx, "backfillRow: invalid Thunder UUID in JWT — leaving column NULL", "name", name, "thunderOrgUUID", thunderOrgUUID, "error", perr)
 		}
 	}
 	err := s.db.WithContext(ctx).Create(&row).Error
@@ -255,11 +263,11 @@ func (s *organizationService) backfillRow(ctx context.Context, view models.Organ
 	}
 	if isUniqueViolation(err) {
 		// Lost the race with a concurrent caller; re-read.
-		if rerr := s.db.WithContext(ctx).Where("name = ?", view.Name).First(&row).Error; rerr == nil {
+		if rerr := s.db.WithContext(ctx).Where("name = ?", name).First(&row).Error; rerr == nil {
 			return row
 		}
 	}
-	slog.WarnContext(ctx, "backfill organization row failed", "name", view.Name, "error", err)
+	slog.WarnContext(ctx, "backfill organization row failed", "name", name, "error", err)
 	return models.Organization{}
 }
 
