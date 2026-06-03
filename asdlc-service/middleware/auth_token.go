@@ -8,6 +8,8 @@ import (
 
 type authTokenKey struct{}
 
+type serviceIdentityKey struct{}
+
 // ExtractAuthToken returns a middleware that reads the Bearer token from the
 // Authorization header and stores it in the request context for downstream use.
 func ExtractAuthToken() func(http.Handler) http.Handler {
@@ -28,8 +30,27 @@ func GetAuthToken(ctx context.Context) string {
 	return ""
 }
 
-// WithAuthToken returns a copy of ctx that carries the given Bearer token.
-// Use this to inject a service token for async operations (e.g. MCP-triggered deploys).
+// WithAuthToken returns a copy of ctx that carries the given Bearer token under
+// the user-token key. This key means "an inbound end-user JWT to forward"; do
+// NOT use it to inject a service token (that collides with the user-JWT path in
+// the OpenChoreo client and suppresses per-org impersonation). For orchestration
+// / async OC calls use WithServiceIdentity instead.
 func WithAuthToken(ctx context.Context, token string) context.Context {
 	return context.WithValue(ctx, authTokenKey{}, token)
+}
+
+// WithServiceIdentity marks ctx as an orchestration / async call (dispatch,
+// webhook handlers, status watchers) that must authenticate with the BFF's own
+// service identity (M2M) and impersonate the target org — never a forwarded
+// end-user JWT. The OpenChoreo client honours this by setting X-Impersonate-Org
+// (derived from the namespace in the request URL) and attaching the M2M token,
+// regardless of whether a user JWT also happens to be in ctx.
+func WithServiceIdentity(ctx context.Context) context.Context {
+	return context.WithValue(ctx, serviceIdentityKey{}, true)
+}
+
+// IsServiceIdentity reports whether ctx was marked by WithServiceIdentity.
+func IsServiceIdentity(ctx context.Context) bool {
+	v, _ := ctx.Value(serviceIdentityKey{}).(bool)
+	return v
 }

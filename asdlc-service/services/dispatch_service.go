@@ -60,20 +60,20 @@ type DispatchService interface {
 }
 
 type dispatchService struct {
-	taskRepo       repositories.TaskRepository
-	repoSvc        RepoService
-	credSvc        *CredentialService
-	anthropicSvc   *AnthropicCredentialService
-	repoBoardSvc   RepoBoardService
-	componentSvc   ComponentService
-	configSvc     ConfigService
-	store         *ArtifactStore
-	taskTokens    *TaskTokenManager
-	tokenInject   func(ctx context.Context) context.Context
-	wfRunService  WorkflowRunService
-	projector     TaskStateProjector
-	gitServiceURL string // URL the agent pod uses to reach git-service; cross-namespace FQDN in cluster
-	platformURL   string // URL the agent pod uses to call the BFF F3c verification-failed callback
+	taskRepo          repositories.TaskRepository
+	repoSvc           RepoService
+	credSvc           *CredentialService
+	anthropicSvc      *AnthropicCredentialService
+	repoBoardSvc      RepoBoardService
+	componentSvc      ComponentService
+	configSvc         ConfigService
+	store             *ArtifactStore
+	taskTokens        *TaskTokenManager
+	asServiceIdentity func(ctx context.Context) context.Context
+	wfRunService      WorkflowRunService
+	projector         TaskStateProjector
+	gitServiceURL     string // URL the agent pod uses to reach git-service; cross-namespace FQDN in cluster
+	platformURL       string // URL the agent pod uses to call the BFF F3c verification-failed callback
 	// traitSync, when non-nil, is invoked after CreateComponent to
 	// reconcile per-environment trait configs (the part CreateComponent
 	// can't pre-stamp because RBs are created asynchronously by OC's
@@ -152,27 +152,27 @@ func NewDispatchService(
 	configSvc ConfigService,
 	store *ArtifactStore,
 	taskTokens *TaskTokenManager,
-	tokenInject func(ctx context.Context) context.Context,
+	asServiceIdentity func(ctx context.Context) context.Context,
 	wfRunService WorkflowRunService,
 	projector TaskStateProjector,
 	gitServiceURL string,
 	platformURL string,
 ) DispatchService {
 	return &dispatchService{
-		taskRepo:      taskRepo,
-		repoSvc:       repoSvc,
-		credSvc:       credSvc,
-		anthropicSvc:  anthropicSvc,
-		repoBoardSvc:  repoBoardSvc,
-		componentSvc:  componentSvc,
-		configSvc:     configSvc,
-		store:         store,
-		taskTokens:    taskTokens,
-		tokenInject:   tokenInject,
-		wfRunService:  wfRunService,
-		projector:     projector,
-		gitServiceURL: gitServiceURL,
-		platformURL:   platformURL,
+		taskRepo:          taskRepo,
+		repoSvc:           repoSvc,
+		credSvc:           credSvc,
+		anthropicSvc:      anthropicSvc,
+		repoBoardSvc:      repoBoardSvc,
+		componentSvc:      componentSvc,
+		configSvc:         configSvc,
+		store:             store,
+		taskTokens:        taskTokens,
+		asServiceIdentity: asServiceIdentity,
+		wfRunService:      wfRunService,
+		projector:         projector,
+		gitServiceURL:     gitServiceURL,
+		platformURL:       platformURL,
 	}
 }
 
@@ -230,7 +230,7 @@ func (s *dispatchService) DispatchTasks(ctx context.Context, orgID, projectID st
 				slog.WarnContext(ctx, "set on_hold", "task", task.ID, "error", err)
 			}
 			if task.IssueURL != "" {
-				if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL,"On Hold"); err != nil {
+				if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "On Hold"); err != nil {
 					slog.WarnContext(ctx, "failed to move board item to On Hold",
 						"task", task.ID, "error", err)
 				}
@@ -331,7 +331,7 @@ func (s *dispatchService) dispatchOne(
 			slog.WarnContext(ctx, "dispatchOne: revert to on_hold failed", "task", task.ID, "error", err)
 		}
 		if task.IssueURL != "" {
-			if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL,"On Hold"); err != nil {
+			if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "On Hold"); err != nil {
 				slog.WarnContext(ctx, "dispatchOne: move board item to On Hold", "task", task.ID, "error", err)
 			}
 		}
@@ -409,7 +409,7 @@ func (s *dispatchService) dispatchOne(
 	// Move the GitHub Project board item to "In Progress" so the console
 	// kanban reflects dispatch state immediately (GitHub does not do this
 	// automatically on WorkflowRun creation).
-	if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL,"In Progress"); err != nil {
+	if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "In Progress"); err != nil {
 		slog.WarnContext(ctx, "failed to move board item to In Progress",
 			"task", task.ID, "error", err)
 	}
@@ -590,7 +590,7 @@ func (s *dispatchService) markFailed(ctx context.Context, task *models.Component
 	slog.ErrorContext(ctx, "dispatch step failed", "task", task.ID, "error", msg)
 	// Sync the GitHub project board item so it surfaces in the Failed column.
 	if task.IssueURL != "" {
-		if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL,"Failed"); err != nil {
+		if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "Failed"); err != nil {
 			slog.WarnContext(ctx, "markFailed: move board item to Failed", "task", task.ID, "error", err)
 		}
 	}
@@ -681,7 +681,6 @@ func (s *dispatchService) RetryTask(ctx context.Context, taskID string) (Dispatc
 	return res, nil
 }
 
-
 // resolveExternalURL resolves a single component's first external URL, or
 // "" if the component has no deployed endpoint with `visibility: external`.
 // Mirrors resolveDependencyEndpoints' inner step but for a single
@@ -739,8 +738,8 @@ func (s *dispatchService) resolveDependencyEndpoints(
 	if len(task.DependsOnComponents) == 0 || s.componentSvc == nil {
 		return nil, nil
 	}
-	if s.tokenInject != nil {
-		ctx = s.tokenInject(ctx)
+	if s.asServiceIdentity != nil {
+		ctx = s.asServiceIdentity(ctx)
 	}
 	out := make([]DependencyEndpoint, 0, len(task.DependsOnComponents))
 	for _, depComponent := range task.DependsOnComponents {
@@ -787,10 +786,12 @@ func (s *dispatchService) ensureOCComponent(
 	task *models.ComponentTask,
 	repoInfo *models.GitRepository,
 ) error {
-	if s.tokenInject != nil {
-		ctx = s.tokenInject(ctx)
+	if s.asServiceIdentity != nil {
+		ctx = s.asServiceIdentity(ctx)
 	}
 	componentName := toK8sName(task.ComponentName)
+	slog.InfoContext(ctx, "ensureOCComponent: creating OC component via service identity",
+		"task", task.ID, "org", task.OrgID, "project", task.ProjectID, "component", componentName)
 
 	comp, err := resolveDesignComponentVia(ctx, s.store, task)
 	if err != nil {

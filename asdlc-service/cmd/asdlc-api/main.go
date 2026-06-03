@@ -645,18 +645,19 @@ func main() {
 		slog.Warn("BFF_TASK_SIGNING_KEY not set — task dispatch will fail")
 	}
 
-	// Token injector for OC API calls from inside dispatch, webhook handlers,
-	// and the build watcher. Uses the same service auth as the rest of the BFF.
-	tokenInject := func(ctx context.Context) context.Context {
-		if tokenProvider == nil {
-			return ctx
-		}
-		token, err := tokenProvider.Token()
-		if err != nil {
-			slog.WarnContext(ctx, "service token fetch failed", "error", err)
-			return ctx
-		}
-		return middleware.WithAuthToken(ctx, token)
+	// asServiceIdentity marks OC API calls made from inside dispatch, webhook
+	// handlers, and the watchers as orchestration / async calls: they
+	// authenticate with the BFF's M2M service identity and impersonate the
+	// target org (via X-Impersonate-Org, derived from the request URL's
+	// namespace) instead of forwarding the inbound user JWT. The OC client's
+	// AuthProvider supplies the M2M token, so this only needs to set the marker.
+	//
+	// (Previously this injected the M2M token into the user-token ctx key, which
+	// collided with the user-JWT forwarding path and suppressed the impersonation
+	// header — mis-routing every async OC write to the service identity's own
+	// org. The explicit marker removes that ambiguity.)
+	asServiceIdentity := func(ctx context.Context) context.Context {
+		return middleware.WithServiceIdentity(ctx)
 	}
 
 	// Dispatch service drives the per-task Issue/branch/PR/Component
@@ -676,7 +677,7 @@ func main() {
 	webhookRouter := webhook.NewRouter()
 	projector := webhook.NewProjector(db)
 
-	wfRunService := services.NewWorkflowRunService(db, taskRepo, componentClient, repoService, buildCredService, artifactStore, projector, tokenInject)
+	wfRunService := services.NewWorkflowRunService(db, taskRepo, componentClient, repoService, buildCredService, artifactStore, projector, asServiceIdentity)
 
 	// Dispatch service — replaces the legacy RemoteWorkerService. Routes to
 	// WorkflowRunService.TriggerCodingAgent (ClusterWorkflow `app-factory-coding-agent`)
@@ -685,7 +686,7 @@ func main() {
 	// AGENT_GIT_SERVICE_URL collapsed into AGENT_PLATFORM_URL: post-fold,
 	// the runner pod reaches every former git-service endpoint via the
 	// merged asdlc-api at AGENT_PLATFORM_URL.
-	dispatchSvc := services.NewDispatchService(taskRepo, repoService, credService, anthropicCredService, repoBoardService, componentService, configService, artifactStore, taskTokens, tokenInject, wfRunService, projector, cfg.AgentPlatformURL, cfg.AgentPlatformURL)
+	dispatchSvc := services.NewDispatchService(taskRepo, repoService, credService, anthropicCredService, repoBoardService, componentService, configService, artifactStore, taskTokens, asServiceIdentity, wfRunService, projector, cfg.AgentPlatformURL, cfg.AgentPlatformURL)
 	if hook, ok := dispatchSvc.(services.DispatchServiceWithTraitSync); ok {
 		hook.SetTraitSync(traitSyncService)
 	}
@@ -732,19 +733,19 @@ func main() {
 	// the HTTP server is up so it's not killed during handler init failures.
 	// Phase 2 PR D — wfRunService.RetryAuthFailedBuild backs the auth
 	// retry path. authBudget is configurable for tests via env.
-	buildWatcher := webhook.NewBuildWatcher(db, componentClient, projector, tokenInject, wfRunService, cfg.BuildAuthRetryBudget)
+	buildWatcher := webhook.NewBuildWatcher(db, componentClient, projector, asServiceIdentity, wfRunService, cfg.BuildAuthRetryBudget)
 
 	// Coding-agent watcher — same cadence, complementary to the GitHub
 	// webhook path. Only acts on terminal-failed coding-agent WorkflowRuns;
 	// success transitions ride the pull_request:ready_for_review webhook.
-	codingAgentWatcher := webhook.NewCodingAgentWatcher(db, componentClient, projector, tokenInject)
+	codingAgentWatcher := webhook.NewCodingAgentWatcher(db, componentClient, projector, asServiceIdentity)
 
 	// Phase 2 — trait_sync drift watcher (10 s cadence). Idempotent
 	// reconcile of the `api-configuration` ClusterTrait on every
 	// (org,project,component) tuple that has a task record. Closes
 	// write-write races between dispatch / design PUT and provides the
 	// convergence backstop the §6 Phase 2 plan calls for.
-	traitSyncWatcher := webhook.NewTraitSyncWatcher(db, traitSyncService, tokenInject)
+	traitSyncWatcher := webhook.NewTraitSyncWatcher(db, traitSyncService, asServiceIdentity)
 
 	// Inbound JWT verifier — Thunder publishes the User JWT and Service JWT
 	// signing keys at JWKSURL. Lazy fetch on first request avoids compose

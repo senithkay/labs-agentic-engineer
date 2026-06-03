@@ -86,19 +86,19 @@ type TaskStateProjector interface {
 }
 
 type workflowRunService struct {
-	db          *gorm.DB
-	taskRepo    repositories.TaskRepository
-	ocClient    openchoreo.ComponentClient
-	repoSvc      RepoService
-	buildCredSvc *BuildCredentialsService
-	store        *ArtifactStore
-	configSvc   ConfigService
-	projector   TaskStateProjector
-	tokenInject func(ctx context.Context) context.Context
+	db                *gorm.DB
+	taskRepo          repositories.TaskRepository
+	ocClient          openchoreo.ComponentClient
+	repoSvc           RepoService
+	buildCredSvc      *BuildCredentialsService
+	store             *ArtifactStore
+	configSvc         ConfigService
+	projector         TaskStateProjector
+	asServiceIdentity func(ctx context.Context) context.Context
 }
 
-// NewWorkflowRunService constructs the service. tokenInject lets the BFF
-// inject the service-auth token for OC API calls; pass nil for tests.
+// NewWorkflowRunService constructs the service. asServiceIdentity marks OC API
+// calls as service-identity (M2M + per-org impersonation); pass nil for tests.
 // repoSvc + buildCredSvc together pre-stage the per-WorkflowRun build
 // Secret in workflows-<orgID> before each WorkflowRun (phase2.md §9.2).
 // store is used to look up per-component AppPath for the changed-path
@@ -111,17 +111,17 @@ func NewWorkflowRunService(
 	buildCredSvc *BuildCredentialsService,
 	store *ArtifactStore,
 	projector TaskStateProjector,
-	tokenInject func(ctx context.Context) context.Context,
+	asServiceIdentity func(ctx context.Context) context.Context,
 ) WorkflowRunService {
 	return &workflowRunService{
-		db:           db,
-		taskRepo:     taskRepo,
-		ocClient:     ocClient,
-		repoSvc:      repoSvc,
-		buildCredSvc: buildCredSvc,
-		store:        store,
-		projector:    projector,
-		tokenInject:  tokenInject,
+		db:                db,
+		taskRepo:          taskRepo,
+		ocClient:          ocClient,
+		repoSvc:           repoSvc,
+		buildCredSvc:      buildCredSvc,
+		store:             store,
+		projector:         projector,
+		asServiceIdentity: asServiceIdentity,
 	}
 }
 
@@ -136,8 +136,8 @@ func (s *workflowRunService) DispatchTaskBuild(ctx context.Context, task *models
 	if task == nil {
 		return "", fmt.Errorf("dispatch task build: task is nil")
 	}
-	if s.tokenInject != nil {
-		ctx = s.tokenInject(ctx)
+	if s.asServiceIdentity != nil {
+		ctx = s.asServiceIdentity(ctx)
 	}
 	if task.LastBuildSHA == sha && task.LastBuildRunName != "" {
 		return task.LastBuildRunName, nil
@@ -231,8 +231,8 @@ func (s *workflowRunService) dispatchBuild(
 // implicitly via time.Now(); idempotency is at the dispatch-service level
 // (DispatchedAt + LastCodingAgentRunName).
 func (s *workflowRunService) TriggerCodingAgent(ctx context.Context, p CodingAgentTrigger) (string, error) {
-	if s.tokenInject != nil {
-		ctx = s.tokenInject(ctx)
+	if s.asServiceIdentity != nil {
+		ctx = s.asServiceIdentity(ctx)
 	}
 	if p.Task == nil {
 		return "", fmt.Errorf("trigger coding-agent: task is nil")
@@ -269,8 +269,8 @@ func (s *workflowRunService) TriggerCodingAgent(ctx context.Context, p CodingAge
 }
 
 func (s *workflowRunService) RetryAuthFailedBuild(ctx context.Context, task *models.ComponentTask) (string, error) {
-	if s.tokenInject != nil {
-		ctx = s.tokenInject(ctx)
+	if s.asServiceIdentity != nil {
+		ctx = s.asServiceIdentity(ctx)
 	}
 	if s.repoSvc == nil || s.buildCredSvc == nil {
 		return "", fmt.Errorf("retry-auth-failed: git client not configured")
