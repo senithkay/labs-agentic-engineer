@@ -754,11 +754,26 @@ echo "🪪 Pre-creating default org base namespace (local-only, ou-service equiv
 THUNDER_URL="${THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
 SEEDER_CLIENT_ID="${SEEDER_CLIENT_ID:-asdlc-local-dev-seeder}"
 SEEDER_CLIENT_SECRET="${SEEDER_CLIENT_SECRET:-asdlc-local-dev-seeder-secret}"
-TOKEN_JSON=$(curl -sS -X POST "${THUNDER_URL}/oauth2/token" \
-    -d "grant_type=client_credentials&client_id=${SEEDER_CLIENT_ID}&client_secret=${SEEDER_CLIENT_SECRET}&scope=openid" || true)
-TOKEN=$(printf '%s' "$TOKEN_JSON" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("access_token",""))' 2>/dev/null || true)
+# Thunder may have come up moments ago and not yet be ready to serve
+# /oauth2/token (especially on the first setup after a fresh k3d
+# cluster). Retry up to ~30s with backoff before giving up — the
+# original one-shot curl left the NS unpopulated, which then surfaced
+# downstream as SM-API mirror 500s during the user's first Connect.
+TOKEN=""
+for ATTEMPT in 1 2 3 4 5 6 7 8 9 10; do
+    TOKEN_JSON=$(curl -sS -X POST "${THUNDER_URL}/oauth2/token" \
+        -d "grant_type=client_credentials&client_id=${SEEDER_CLIENT_ID}&client_secret=${SEEDER_CLIENT_SECRET}&scope=openid" 2>/dev/null || true)
+    TOKEN=$(printf '%s' "$TOKEN_JSON" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("access_token",""))' 2>/dev/null || true)
+    if [ -n "$TOKEN" ]; then
+        break
+    fi
+    if [ "$ATTEMPT" -lt 10 ]; then
+        sleep 3
+    fi
+done
 if [ -z "$TOKEN" ]; then
-    echo "⚠️  could not mint seeder token from Thunder; skipping NS pre-create (re-run after Thunder is reachable)"
+    echo "⚠️  could not mint seeder token from Thunder after 30s; skipping NS pre-create"
+    echo "    (re-run setup.sh once Thunder is reachable, or kubectl create the wc-* NS manually)"
 else
     # Decode JWT payload (middle base64url segment), extract ouId.
     PAYLOAD=$(printf '%s' "$TOKEN" | cut -d. -f2)
