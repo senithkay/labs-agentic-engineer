@@ -390,10 +390,15 @@ func main() {
 	// running until WS2.3 cuts over.
 	var cgwClient *clustergatewayproxy.Client
 	if cfg.ClusterGatewayProxyURL != "" {
-		cgwClient = clustergatewayproxy.New(clustergatewayproxy.Config{
-			BaseURL: cfg.ClusterGatewayProxyURL,
-		})
-		slog.Info("cluster-gateway-proxy client", "baseURL", cfg.ClusterGatewayProxyURL)
+		cgwCfg := clustergatewayproxy.Config{BaseURL: cfg.ClusterGatewayProxyURL}
+		// The cloud cluster-gateway-proxy validates platform-idp JWTs; send the
+		// BFF's M2M service token (same provider as the OC client). Left nil for
+		// local k3d (no tokenProvider), where the proxy is unauthenticated.
+		if tokenProvider != nil {
+			cgwCfg.AuthProvider = tokenProvider
+		}
+		cgwClient = clustergatewayproxy.New(cgwCfg)
+		slog.Info("cluster-gateway-proxy client", "baseURL", cfg.ClusterGatewayProxyURL, "authenticated", tokenProvider != nil)
 	} else {
 		slog.Warn("CLUSTER_GATEWAY_PROXY_URL not set — Phase 2 dispatch disabled")
 	}

@@ -38,6 +38,13 @@ import (
 // ErrNotFound is returned by Get* methods when the proxy returns 404.
 var ErrNotFound = errors.New("clustergatewayproxy: not found")
 
+// AuthProvider supplies the Bearer token attached to proxy requests. It
+// matches the Token() method of *oauth.TokenProvider so that type satisfies
+// the interface as-is.
+type AuthProvider interface {
+	Token() (string, error)
+}
+
 // Config holds connection settings.
 type Config struct {
 	// BaseURL is the proxy's base URL, e.g.
@@ -47,6 +54,12 @@ type Config struct {
 	BaseURL string
 	// Timeout is the HTTP client timeout (default: 30s).
 	Timeout time.Duration
+	// AuthProvider, when set, supplies the Bearer token sent on every proxy
+	// request. The cloud cluster-gateway-proxy validates platform-idp JWTs
+	// (JWKS), so this must be the BFF's M2M service token — the same provider
+	// the OpenChoreo client uses. nil leaves requests unauthenticated, for
+	// local k3d where the proxy's auth middleware is disabled.
+	AuthProvider AuthProvider
 }
 
 // Client wraps the proxy HTTP calls.
@@ -59,6 +72,8 @@ type Client struct {
 	// the only cancellation signal — callers must cancel ctx to stop
 	// the stream.
 	streamClient *http.Client
+	// auth, when non-nil, supplies the Bearer token for each request.
+	auth AuthProvider
 }
 
 // New constructs a Client; panics on empty BaseURL since main.go
@@ -75,6 +90,7 @@ func New(cfg Config) *Client {
 		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
 		httpClient:   &http.Client{Timeout: cfg.Timeout},
 		streamClient: &http.Client{Timeout: 0},
+		auth:         cfg.AuthProvider,
 	}
 }
 
@@ -345,6 +361,9 @@ func (c *Client) StreamPodLog(ctx context.Context, namespace, podName string, op
 		return nil, fmt.Errorf("clustergatewayproxy: build request: %w", err)
 	}
 	req.Header.Set("X-Correlation-ID", middleware.GetCorrelationID(ctx))
+	if err := c.setAuthHeader(req); err != nil {
+		return nil, err
+	}
 	resp, err := c.streamClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("clustergatewayproxy: GET %s: %w", url, err)
@@ -448,6 +467,24 @@ func (c *Client) upsert(ctx context.Context, listPath, itemPath string, body any
 
 // do performs a single proxy request. The body is JSON-marshalled when
 // non-nil; the response body is fully read and returned for inspection.
+// setAuthHeader attaches the Bearer token when an AuthProvider is configured.
+// A token-fetch failure aborts the request rather than sending it
+// unauthenticated (the cloud proxy would reject it with 401 anyway, and the
+// caller gets the real auth error).
+func (c *Client) setAuthHeader(req *http.Request) error {
+	if c.auth == nil {
+		return nil
+	}
+	tok, err := c.auth.Token()
+	if err != nil {
+		return fmt.Errorf("clustergatewayproxy: fetch auth token: %w", err)
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	return nil
+}
+
 func (c *Client) do(ctx context.Context, method, k8sPath string, body any) (*http.Response, []byte, error) {
 	var reader io.Reader
 	if body != nil {
@@ -466,6 +503,9 @@ func (c *Client) do(ctx context.Context, method, k8sPath string, body any) (*htt
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-Correlation-ID", middleware.GetCorrelationID(ctx))
+	if err := c.setAuthHeader(req); err != nil {
+		return nil, nil, err
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		slog.DebugContext(ctx, "cluster-gateway-proxy request failed",
