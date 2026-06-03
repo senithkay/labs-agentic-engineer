@@ -903,19 +903,23 @@ func main() {
 	watcherCtx, cancelWatcher := context.WithCancel(context.Background())
 	defer cancelWatcher()
 	go buildWatcher.Run(watcherCtx)
-	go codingAgentWatcher.Run(watcherCtx)
 	go onHoldWatcher.Run(watcherCtx)
 	go traitSyncWatcher.Run(watcherCtx)
 
-	// WS2.5 — proxy-based Job watcher. Polls per-task Jobs in the
-	// remote-worker NS via cluster-gateway-proxy and surfaces failures
-	// as task.status=failed. No-op when the proxy isn't configured
-	// (cgwClient nil); the legacy codingAgentWatcher above keeps
-	// running and watching the OC WorkflowRun side until WS2.6.
+	// Coding-agent run watcher — split between the legacy OC WorkflowRun
+	// path (kept while cgwClient is unconfigured, currently the wso2cloud
+	// dev release binding state) and the WS2.5 proxy Job path. Run one or
+	// the other, never both: when cgwClient is set the dispatcher creates
+	// Jobs not WorkflowRuns, so the legacy watcher would log
+	// "WorkflowRun not found" on every tick. Cloud is unaffected because
+	// the deployed dev release binding doesn't set CLUSTER_GATEWAY_PROXY_URL.
 	if cgwClient != nil {
 		jobWatcher := codingagent.NewJobWatcher(db, cgwClient)
 		go jobWatcher.Run(watcherCtx)
 		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)")
+	} else {
+		go codingAgentWatcher.Run(watcherCtx)
+		slog.Info("webhook.CodingAgentWatcher: enabled (legacy OC WorkflowRun path)")
 	}
 
 	// Periodic credential validator (folded in from git-service). Walks
