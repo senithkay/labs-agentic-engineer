@@ -730,6 +730,14 @@ func main() {
 	if hook, ok := dispatchSvc.(services.DispatchServiceWithTraitSync); ok {
 		hook.SetTraitSync(traitSyncService)
 	}
+	// WS2.4 — let the proxy dispatch pre-flight provision the per-org publisher
+	// cc on demand (decoupled from API security), so the runner can auth to the
+	// BFF through the gateway for every component, not just protected ones.
+	if idpSetter, ok := dispatchSvc.(interface {
+		SetIDPService(services.IDPService)
+	}); ok {
+		idpSetter.SetIDPService(idpService)
+	}
 	// WS2.3 — wire the proxy-based dispatcher. nil dispatcher → the
 	// legacy ClusterWorkflow path stays the only dispatch flow.
 	if codingAgentDispatcher != nil {
