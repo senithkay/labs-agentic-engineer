@@ -17,9 +17,10 @@ type thunderMock struct {
 	clientID string
 	ouID     string // OU the existing app is registered under
 
-	deleted     bool
-	createdOU   string // OU passed to the create call
-	createCount int
+	deleted      bool
+	deleteStatus int    // override delete response code (0 = 204); app is removed regardless
+	createdOU    string // OU passed to the create call
+	createCount  int
 }
 
 func (m *thunderMock) server(t *testing.T) *httptest.Server {
@@ -43,7 +44,11 @@ func (m *thunderMock) server(t *testing.T) *httptest.Server {
 
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/applications/"):
 			m.deleted = true
-			m.appID = "" // gone
+			m.appID = "" // removed server-side regardless of the response code
+			if m.deleteStatus != 0 {
+				w.WriteHeader(m.deleteStatus)
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 
 		case r.Method == http.MethodPost && r.URL.Path == "/applications":
@@ -90,6 +95,23 @@ func TestEnsurePublisherApp_HealsWrongOU(t *testing.T) {
 	}
 	if id != "asdlc-publisher-org1" {
 		t.Errorf("client_id changed: got %q", id)
+	}
+}
+
+// Wrong OU + Thunder returns 500 on delete but the app is actually gone →
+// the heal must still recreate under the org OU (one-pass durability).
+func TestEnsurePublisherApp_HealsWrongOU_DeleteReturns500ButGone(t *testing.T) {
+	m := &thunderMock{appID: "app-1", appName: "asdlc-publisher-org1", clientID: "asdlc-publisher-org1", ouID: "default-ou", deleteStatus: 500}
+	srv := m.server(t)
+	defer srv.Close()
+	c := newTestClient(srv.URL)
+
+	_, secret, created, err := c.EnsurePublisherApp(context.Background(), "org1", "org-ou-1")
+	if err != nil {
+		t.Fatalf("heal must tolerate a 500-but-deleted delete, got error: %v", err)
+	}
+	if m.createdOU != "org-ou-1" || !created || secret != "fresh-secret" {
+		t.Errorf("want recreate under org-ou-1 (created+secret), got ou=%q created=%v secret=%q", m.createdOU, created, secret)
 	}
 }
 
