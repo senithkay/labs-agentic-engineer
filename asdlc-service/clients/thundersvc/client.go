@@ -296,15 +296,51 @@ func (c *client) EnsurePublisherApp(ctx context.Context, orgHandle, orgOUID stri
 	}
 	appName := PublisherAppName(orgHandle)
 
-	_, existingClientID, err := c.findApp(ctx, token, appName)
+	internalID, existingClientID, err := c.findApp(ctx, token, appName)
 	if err != nil {
-		return "", "", false, err
+		return "", "", false, fmt.Errorf("findApp %q: %w", appName, err)
 	}
 	if existingClientID != "" {
-		// Already exists. Thunder doesn't expose secrets on read so
-		// the caller must already have it in OpenBao; we return only
-		// the clientId + created=false.
-		return existingClientID, "", false, nil
+		// The app exists. Self-heal its OU: an app created under the wrong
+		// OU (e.g. the default OU, before this code registered under the
+		// org OU) issues cc tokens whose `ouHandle` won't match the org, so
+		// the publisher-token verifier rejects the runner. When we know the
+		// org OU and the existing app sits under a different one, delete +
+		// recreate it under the org OU. The client_id is deterministic
+		// (= app name) so it's unchanged; only the secret rotates, which
+		// the caller re-mirrors on the created=true branch.
+		if orgOUID == "" {
+			slog.WarnContext(ctx, "publisher app OU not verified — org OU unknown (falling back), token ouHandle may not match",
+				"appName", appName)
+			return existingClientID, "", false, nil
+		}
+		currentOU, ouErr := c.appOUID(ctx, token, internalID)
+		if ouErr != nil {
+			// Don't take a destructive heal on an uncertain read; log and
+			// keep the existing app so dispatch isn't blocked.
+			slog.WarnContext(ctx, "publisher app OU read failed — skipping OU self-heal",
+				"appName", appName, "appID", internalID, "error", ouErr)
+			return existingClientID, "", false, nil
+		}
+		if currentOU == "" || currentOU == orgOUID {
+			slog.DebugContext(ctx, "publisher app already under correct OU",
+				"appName", appName, "ouID", currentOU)
+			return existingClientID, "", false, nil
+		}
+		slog.InfoContext(ctx, "publisher app under wrong OU — re-registering under org OU",
+			"appName", appName, "appID", internalID, "currentOU", currentOU, "orgOU", orgOUID)
+		if _, derr := c.deleteApp(ctx, token, internalID); derr != nil {
+			return "", "", false, fmt.Errorf("heal publisher OU: delete %q (id=%s): %w", appName, internalID, derr)
+		}
+		id, secret, cerr := c.createApp(ctx, token, appName, orgOUID)
+		if cerr != nil {
+			// The old app is gone; the next dispatch re-enters the create
+			// path below and provisions fresh. Surface the error loudly.
+			return "", "", false, fmt.Errorf("heal publisher OU: recreate %q under OU %s: %w", appName, orgOUID, cerr)
+		}
+		slog.InfoContext(ctx, "publisher app re-registered under org OU (secret rotated)",
+			"appName", appName, "orgOU", orgOUID)
+		return id, secret, true, nil
 	}
 
 	// Register the app under the org's own OU so the cc token's `ouHandle`
@@ -314,15 +350,35 @@ func (c *client) EnsurePublisherApp(ctx context.Context, orgHandle, orgOUID stri
 	if ouID == "" {
 		ouID, err = c.getDefaultOUID(ctx, token)
 		if err != nil {
-			return "", "", false, err
+			return "", "", false, fmt.Errorf("getDefaultOUID: %w", err)
 		}
+		slog.WarnContext(ctx, "creating publisher app under DEFAULT OU — org OU unknown; token ouHandle may not match org",
+			"appName", appName, "defaultOU", ouID)
 	}
 
 	id, secret, err := c.createApp(ctx, token, appName, ouID)
 	if err != nil {
-		return "", "", false, err
+		return "", "", false, fmt.Errorf("createApp %q under OU %s: %w", appName, ouID, err)
 	}
+	slog.InfoContext(ctx, "publisher app created", "appName", appName, "ouID", ouID, "underOrgOU", orgOUID != "")
 	return id, secret, true, nil
+}
+
+// appOUID reads the OU id an existing Thunder application is registered
+// under, so EnsurePublisherApp can detect a wrong-OU app and heal it.
+// Returns "" (not an error) when the OU can't be determined from the app
+// body — callers treat that as "don't risk a destructive heal".
+func (c *client) appOUID(ctx context.Context, token, appID string) (string, error) {
+	app, err := c.getAppByID(ctx, token, appID)
+	if err != nil {
+		return "", err
+	}
+	for _, k := range []string{"ouId", "ou_id", "organizationUnitId"} {
+		if v, ok := app[k].(string); ok && v != "" {
+			return v, nil
+		}
+	}
+	return "", nil
 }
 
 func (c *client) DeletePublisherApp(ctx context.Context, orgHandle string) (bool, error) {

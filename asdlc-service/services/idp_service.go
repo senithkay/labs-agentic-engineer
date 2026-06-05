@@ -222,7 +222,14 @@ func (s *idpService) EnsureOrgPublisher(ctx context.Context, orgID, actor string
 	// registered under the org's OU — its cc token then carries
 	// ouHandle == orgHandle, which the publisher-token verifier requires.
 	// Empty (org UUID not yet backfilled) falls back to the default OU.
-	clientID, clientSecret, created, terr := s.thunder.EnsurePublisherApp(ctx, orgID, s.lookupOrgOUID(ctx, orgID))
+	orgOUID := s.lookupOrgOUID(ctx, orgID)
+	if orgOUID == "" {
+		slog.WarnContext(ctx, "idp_service: org Thunder OU id unknown — publisher app will use the default OU; runner token ouHandle may not match the org. Ensure the org row has thunder_org_uuid (user must have logged in with an ouId claim).",
+			"orgID", orgID)
+	} else {
+		slog.DebugContext(ctx, "idp_service: provisioning publisher under org OU", "orgID", orgID, "orgOU", orgOUID)
+	}
+	clientID, clientSecret, created, terr := s.thunder.EnsurePublisherApp(ctx, orgID, orgOUID)
 	if terr != nil {
 		s.audit(ctx, orgID, models.IDPAuditEnsurePublisher, actor, beforeJSON, nil, terr)
 		return "", "", false, fmt.Errorf("idp_service.EnsureOrgPublisher: %w", terr)
