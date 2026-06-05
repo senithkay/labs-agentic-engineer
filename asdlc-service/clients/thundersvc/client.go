@@ -330,7 +330,17 @@ func (c *client) EnsurePublisherApp(ctx context.Context, orgHandle, orgOUID stri
 		slog.InfoContext(ctx, "publisher app under wrong OU — re-registering under org OU",
 			"appName", appName, "appID", internalID, "currentOU", currentOU, "orgOU", orgOUID)
 		if _, derr := c.deleteApp(ctx, token, internalID); derr != nil {
-			return "", "", false, fmt.Errorf("heal publisher OU: delete %q (id=%s): %w", appName, internalID, derr)
+			// Thunder has been observed to return 5xx (SSE-5000) on delete
+			// even when the app was actually removed server-side. Don't abort
+			// the heal on that — re-check by name and, if the app is gone,
+			// continue to recreate so the heal completes in a single dispatch
+			// (otherwise the org is left with no publisher app until the next
+			// run). Only a genuinely-still-present app is a hard failure.
+			if _, stillID, ferr := c.findApp(ctx, token, appName); ferr != nil || stillID != "" {
+				return "", "", false, fmt.Errorf("heal publisher OU: delete %q (id=%s): %w", appName, internalID, derr)
+			}
+			slog.WarnContext(ctx, "publisher app delete returned an error but the app is gone — continuing to recreate",
+				"appName", appName, "appID", internalID, "deleteErr", derr)
 		}
 		id, secret, cerr := c.createApp(ctx, token, appName, orgOUID)
 		if cerr != nil {
