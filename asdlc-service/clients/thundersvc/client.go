@@ -52,7 +52,14 @@ type Client interface {
 	// it up in their secret store. When the secret was lost (e.g.
 	// OpenBao was wiped), use RegenerateClientSecret to issue a new
 	// one.
-	EnsurePublisherApp(ctx context.Context, orgHandle string) (clientID, clientSecret string, created bool, err error)
+	//
+	// orgOUID is the org's Thunder OU id (the JWT `ouId`). The app is
+	// registered under that OU so its client_credentials token carries
+	// `ouHandle == orgHandle` — the publisher-token verifier's cross-org
+	// check requires this. When orgOUID is empty the default OU is used
+	// (single-org / local dev), which only matches when the default OU
+	// is the org's OU.
+	EnsurePublisherApp(ctx context.Context, orgHandle, orgOUID string) (clientID, clientSecret string, created bool, err error)
 
 	// DeletePublisherApp deletes the publisher app for the given org.
 	// Returns true when the app existed and was deleted, false when it
@@ -279,7 +286,7 @@ func (c *client) getDefaultOUID(ctx context.Context, token string) (string, erro
 
 // -- EnsurePublisherApp ---------------------------------------------------
 
-func (c *client) EnsurePublisherApp(ctx context.Context, orgHandle string) (string, string, bool, error) {
+func (c *client) EnsurePublisherApp(ctx context.Context, orgHandle, orgOUID string) (string, string, bool, error) {
 	if orgHandle == "" {
 		return "", "", false, fmt.Errorf("orgHandle required")
 	}
@@ -300,9 +307,15 @@ func (c *client) EnsurePublisherApp(ctx context.Context, orgHandle string) (stri
 		return existingClientID, "", false, nil
 	}
 
-	ouID, err := c.getDefaultOUID(ctx, token)
-	if err != nil {
-		return "", "", false, err
+	// Register the app under the org's own OU so the cc token's `ouHandle`
+	// resolves to the org handle (the verifier's cross-org check). Fall
+	// back to the default OU only when the org OU is unknown.
+	ouID := orgOUID
+	if ouID == "" {
+		ouID, err = c.getDefaultOUID(ctx, token)
+		if err != nil {
+			return "", "", false, err
+		}
 	}
 
 	id, secret, err := c.createApp(ctx, token, appName, ouID)
