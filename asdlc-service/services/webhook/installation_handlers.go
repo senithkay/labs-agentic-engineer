@@ -251,19 +251,20 @@ func (h *installationHandler) handleReposRemoved(ctx context.Context, _ string, 
 		return nil
 	}
 
-	// Resolve removed repo full_names → project IDs via git_repositories.
-	projectIDs := make([]string, 0, len(confirmed))
-	repoByProject := make(map[string]string, len(confirmed))
+	// Resolve removed repo full_names → (orgID, projectID) via git_repositories.
+	// We key by the (org, project) tuple, not project_id alone: project_id is a
+	// per-org slug reused across orgs, so a project_id-only match would cascade
+	// the abandon onto another org's tasks that share the slug.
+	orgProjectPairs := make([][]any, 0, len(confirmed))
 	for _, r := range confirmed {
-		pid, err := lookupProjectByRepo(h.db.WithContext(ctx), r)
+		orgID, pid, err := lookupProjectByRepo(h.db.WithContext(ctx), r)
 		if err != nil || pid == "" {
 			// No project for this repo on our side — nothing to cascade.
 			continue
 		}
-		projectIDs = append(projectIDs, pid)
-		repoByProject[pid] = r
+		orgProjectPairs = append(orgProjectPairs, []any{orgID, pid})
 	}
-	if len(projectIDs) == 0 {
+	if len(orgProjectPairs) == 0 {
 		slog.InfoContext(ctx, "webhook: reach reconciliation Phase B confirmed but no matching projects",
 			"installationId", p.Installation.ID, "confirmed", confirmed)
 		return nil
@@ -279,7 +280,7 @@ func (h *installationHandler) handleReposRemoved(ctx context.Context, _ string, 
 		string(models.TaskStatusAbandoned),
 	}
 	if err := h.db.WithContext(ctx).
-		Where("project_id IN ? AND status NOT IN ?", projectIDs, terminal).
+		Where("(org_id, project_id) IN ? AND status NOT IN ?", orgProjectPairs, terminal).
 		Find(&tasks).Error; err != nil {
 		slog.ErrorContext(ctx, "webhook: reach reconciliation Phase B list tasks failed",
 			"installationId", p.Installation.ID, "error", err)
