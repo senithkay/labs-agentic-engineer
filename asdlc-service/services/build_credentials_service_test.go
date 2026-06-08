@@ -141,6 +141,26 @@ func TestStageBuildSecret_DeleteNotFoundTolerated(t *testing.T) {
 	}
 }
 
+// A 409 on the create leg (a concurrent same-org build re-created the secret
+// between our delete and create) must be tolerated — the secret exists with a
+// valid token, so the build proceeds.
+func TestStageBuildSecret_CreateConflictTolerated(t *testing.T) {
+	repos := &fakeRepoRepo{rows: map[string]*models.GitRepository{
+		"default/slug": {OrgID: "default", RepoSlug: "slug"},
+	}}
+	res := &fakeResolver{cred: &fakeCred{token: "t", exp: time.Now().Add(time.Hour)}}
+	gs := &fakeGitSecretClient{createErr: openchoreo.ErrConflict}
+
+	svc := NewBuildCredentialsService(repos, res, gs)
+	got, err := svc.StageBuildSecret(context.Background(), "default", "slug", testRunName)
+	if err != nil {
+		t.Fatalf("StageBuildSecret should tolerate create-409, got: %v", err)
+	}
+	if got.SecretRef != BuildGitSecretName {
+		t.Errorf("SecretRef = %q; want %q", got.SecretRef, BuildGitSecretName)
+	}
+}
+
 // With no git-secret client wired (degraded), provisioning is skipped and an
 // empty SecretRef is returned so the build clones unauthenticated.
 func TestStageBuildSecret_NilClientDegraded(t *testing.T) {
