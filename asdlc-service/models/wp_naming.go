@@ -27,31 +27,10 @@ func WorkflowPlaneNamespace(ocOrgID string) string {
 	return boundedDNSName("workflows-", ocOrgID)
 }
 
-// BuildSecretNameFor returns the K8s Secret name git-service writes
-// (kubernetes.io/basic-auth) into WorkflowPlaneNamespace(ocOrgID) for one
-// WorkflowRun. The name matches the upstream `dockerfile-builder`
-// ClusterWorkflow's expected default for `workflow.parameters.git-secret`
-// — `${metadata.workflowRunName}-git-secret` (line 144 of the workflow).
-//
-// Per-WorkflowRun (NOT per-org) because the upstream workflow templates
-// the Secret name from the WorkflowRun's metadata.name; using that exact
-// shape lets us keep the shared workflow byte-identical to upstream while
-// pre-staging the Secret from git-service before the build pod runs.
-//
-// We intentionally do NOT length-bound here. The workflow itself fails
-// the Argo Workflow creation if `<workflowRunName>-git-secret` exceeds
-// DNS-1123 subdomain length, so the WorkflowRun would already be invalid
-// upstream — bounding here would produce a name that doesn't match what
-// the workflow templates and silently break the mount.
-func BuildSecretNameFor(workflowRunName string) string {
-	return workflowRunName + "-git-secret"
-}
-
 // AnthropicSecretName is the fixed K8s Secret name git-service writes
 // into WorkflowPlaneNamespace(ocOrgID). The Secret is unique within its
 // namespace (one per WP namespace, one WP namespace per org), so no
-// org-id encoding in the name is needed — different from BuildSecretName
-// which retains its legacy `git-<orgID>` shape. The coding-agent pod
+// org-id encoding in the name is needed. The coding-agent pod
 // mounts this Secret's ANTHROPIC_API_KEY key via secretKeyRef. Each
 // dispatch SSA-overwrites the same Secret with the freshest value from
 // `org_secrets`.

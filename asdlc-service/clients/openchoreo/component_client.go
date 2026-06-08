@@ -89,12 +89,16 @@ type ComponentClient interface {
 	// empty the OC client auto-generates one via NewBuildRunName. Callers
 	// that need to know the name ahead of time (so they can stage a
 	// per-WorkflowRun build Secret) MUST pass it.
-	TriggerBuild(ctx context.Context, orgName, projectName, componentName, runName string) (*models.WorkflowRun, error)
+	// secretRef sets parameters.repository.secretRef so the dockerfile-builder
+	// workflow synthesises the git Secret from the org's SecretReference
+	// (provisioned by BuildCredentialsService). Empty leaves it blank — the
+	// build clones unauthenticated (public repos only).
+	TriggerBuild(ctx context.Context, orgName, projectName, componentName, secretRef, runName string) (*models.WorkflowRun, error)
 	// TriggerBuildAtCommit creates a WorkflowRun pinned to commitSHA via
 	// params.repository.revision.commit. Mirrors agent-manager's pattern at
 	// agent-manager-service/clients/openchoreosvc/client/builds.go:71-85.
-	// See TriggerBuild for the `runName` contract.
-	TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, runName string) (*models.WorkflowRun, error)
+	// See TriggerBuild for the `runName` + `secretRef` contracts.
+	TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*models.WorkflowRun, error)
 	// TriggerCodingAgent creates a WorkflowRun of ClusterWorkflow
 	// `app-factory-coding-agent` for the per-task ephemeral pod that runs the
 	// Claude Agent SDK against the task's feature branch. Replaces the legacy
@@ -865,12 +869,12 @@ func (c *componentClient) ListDeployments(ctx context.Context, orgName, projectN
 
 // -- WorkflowRuns (builds + coding-agent) ------------------------------------
 
-func (c *componentClient) TriggerBuild(ctx context.Context, orgName, projectName, componentName, runName string) (*models.WorkflowRun, error) {
-	return c.triggerBuildInner(ctx, orgName, projectName, componentName, "", runName)
+func (c *componentClient) TriggerBuild(ctx context.Context, orgName, projectName, componentName, secretRef, runName string) (*models.WorkflowRun, error) {
+	return c.triggerBuildInner(ctx, orgName, projectName, componentName, "", secretRef, runName)
 }
 
-func (c *componentClient) TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, runName string) (*models.WorkflowRun, error) {
-	return c.triggerBuildInner(ctx, orgName, projectName, componentName, commitSHA, runName)
+func (c *componentClient) TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*models.WorkflowRun, error) {
+	return c.triggerBuildInner(ctx, orgName, projectName, componentName, commitSHA, secretRef, runName)
 }
 
 // triggerBuildInner fetches the Component to grab its declared Workflow
@@ -884,7 +888,7 @@ func (c *componentClient) TriggerBuildAtCommit(ctx context.Context, orgName, pro
 // Production callers (dispatch path, console "Build" button) pass runName
 // because they staged the per-WorkflowRun build Secret with that name
 // upfront.
-func (c *componentClient) triggerBuildInner(ctx context.Context, orgName, projectName, componentName, commitSHA, runName string) (*models.WorkflowRun, error) {
+func (c *componentClient) triggerBuildInner(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*models.WorkflowRun, error) {
 	scopedComp := ScopedComponentName(projectName, componentName)
 
 	compResp, err := c.oc.GetComponentWithResponse(ctx, orgName, scopedComp)
@@ -900,7 +904,7 @@ func (c *componentClient) triggerBuildInner(ctx context.Context, orgName, projec
 		})
 	}
 
-	wf := buildWorkflowFromComponent(compResp.JSON200, commitSHA)
+	wf := buildWorkflowFromComponent(compResp.JSON200, commitSHA, secretRef)
 	if wf.Name == "" {
 		return nil, fmt.Errorf("trigger build: component %s/%s has no workflow configured", projectName, componentName)
 	}
@@ -928,7 +932,7 @@ func (c *componentClient) triggerBuildInner(ctx context.Context, orgName, projec
 // Parameters is shaped as `map[string]interface{}` end-to-end on the gen
 // side; we deep-copy the slice keys we touch to avoid mutating shared maps
 // returned by the cache layer (which would race with concurrent triggers).
-func buildWorkflowFromComponent(comp *gen.Component, commitSHA string) gen.WorkflowRunConfig {
+func buildWorkflowFromComponent(comp *gen.Component, commitSHA, secretRef string) gen.WorkflowRunConfig {
 	if comp == nil || comp.Spec == nil || comp.Spec.Workflow == nil {
 		return gen.WorkflowRunConfig{}
 	}
@@ -950,30 +954,26 @@ func buildWorkflowFromComponent(comp *gen.Component, commitSHA string) gen.Workf
 	if commitSHA != "" {
 		injectCommitSHA(params, commitSHA)
 	}
-	// Force-blank repository.secretRef. App Factory delivers the per-build
-	// credential by pre-staging a K8s Secret named
-	// `<workflowRunName>-git-secret` in workflows-<orgID> (see
-	// docs/design/build-credential-injection.md); the upstream
-	// dockerfile-builder workflow's externalRefs lookup is skipped when
-	// secretRef is empty (openchoreo internal/controller/workflowrun/
-	// externalref.go:41-44) and its git-secret ExternalSecret resource is
-	// gated on `secretRef != ""`. Legacy Components may still have a
-	// non-empty secretRef stored from the SecretReference-era flow — wipe
-	// it at trigger time so the workflow never tries to resolve it.
-	blankRepoSecretRef(params)
+	// Set repository.secretRef explicitly at trigger time. When non-empty
+	// (the BFF provisioned the per-org GitSecret), the dockerfile-builder
+	// workflow synthesises the git ExternalSecret from that SecretReference;
+	// when empty it clones unauthenticated (public repos). Setting it here —
+	// rather than trusting whatever the Component stored — keeps the build's
+	// credential a property of the dispatch (which provisioned the secret),
+	// and overwrites any stale value left by an earlier flow.
+	setRepoSecretRef(params, secretRef)
 	out.Parameters = &params
 	return out
 }
 
-// blankRepoSecretRef sets params["repository"]["secretRef"] = "", creating
-// the nested map if needed. No-op for components that never had a
-// repository block.
-func blankRepoSecretRef(params map[string]interface{}) {
+// setRepoSecretRef sets params["repository"]["secretRef"] = secretRef.
+// No-op for components that never had a repository block.
+func setRepoSecretRef(params map[string]interface{}, secretRef string) {
 	repo, ok := params["repository"].(map[string]interface{})
 	if !ok {
 		return
 	}
-	repo["secretRef"] = ""
+	repo["secretRef"] = secretRef
 }
 
 // injectCommitSHA stamps params["repository"]["revision"]["commit"] = sha,
@@ -1170,4 +1170,3 @@ func (c *componentClient) GetWorkflowRun(ctx context.Context, orgName, runName s
 	run := workflowRunToModel(*resp.JSON200)
 	return &run, nil
 }
-

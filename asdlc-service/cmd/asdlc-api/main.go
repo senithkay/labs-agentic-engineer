@@ -321,6 +321,10 @@ func main() {
 	projectClient := openchoreo.NewProjectClient(ocConfig)
 	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
 	componentClient := openchoreo.NewComponentClient(ocConfig)
+	// GitSecret client lands the per-org build git credential on the workflow
+	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
+	// for both cloud (CP/WP split) and local k3d — one unified path.
+	gitSecretClient := openchoreo.NewGitSecretClient(ocConfig)
 
 	// Observability client (optional — build logs disabled when URL not set)
 	var observClient observability.Client
@@ -530,7 +534,7 @@ func main() {
 	webhookRegService := services.NewWebhookService(repoRepo, githubClient, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
 	credRefreshService := services.NewCredentialsRefreshService(credResolver)
 	credService := services.NewCredentialService(db, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, githubClient)
-	buildCredService := services.NewBuildCredentialsService(repoRepo, credResolver, wpClient)
+	buildCredService := services.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
 	credService.WithBuildSecretCleaner(buildCredService)
 	anthropicInvalidator := services.HTTPAgentsCacheInvalidator(cfg.AgentsServiceURL, "")
 	anthropicCredService := services.NewAnthropicCredentialService(db, credStore, wpClient, cfg.AnthropicPlatformKey, anthropicInvalidator)

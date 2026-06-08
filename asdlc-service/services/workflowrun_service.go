@@ -171,11 +171,14 @@ func (s *workflowRunService) dispatchBuild(
 	// per-build K8s Secret before the WorkflowRun spawns the Argo pod.
 	runName := openchoreo.NewBuildRunName(projectID, task.ComponentName)
 
-	// Stage the per-WorkflowRun build Secret in workflows-<orgID> with the
-	// org's GitHub credential. Errors classify identically to the previous
-	// mint-build surface (404 → skip, 409 → skip, 5xx → log + retry).
+	// Provision the org's build git secret on the workflow plane (OC
+	// GitSecret) and capture the secretRef to pass to the build. Errors
+	// classify identically to the previous mint-build surface (404 → skip,
+	// 409 → skip, 5xx → log + retry).
+	var buildSecretRef string
 	if s.repoSvc != nil && s.buildCredSvc != nil && repoSlug != "" {
-		if _, err := s.buildCredSvc.StageBuildSecret(ctx, orgID, repoSlug, runName); err != nil {
+		res, err := s.buildCredSvc.StageBuildSecret(ctx, orgID, repoSlug, runName)
+		if err != nil {
 			switch {
 			case errors.Is(err, ErrRepoNotInOrg):
 				slog.WarnContext(ctx, "stage-build-secret refused: repo/org mismatch",
@@ -191,9 +194,12 @@ func (s *workflowRunService) dispatchBuild(
 				return "", err
 			}
 		}
+		if res != nil {
+			buildSecretRef = res.SecretRef
+		}
 	}
 
-	run, err := s.ocClient.TriggerBuildAtCommit(ctx, orgID, projectID, task.ComponentName, sha, runName)
+	run, err := s.ocClient.TriggerBuildAtCommit(ctx, orgID, projectID, task.ComponentName, sha, buildSecretRef, runName)
 	if err != nil {
 		slog.ErrorContext(ctx, "trigger build failed",
 			"component", task.ComponentName, "sha", sha, "error", err)
@@ -286,7 +292,8 @@ func (s *workflowRunService) RetryAuthFailedBuild(ctx context.Context, task *mod
 		return "", fmt.Errorf("retry-auth-failed: project %s has no repo slug", task.ProjectID)
 	}
 	runName := openchoreo.NewBuildRunName(task.ProjectID, task.ComponentName)
-	if _, err := s.buildCredSvc.StageBuildSecret(ctx, task.OrgID, repo.RepoSlug, runName); err != nil {
+	res, err := s.buildCredSvc.StageBuildSecret(ctx, task.OrgID, repo.RepoSlug, runName)
+	if err != nil {
 		switch {
 		case errors.Is(err, ErrRepoNotInOrg), errors.Is(err, ErrOrgDisconnected):
 			return "", err
@@ -294,7 +301,11 @@ func (s *workflowRunService) RetryAuthFailedBuild(ctx context.Context, task *mod
 			return "", fmt.Errorf("retry-auth-failed: stage-build-secret: %w", err)
 		}
 	}
-	run, err := s.ocClient.TriggerBuildAtCommit(ctx, task.OrgID, task.ProjectID, task.ComponentName, task.LastBuildSHA, runName)
+	buildSecretRef := ""
+	if res != nil {
+		buildSecretRef = res.SecretRef
+	}
+	run, err := s.ocClient.TriggerBuildAtCommit(ctx, task.OrgID, task.ProjectID, task.ComponentName, task.LastBuildSHA, buildSecretRef, runName)
 	if err != nil {
 		return "", fmt.Errorf("retry-auth-failed: trigger build: %w", err)
 	}
