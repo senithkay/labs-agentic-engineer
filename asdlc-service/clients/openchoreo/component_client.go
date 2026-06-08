@@ -689,7 +689,26 @@ func buildCreateComponentBody(projectName string, req *models.CreateComponentReq
 		AnnotationKeyDisplayName: req.DisplayName,
 		AnnotationKeyDescription: req.Description,
 	}
-	ctKind := gen.ComponentSpecComponentTypeKindClusterComponentType
+	// Reference the per-org NAMESPACED ComponentType (not the cluster-scoped
+	// ClusterComponentType). Why: in dev cloud the `deployment/service`
+	// ClusterComponentType is the OpenChoreo built-in, whose render template has
+	// NO `registry-pull-secret` / `imagePullSecrets` — so the deployed workload
+	// can't pull its image from the per-org ECR repo and the Release sits at
+	// ResourcesProgressing (ImagePullBackOff) forever. The platform provisions a
+	// per-org namespaced ComponentType (named `service`/`web-application`, via
+	// platform-api ProvisionOrgUnit) that DOES carry the registry-pull-secret +
+	// imagePullSecrets AND still allows the dockerfile-builder ClusterWorkflow.
+	// Devant and agent-manager both reference the namespaced `ComponentType`
+	// (kind=ComponentType) for the same reason; app-factory was the outlier.
+	//
+	// NOTE — must verify locally before relying on this unconditionally: the
+	// local stack (deployments/scripts/setup-asdlc.sh) currently ships
+	// `service`/`web-application` ONLY as cluster-scoped ClusterComponentTypes
+	// and does not provision per-org namespaced ComponentTypes, so this kind may
+	// need to become env-conditional (ComponentType in cloud, ClusterComponentType
+	// locally) — or local setup updated to provision the namespaced types. The
+	// type NAME (`deployment/service` etc.) is identical for both kinds.
+	ctKind := gen.ComponentSpecComponentTypeKindComponentType
 	body := gen.Component{
 		Metadata: gen.ObjectMeta{
 			Name:        ScopedComponentName(projectName, req.Name),
