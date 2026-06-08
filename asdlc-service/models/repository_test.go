@@ -23,22 +23,6 @@ func TestSlugForURL(t *testing.T) {
 	}
 }
 
-func TestBuildSecretNameFor(t *testing.T) {
-	// The Secret name must match what the upstream dockerfile-builder
-	// ClusterWorkflow templates from `${metadata.workflowRunName}-git-secret`.
-	cases := []struct {
-		runName, want string
-	}{
-		{"default-greeting-api-1731538100123", "default-greeting-api-1731538100123-git-secret"},
-		{"x", "x-git-secret"},
-	}
-	for _, c := range cases {
-		if got := BuildSecretNameFor(c.runName); got != c.want {
-			t.Errorf("BuildSecretNameFor(%q) = %q; want %q", c.runName, got, c.want)
-		}
-	}
-}
-
 func TestWorkflowPlaneNamespace(t *testing.T) {
 	cases := []struct {
 		in, want string

@@ -56,8 +56,8 @@ type componentService struct {
 	// repoSvc + buildCredSvc are used by TriggerBuild to pre-stage the
 	// per-WorkflowRun build Secret. Optional — nil means "no staging"
 	// (tests / unit-only flows).
-	repoSvc       RepoService
-	buildCredSvc  *BuildCredentialsService
+	repoSvc      RepoService
+	buildCredSvc *BuildCredentialsService
 }
 
 // NewComponentService builds the component service. repoSvc + buildCredSvc
@@ -167,22 +167,27 @@ func (s *componentService) TriggerBuild(ctx context.Context, orgName, projectNam
 	// Manual triggers from the console go through this path; the
 	// webhook-driven dispatch path uses workflowRunService.dispatchBuild.
 	runName := openchoreo.NewBuildRunName(projectName, componentName)
+	buildSecretRef := ""
 	if s.repoSvc != nil && s.buildCredSvc != nil {
 		repo, err := s.repoSvc.GetRepo(ctx, projectName)
 		switch {
 		case err != nil:
-			slog.WarnContext(ctx, "trigger-build: GetRepo failed; proceeding without staged Secret (build will fail at clone)",
+			slog.WarnContext(ctx, "trigger-build: GetRepo failed; proceeding without git secret (build will fail at clone)",
 				"orgName", orgName, "projectName", projectName, "error", err)
 		case repo == nil || repo.RepoSlug == "":
-			slog.WarnContext(ctx, "trigger-build: no repo / repoSlug; proceeding without staged Secret",
+			slog.WarnContext(ctx, "trigger-build: no repo / repoSlug; proceeding without git secret",
 				"orgName", orgName, "projectName", projectName)
 		default:
-			if _, sErr := s.buildCredSvc.StageBuildSecret(ctx, orgName, repo.RepoSlug, runName); sErr != nil {
+			res, sErr := s.buildCredSvc.StageBuildSecret(ctx, orgName, repo.RepoSlug, runName)
+			if sErr != nil {
 				return nil, fmt.Errorf("trigger-build: stage-build-secret: %w", sErr)
+			}
+			if res != nil {
+				buildSecretRef = res.SecretRef
 			}
 		}
 	}
-	run, err := s.client.TriggerBuild(ctx, orgName, projectName, componentName, runName)
+	run, err := s.client.TriggerBuild(ctx, orgName, projectName, componentName, buildSecretRef, runName)
 	if err != nil {
 		return nil, translateComponentHTTPError(err)
 	}
