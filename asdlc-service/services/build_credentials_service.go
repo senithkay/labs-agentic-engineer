@@ -141,7 +141,20 @@ func (s *BuildCredentialsService) StageBuildSecret(
 	}
 
 	if err := s.provisionGitSecret(ctx, ocOrgID, usernameForCredential(cred), token); err != nil {
-		return nil, fmt.Errorf("stage-build-secret: provision git secret: %w", err)
+		// Degrade gracefully instead of blocking the build. On dev cloud the
+		// OpenChoreo GitSecret API is unreachable — the platform-api does not
+		// route /api/v1alpha1/gitsecrets, so CreateGitSecret 404s (cross-plane
+		// private-repo secret delivery is tracked by wso2-enterprise/wso2cloud#319).
+		// Returning an empty SecretRef lets the build dispatch and clone
+		// unauthenticated, which is correct for the public repos app-factory
+		// creates by default; a private repo would fail later at checkout with a
+		// clear git error rather than a stuck task. Where provisioning DOES work
+		// (local k3d, single cluster), this branch is not taken and the real
+		// SecretRef is returned below.
+		slog.WarnContext(ctx, "stage-build-secret: git secret provisioning failed — dispatching build without a git secret (clones public repos only; see wso2cloud#319)",
+			"ocOrgId", ocOrgID, "repoSlug", repoSlug,
+			"workflowRunName", workflowRunName, "error", err)
+		return &StageResult{SecretRef: ""}, nil
 	}
 
 	slog.InfoContext(ctx, "stage-build-secret: git secret provisioned",
