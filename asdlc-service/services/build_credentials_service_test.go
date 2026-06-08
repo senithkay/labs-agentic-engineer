@@ -141,6 +141,48 @@ func TestStageBuildSecret_DeleteNotFoundTolerated(t *testing.T) {
 	}
 }
 
+// A 409 on the create leg (a concurrent same-org build re-created the secret
+// between our delete and create) must be tolerated — the secret exists with a
+// valid token, so the build proceeds.
+func TestStageBuildSecret_CreateConflictTolerated(t *testing.T) {
+	repos := &fakeRepoRepo{rows: map[string]*models.GitRepository{
+		"default/slug": {OrgID: "default", RepoSlug: "slug"},
+	}}
+	res := &fakeResolver{cred: &fakeCred{token: "t", exp: time.Now().Add(time.Hour)}}
+	gs := &fakeGitSecretClient{createErr: openchoreo.ErrConflict}
+
+	svc := NewBuildCredentialsService(repos, res, gs)
+	got, err := svc.StageBuildSecret(context.Background(), "default", "slug", testRunName)
+	if err != nil {
+		t.Fatalf("StageBuildSecret should tolerate create-409, got: %v", err)
+	}
+	if got.SecretRef != BuildGitSecretName {
+		t.Errorf("SecretRef = %q; want %q", got.SecretRef, BuildGitSecretName)
+	}
+}
+
+// A non-tolerated provisioning failure (e.g. the dev-cloud platform-api 404 on
+// CreateGitSecret, surfaced as ErrNotFound) must NOT block the build — it
+// degrades to an empty SecretRef so the build dispatches and clones the
+// (public) repo unauthenticated. Private-repo support is tracked by
+// wso2-enterprise/wso2cloud#319.
+func TestStageBuildSecret_ProvisionFailureDegrades(t *testing.T) {
+	repos := &fakeRepoRepo{rows: map[string]*models.GitRepository{
+		"default/slug": {OrgID: "default", RepoSlug: "slug"},
+	}}
+	res := &fakeResolver{cred: &fakeCred{token: "t", exp: time.Now().Add(time.Hour)}}
+	gs := &fakeGitSecretClient{createErr: openchoreo.ErrNotFound}
+
+	svc := NewBuildCredentialsService(repos, res, gs)
+	got, err := svc.StageBuildSecret(context.Background(), "default", "slug", testRunName)
+	if err != nil {
+		t.Fatalf("StageBuildSecret should degrade on provision failure, got: %v", err)
+	}
+	if got.SecretRef != "" {
+		t.Errorf("SecretRef = %q; want empty (degraded)", got.SecretRef)
+	}
+}
+
 // With no git-secret client wired (degraded), provisioning is skipped and an
 // empty SecretRef is returned so the build clones unauthenticated.
 func TestStageBuildSecret_NilClientDegraded(t *testing.T) {

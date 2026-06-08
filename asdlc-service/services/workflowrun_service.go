@@ -172,9 +172,12 @@ func (s *workflowRunService) dispatchBuild(
 	runName := openchoreo.NewBuildRunName(projectID, task.ComponentName)
 
 	// Provision the org's build git secret on the workflow plane (OC
-	// GitSecret) and capture the secretRef to pass to the build. Errors
-	// classify identically to the previous mint-build surface (404 → skip,
-	// 409 → skip, 5xx → log + retry).
+	// GitSecret) and capture the secretRef to pass to the build. Failing to
+	// provision the secret is non-fatal — StageBuildSecret degrades to an empty
+	// secretRef so the build still dispatches and clones unauthenticated (correct
+	// for the public repos app-factory creates by default; private-repo support
+	// is tracked by wso2-enterprise/wso2cloud#319). Only an ownership/credential
+	// refusal (repo not in org, org disconnected) blocks the build here.
 	var buildSecretRef string
 	if s.repoSvc != nil && s.buildCredSvc != nil && repoSlug != "" {
 		res, err := s.buildCredSvc.StageBuildSecret(ctx, orgID, repoSlug, runName)

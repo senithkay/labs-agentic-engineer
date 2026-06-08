@@ -141,7 +141,20 @@ func (s *BuildCredentialsService) StageBuildSecret(
 	}
 
 	if err := s.provisionGitSecret(ctx, ocOrgID, usernameForCredential(cred), token); err != nil {
-		return nil, fmt.Errorf("stage-build-secret: provision git secret: %w", err)
+		// Degrade gracefully instead of blocking the build. On dev cloud the
+		// OpenChoreo GitSecret API is unreachable — the platform-api does not
+		// route /api/v1alpha1/gitsecrets, so CreateGitSecret 404s (cross-plane
+		// private-repo secret delivery is tracked by wso2-enterprise/wso2cloud#319).
+		// Returning an empty SecretRef lets the build dispatch and clone
+		// unauthenticated, which is correct for the public repos app-factory
+		// creates by default; a private repo would fail later at checkout with a
+		// clear git error rather than a stuck task. Where provisioning DOES work
+		// (local k3d, single cluster), this branch is not taken and the real
+		// SecretRef is returned below.
+		slog.WarnContext(ctx, "stage-build-secret: git secret provisioning failed — dispatching build without a git secret (clones public repos only; see wso2cloud#319)",
+			"ocOrgId", ocOrgID, "repoSlug", repoSlug,
+			"workflowRunName", workflowRunName, "error", err)
+		return &StageResult{SecretRef: ""}, nil
 	}
 
 	slog.InfoContext(ctx, "stage-build-secret: git secret provisioned",
@@ -153,14 +166,19 @@ func (s *BuildCredentialsService) StageBuildSecret(
 
 // provisionGitSecret refreshes the per-org build GitSecret with the current
 // token. OC has no update verb and Create 409s on a duplicate name, so we
-// delete (tolerating not-found) then create. The brief delete window is safe
-// for in-flight builds: each build has its own ExternalSecret/target Secret,
-// ESO defaults to deletionPolicy=Retain, and installation tokens are
-// interchangeable.
+// delete (tolerating not-found) then create. Both legs tolerate the benign
+// concurrent state: a not-found delete and a conflicting create both mean
+// another same-org build raced us. The delete window and a conflicting create
+// are safe for in-flight builds — each build has its own ExternalSecret/target
+// Secret, ESO defaults to deletionPolicy=Retain, and installation tokens are
+// account-scoped/interchangeable (the racing build's token clones our repo too).
 func (s *BuildCredentialsService) provisionGitSecret(ctx context.Context, ocOrgID, username, token string) error {
 	if err := s.gitSecrets.DeleteGitSecret(ctx, ocOrgID, BuildGitSecretName); err != nil && !errors.Is(err, openchoreo.ErrNotFound) {
 		return fmt.Errorf("refresh (delete) git secret: %w", err)
 	}
+	// Tolerate ErrConflict (409): a concurrent build re-created the secret
+	// between our delete and create. The secret exists with a valid token, so
+	// the build can proceed — don't fail it on the race.
 	if _, err := s.gitSecrets.CreateGitSecret(ctx, ocOrgID, openchoreo.CreateGitSecretRequest{
 		Name:       BuildGitSecretName,
 		SecretType: openchoreo.GitSecretBasicAuth,
@@ -168,7 +186,7 @@ func (s *BuildCredentialsService) provisionGitSecret(ctx context.Context, ocOrgI
 		Token:      token,
 		// WorkflowPlaneKind/Name left zero — the client defaults them to
 		// ClusterWorkflowPlane/default.
-	}); err != nil {
+	}); err != nil && !errors.Is(err, openchoreo.ErrConflict) {
 		return fmt.Errorf("create git secret: %w", err)
 	}
 	return nil

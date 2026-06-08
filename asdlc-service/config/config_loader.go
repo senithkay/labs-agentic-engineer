@@ -88,7 +88,7 @@ func Load() (Config, error) {
 		// env-var names the standalone git-service used so existing local
 		// .env files / release-bindings keep working.
 		RepoBasePath:                r.readOptionalString("REPO_BASE_PATH", "/tmp/asdlc-repos"),
-		GitHubRepoVisibility:        r.readOptionalString("GITHUB_REPO_VISIBILITY", "private"),
+		GitHubRepoVisibility:        r.readOptionalString("GITHUB_REPO_VISIBILITY", "public"),
 		GitHubCommitterName:         r.readOptionalString("GIT_COMMITTER_NAME", "ASDLC Bot"),
 		GitHubCommitterEmail:        r.readOptionalString("GIT_COMMITTER_EMAIL", "bot@asdlc.dev"),
 		WebhookDeliveryURL:          r.readOptionalString("GITHUB_WEBHOOK_DELIVERY_URL", ""),
