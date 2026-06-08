@@ -82,7 +82,7 @@ func (p *Projector) ApplyToTaskByPR(
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Resolve repo_full_name → project_id via git_repositories. The repo
 		// row is the authority here; without it the PR number is ambiguous.
-		projectID, err := lookupProjectByRepo(tx, repoFullName)
+		orgID, projectID, err := lookupProjectByRepo(tx, repoFullName)
 		if err != nil {
 			return fmt.Errorf("resolve project for repo %q: %w", repoFullName, err)
 		}
@@ -90,11 +90,13 @@ func (p *Projector) ApplyToTaskByPR(
 			return errTaskNotFound{prNumber: prNumber, repoFullName: repoFullName}
 		}
 
-		// Find the task scoped to (project, PR number). We use FOR UPDATE in
-		// case this is called concurrently against the same task; combined
-		// with the advisory lock below this is belt-and-suspenders.
+		// Find the task scoped to (org, project, PR number). org_id is required:
+		// project_id is a per-org slug reused across orgs, so a (project, PR)
+		// filter alone can resolve to another org's task that shares the slug.
+		// We use FOR UPDATE in case this is called concurrently against the same
+		// task; combined with the advisory lock below this is belt-and-suspenders.
 		var task models.ComponentTask
-		err = tx.Where("project_id = ? AND pull_request_number = ?", projectID, prNumber).
+		err = tx.Where("org_id = ? AND project_id = ? AND pull_request_number = ?", orgID, projectID, prNumber).
 			Clauses().
 			First(&task).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -271,7 +273,7 @@ func (p *Projector) LinkTaskByIssue(
 		return fmt.Errorf("repoFullName is required")
 	}
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		projectID, err := lookupProjectByRepo(tx, repoFullName)
+		orgID, projectID, err := lookupProjectByRepo(tx, repoFullName)
 		if err != nil {
 			return fmt.Errorf("resolve project for repo %q: %w", repoFullName, err)
 		}
@@ -279,8 +281,11 @@ func (p *Projector) LinkTaskByIssue(
 			return errTaskNotFound{issueNumber: issueNumber, repoFullName: repoFullName}
 		}
 
+		// Scope by (org, project, issue): project_id is a per-org slug reused
+		// across orgs, so an issue lookup without org_id can link the PR to a
+		// different org's task that shares the slug and issue number.
 		var task models.ComponentTask
-		err = tx.Where("project_id = ? AND issue_number = ?", projectID, issueNumber).
+		err = tx.Where("org_id = ? AND project_id = ? AND issue_number = ?", orgID, projectID, issueNumber).
 			First(&task).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errTaskNotFound{issueNumber: issueNumber, repoFullName: repoFullName}
