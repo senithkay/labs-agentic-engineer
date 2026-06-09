@@ -228,8 +228,14 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		if apierrors.IsAlreadyExists(err) {
 			// Same generated name already present (uuid collision — vanishingly
 			// rare). Treat as success: vault already holds the latest data.
+			// Fetch the live object so the response carries the real
+			// creationTimestamp (cr is the unsubmitted local copy).
 			slog.Warn("SecretReference already exists, treating create as idempotent", "name", secretRefName)
-			created = cr
+			created, err = s.dyn.Resource(secretReferenceGVR).Namespace(ns).Get(r.Context(), secretRefName, metav1.GetOptions{})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "get existing SecretReference failed: "+err.Error())
+				return
+			}
 		} else {
 			slog.Error("SecretReference create failed, cleaning up vault", "name", secretRefName, "error", err)
 			if delErr := s.vaultDelete(r.Context(), vaultPath); delErr != nil {
