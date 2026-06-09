@@ -321,6 +321,10 @@ func main() {
 	projectClient := openchoreo.NewProjectClient(ocConfig)
 	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
 	componentClient := openchoreo.NewComponentClient(ocConfig)
+	// GitSecret client lands the per-org build git credential on the workflow
+	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
+	// for both cloud (CP/WP split) and local k3d — one unified path.
+	gitSecretClient := openchoreo.NewGitSecretClient(ocConfig)
 
 	// Observability client (optional — build logs disabled when URL not set)
 	var observClient observability.Client
@@ -530,7 +534,7 @@ func main() {
 	webhookRegService := services.NewWebhookService(repoRepo, githubClient, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
 	credRefreshService := services.NewCredentialsRefreshService(credResolver)
 	credService := services.NewCredentialService(db, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, githubClient)
-	buildCredService := services.NewBuildCredentialsService(repoRepo, credResolver, wpClient)
+	buildCredService := services.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
 	credService.WithBuildSecretCleaner(buildCredService)
 	anthropicInvalidator := services.HTTPAgentsCacheInvalidator(cfg.AgentsServiceURL, "")
 	anthropicCredService := services.NewAnthropicCredentialService(db, credStore, wpClient, cfg.AnthropicPlatformKey, anthropicInvalidator)
@@ -729,6 +733,14 @@ func main() {
 	dispatchSvc := services.NewDispatchService(taskRepo, repoService, credService, anthropicCredService, repoBoardService, componentService, configService, artifactStore, taskTokens, asServiceIdentity, wfRunService, projector, cfg.AgentPlatformURL, cfg.AgentPlatformURL)
 	if hook, ok := dispatchSvc.(services.DispatchServiceWithTraitSync); ok {
 		hook.SetTraitSync(traitSyncService)
+	}
+	// WS2.4 — let the proxy dispatch pre-flight provision the per-org publisher
+	// cc on demand (decoupled from API security), so the runner can auth to the
+	// BFF through the gateway for every component, not just protected ones.
+	if idpSetter, ok := dispatchSvc.(interface {
+		SetIDPService(services.IDPService)
+	}); ok {
+		idpSetter.SetIDPService(idpService)
 	}
 	// WS2.3 — wire the proxy-based dispatcher. nil dispatcher → the
 	// legacy ClusterWorkflow path stays the only dispatch flow.
