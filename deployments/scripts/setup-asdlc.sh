@@ -527,6 +527,33 @@ spec:
 OCEOF
 echo "✅ ClusterComponentType 'deployment/web-application' created"
 
+# ── Per-org NAMESPACED ComponentTypes (local stand-in for cloud's
+#    platform-api ProvisionOrgUnit) ────────────────────────────────────────
+# The BFF references the per-org namespaced ComponentType (kind=ComponentType),
+# not the cluster-scoped ClusterComponentType — see
+# asdlc-service/clients/openchoreo/component_client.go. In dev cloud,
+# platform-api's ProvisionOrgUnit creates `service`/`web-application`
+# ComponentTypes inside each org's namespace; locally nothing did, so a
+# kind=ComponentType reference resolved to `ComponentTypeNotFound` and user
+# components never deployed. Derive namespaced copies (in the org control-plane
+# ns `default`) from the cluster-scoped definitions above so the two can't
+# drift. Same NAME (`service`/`web-application`); only kind + namespace differ.
+echo ""
+echo "🧩 Provisioning per-org namespaced ComponentTypes (local ProvisionOrgUnit stand-in)..."
+for _ct in service web-application; do
+    kubectl get clustercomponenttype "$_ct" -o json \
+        | python3 -c 'import sys, json
+c = json.load(sys.stdin)
+print(json.dumps({
+    "apiVersion": c["apiVersion"],
+    "kind": "ComponentType",
+    "metadata": {"name": c["metadata"]["name"], "namespace": "default"},
+    "spec": c["spec"],
+}))' \
+        | kubectl apply -f -
+done
+echo "✅ Namespaced ComponentTypes 'service' + 'web-application' created in ns 'default'"
+
 # Environment: development — backed by the default ClusterDataPlane
 kubectl apply -f - <<'OCEOF'
 apiVersion: openchoreo.dev/v1alpha1
