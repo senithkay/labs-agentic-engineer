@@ -118,8 +118,13 @@ func (w *JobWatcher) Run(ctx context.Context) {
 
 func (w *JobWatcher) tick(ctx context.Context) {
 	var tasks []models.ComponentTask
+	// Only claim proxy-dispatched runs (run name prefix "ca-"). Legacy
+	// dispatches use the "coding-agent-<task8>-<unixms>" naming and are
+	// owned by webhook.CodingAgentWatcher; without this filter JobWatcher
+	// 404s on every legacy task's missing Job and falsely marks the task
+	// failed (job_not_found_in_namespace).
 	if err := w.db.WithContext(ctx).
-		Where("last_coding_agent_run_name <> ''").
+		Where("last_coding_agent_run_name LIKE ?", "ca-%").
 		Where("status IN ?", w.activeStatuses).
 		Find(&tasks).Error; err != nil {
 		slog.ErrorContext(ctx, "codingagent.JobWatcher: list tasks failed", "error", err)

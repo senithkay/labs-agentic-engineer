@@ -402,6 +402,51 @@ func (s *CredentialService) mirrorPATToSMAPI(ctx context.Context, ocOrgID, pat s
 	}
 }
 
+// SMAPISeedBundle packages the data the repair script needs to reseed
+// OpenBao after a local cluster teardown. The BFF holds the plaintext
+// (encrypted at rest in the cred store); the shell script holds vault
+// access (via kubectl exec). Plaintext crosses the localhost boundary
+// once, via the TestMode-gated repair endpoint.
+type SMAPISeedBundle struct {
+	KVPath   string `json:"kvPath"`   // remoteRef.key from the dispatcher's ExternalSecret
+	Property string `json:"property"` // remoteRef.property — sub-field within the KV entry
+	Value    string `json:"value"`    // plaintext secret
+}
+
+// PrepareSMAPISeed returns the OpenBao reseed bundle for the org's PAT
+// credential. Returns (nil, nil) when the org has no active PAT row, the
+// SM-API triplet isn't populated (Connect ran with SM-API disabled), or
+// the cred-store value is missing — all idempotent no-op cases.
+// App-mode rows are skipped — App installations don't carry a long-lived
+// secret in OpenBao (per-request tokens are minted from the App private key).
+//
+// Drives the local-dev repair path. See deployments/scripts/repair-secrets.sh.
+func (s *CredentialService) PrepareSMAPISeed(ctx context.Context, ocOrgID string) (*SMAPISeedBundle, error) {
+	var row models.OrgCredential
+	if err := s.db.WithContext(ctx).Where("oc_org_id = ?", ocOrgID).First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("credentials seed: load row: %w", err)
+	}
+	if row.Kind != "user-pat" || row.Status != "active" {
+		return nil, nil
+	}
+	if row.SMAPIKVPath == nil || row.SMAPIProperty == nil ||
+		*row.SMAPIKVPath == "" || *row.SMAPIProperty == "" {
+		return nil, nil
+	}
+	pat, err := s.store.Get(ctx, ocOrgID, "github/pat")
+	if err != nil || len(pat) == 0 {
+		return nil, nil
+	}
+	return &SMAPISeedBundle{
+		KVPath:   *row.SMAPIKVPath,
+		Property: *row.SMAPIProperty,
+		Value:    string(pat),
+	}, nil
+}
+
 func (s *CredentialService) connectApp(ctx context.Context, tx *gorm.DB, ocOrgID string, hadRow bool, existing *models.OrgCredential, req ConnectRequest) (*Projection, error) {
 	if req.InstallationID == 0 {
 		return nil, &ValidationError{Code: "installation_id_missing", Message: "installationId is required"}
