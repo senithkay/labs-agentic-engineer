@@ -701,13 +701,12 @@ func buildCreateComponentBody(projectName string, req *models.CreateComponentReq
 	// Devant and agent-manager both reference the namespaced `ComponentType`
 	// (kind=ComponentType) for the same reason; app-factory was the outlier.
 	//
-	// NOTE — must verify locally before relying on this unconditionally: the
-	// local stack (deployments/scripts/setup-asdlc.sh) currently ships
-	// `service`/`web-application` ONLY as cluster-scoped ClusterComponentTypes
-	// and does not provision per-org namespaced ComponentTypes, so this kind may
-	// need to become env-conditional (ComponentType in cloud, ClusterComponentType
-	// locally) — or local setup updated to provision the namespaced types. The
-	// type NAME (`deployment/service` etc.) is identical for both kinds.
+	// Verified local + dev cloud: in cloud, platform-api's ProvisionOrgUnit
+	// creates the per-org namespaced `service`/`web-application` ComponentTypes;
+	// locally, deployments/scripts/setup-asdlc.sh provisions the same namespaced
+	// types in the org ns (derived from the cluster-scoped definitions). So the
+	// kind=ComponentType reference resolves in both environments — no env branch.
+	// The type NAME (`deployment/service` etc.) is identical for both kinds.
 	ctKind := gen.ComponentSpecComponentTypeKindComponentType
 	body := gen.Component{
 		Metadata: gen.ObjectMeta{

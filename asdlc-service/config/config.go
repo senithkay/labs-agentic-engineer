@@ -14,6 +14,16 @@ type Config struct {
 	// Test mode — enables test-only endpoints like _test/reset.
 	TestMode bool
 
+	// LocalOpenBaoRepairEnabled gates the _test/sm-api-resync endpoint —
+	// distinct from TestMode because the resync surface emits decrypted
+	// per-org plaintext (Anthropic API keys, GitHub PATs) and TestMode is
+	// set on the wso2cloud dev release binding for the existing destructive
+	// _test/reset route. Splitting the two means the resync route only
+	// mounts where deployments/docker-compose.yml explicitly opts in;
+	// cloud release bindings never set this var so the route never
+	// registers in deployed environments.
+	LocalOpenBaoRepairEnabled bool
+
 	// DeploymentTier guards dev-only destructive migrations and seed paths.
 	// Phase 0 used this for the platform-PAT startup gate (now retired in PR
 	// A); Phase 2 PR A's BFF migration (RunPhase2PRA) refuses to run unless

@@ -954,15 +954,18 @@ func main() {
 	watcherCtx, cancelWatcher := context.WithCancel(context.Background())
 	defer cancelWatcher()
 	go buildWatcher.Run(watcherCtx)
-	go codingAgentWatcher.Run(watcherCtx)
 	go onHoldWatcher.Run(watcherCtx)
 	go traitSyncWatcher.Run(watcherCtx)
 
-	// WS2.5 — proxy-based Job watcher. Polls per-task Jobs in the
-	// remote-worker NS via cluster-gateway-proxy and surfaces failures
-	// as task.status=failed. No-op when the proxy isn't configured
-	// (cgwClient nil); the legacy codingAgentWatcher above keeps
-	// running and watching the OC WorkflowRun side until WS2.6.
+	// Coding-agent run watchers — both can coexist because each filters
+	// to the tasks it owns by run-name prefix. The proxy-based JobWatcher
+	// only picks up "ca-…" tasks; the legacy webhook.CodingAgentWatcher
+	// only picks up "coding-agent-…" tasks. When the proxy path falls back
+	// to the legacy dispatcher (e.g. SM-API triplet missing on the cred
+	// row), JobWatcher would otherwise 404 on the missing Job and
+	// incorrectly mark the task failed — the prefix filter in JobWatcher
+	// is what makes mixed-mode operation safe.
+	go codingAgentWatcher.Run(watcherCtx)
 	if cgwClient != nil {
 		jobWatcher := codingagent.NewJobWatcher(db, cgwClient)
 		go jobWatcher.Run(watcherCtx)

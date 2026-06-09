@@ -33,7 +33,11 @@ if [ ! -f "$DEPLOY_DIR/docker-compose.yml" ]; then
     echo "❌ docker-compose.yml missing at $DEPLOY_DIR/docker-compose.yml"
     exit 1
 fi
-echo "✅ Pre-flight ok (docker + compose + buildx + docker-compose.yml)"
+if [ ! -f "$DEPLOY_DIR/local-secret-manager-api/main.go" ]; then
+    echo "❌ local-secret-manager-api stub missing at $DEPLOY_DIR/local-secret-manager-api/ (in-repo sm-api stub — no wso2cloud checkout needed)"
+    exit 1
+fi
+echo "✅ Pre-flight ok (docker + compose + buildx + docker-compose.yml + sm-api stub)"
 
 # Load specific env keys needed before `docker compose up` runs envsubst.
 # We extract keys individually rather than blanket-sourcing because .env
@@ -164,6 +168,19 @@ echo ""
 echo "🐳 Starting Docker services..."
 docker compose up --build -d
 echo "✅ Docker services started"
+
+# 7. Repair per-org secrets in OpenBao. When the local cluster (or just the
+#    OpenBao volume) has been torn down since the last credential connect,
+#    the SM-API metadata rows still point at OpenBao paths that no longer
+#    exist. Without this stage every coding-agent dispatch hangs in
+#    CreateContainerConfigError. Best-effort: failure here doesn't fail
+#    start.sh. Safe in remote envs because repair-secrets.sh refuses to
+#    run unless the kubectl context matches the local k3d cluster.
+echo ""
+if [ -x "$SCRIPT_DIR/repair-secrets.sh" ]; then
+    bash "$SCRIPT_DIR/repair-secrets.sh" || \
+        echo "⚠️  repair-secrets did not complete cleanly — see output above."
+fi
 
 echo ""
 echo "============================================"
