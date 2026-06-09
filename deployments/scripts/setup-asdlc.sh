@@ -747,8 +747,8 @@ echo "✅ .env file generated at $(realpath "$ENV_FILE")"
 #
 # Derives the NS deterministically from Thunder's ouId for the default
 # org (= `wc-<ouId8>-<sha256(ouId)[:8]>`), matching
-# `secret-manager-api/internal/auth/jwt.go::GenerateNamespaceName` and
-# `services/codingagent/namespace.go::OrgBaseNamespace`.
+# `local-secret-manager-api/main.go::generateNamespaceName` (the in-repo
+# sm-api stub) and `services/codingagent/namespace.go::OrgBaseNamespace`.
 echo ""
 echo "🪪 Pre-creating default org base namespace (local-only, ou-service equivalent)..."
 THUNDER_URL="${THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
