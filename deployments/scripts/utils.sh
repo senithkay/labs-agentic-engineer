@@ -328,8 +328,10 @@ load_public_urls() {
     PUBLIC_THUNDER_URL=""
     PUBLIC_CONSOLE_URL=""
     if [ -f "$env_file" ]; then
-        PUBLIC_THUNDER_URL="$(grep -E '^PUBLIC_THUNDER_URL=' "$env_file" | head -1 | cut -d= -f2-)"
-        PUBLIC_CONSOLE_URL="$(grep -E '^PUBLIC_CONSOLE_URL=' "$env_file" | head -1 | cut -d= -f2-)"
+        # grep exits 1 when no match — tolerate with || true so callers using
+        # set -o pipefail don't abort before the defaults below apply.
+        PUBLIC_THUNDER_URL="$(grep -E '^PUBLIC_THUNDER_URL=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+        PUBLIC_CONSOLE_URL="$(grep -E '^PUBLIC_CONSOLE_URL=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- || true)"
     fi
     # First-install fallback: .env doesn't exist yet, so use local defaults.
     : "${PUBLIC_THUNDER_URL:=http://thunder.openchoreo.localhost:8080}"
