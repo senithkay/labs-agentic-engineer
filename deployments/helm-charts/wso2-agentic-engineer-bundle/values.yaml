@@ -25,6 +25,11 @@ wso2-agentic-engineer:
   console:
     publicURL: "https://asdlc.example.com"
     thunderPublicURL: "https://thunder.example.com"
+  # idp.issuer and idp.jwksURL must match Thunder's public URL since Thunder
+  # uses its public URL as the iss claim in issued tokens.
+  idp:
+    issuer: "https://thunder.example.com"
+    jwksURL: "https://thunder.example.com/oauth2/jwks"
   anthropic:
     apiKey: ""
   openbao:
