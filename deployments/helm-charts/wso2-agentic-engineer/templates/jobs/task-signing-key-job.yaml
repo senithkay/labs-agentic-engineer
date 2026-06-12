@@ -22,16 +22,10 @@ spec:
     spec:
       serviceAccountName: {{ include "asdlc.serviceAccountName" . }}
       restartPolicy: Never
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 65534
       containers:
         - name: task-signing-key-gen
           image: alpine:3.21
           imagePullPolicy: IfNotPresent
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
           command:
             - /bin/sh
             - -c
