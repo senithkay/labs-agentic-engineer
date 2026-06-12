@@ -1,0 +1,14 @@
+apiVersion: v2
+name: wso2-agentic-engineer
+description: Helm chart for the WSO2 Agentic Engineer platform (asdlc-api, agents-service, console, postgres).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - wso2
+  - agentic-engineer
+  - ai
+  - openchoreo
+maintainers:
+  - name: WSO2
+    url: https://wso2.com
