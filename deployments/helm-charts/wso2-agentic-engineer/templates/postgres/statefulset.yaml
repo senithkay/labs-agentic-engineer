@@ -28,7 +28,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secrets.postgresSecret }}
+                  name: {{ include "asdlc.postgresSecretName" . }}
                   key: password
           volumeMounts:
             - name: pgdata
