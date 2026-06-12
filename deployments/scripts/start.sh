@@ -155,7 +155,14 @@ else
     [ -f "$INTERNAL_KUBECONFIG" ] || touch "$INTERNAL_KUBECONFIG"
 fi
 
-# 4. BFF Task JWT signing key — bind-mounted into asdlc-api as
+# 4. Repo workspace bind mount — asdlc-api clones project repos here
+#    (REPO_BASE_PATH=/data/repos). Must exist and be writable by appuser
+#    (uid 1000) before compose creates the mount as root.
+echo ""
+echo "📁 Ensuring repo storage at $DEPLOY_DIR/data/repos..."
+ensure_repo_storage "$DEPLOY_DIR/data/repos"
+
+# 5. BFF Task JWT signing key — bind-mounted into asdlc-api as
 #    /app/keys/task-signing.pem (docker-compose volume). The BFF reads
 #    the PEM from BFF_TASK_SIGNING_KEY_PATH; mounting beats env-passing
 #    a multi-line value through compose's `${VAR}` substitution.
@@ -167,7 +174,7 @@ else
     chmod 644 "$TASK_KEY_PATH"
 fi
 
-# 5. Sync public URLs (.env → cluster). Touches Thunder ConfigMap, OIDC
+# 6. Sync public URLs (.env → cluster). Touches Thunder ConfigMap, OIDC
 #    issuer, HTTPRoute, redirect_uris. Idempotent — fast no-op if nothing
 #    changed.
 echo ""
@@ -178,7 +185,7 @@ else
     echo "⚠️  k3d cluster not accessible — skipping public-URL sync"
 fi
 
-# 6. Bring up the compose stack. The coding-agent runner is no longer a
+# 7. Bring up the compose stack. The coding-agent runner is no longer a
 #    long-lived service — it's dispatched as a one-shot pod via the
 #    `app-factory-coding-agent` ClusterWorkflow in the cluster (installed
 #    by setup-asdlc.sh). No host-mode toggle here.
@@ -188,7 +195,7 @@ echo "🐳 Starting Docker services..."
 docker compose up --build -d
 echo "✅ Docker services started"
 
-# 7. Repair per-org secrets in OpenBao. When the local cluster (or just the
+# 8. Repair per-org secrets in OpenBao. When the local cluster (or just the
 #    OpenBao volume) has been torn down since the last credential connect,
 #    the SM-API metadata rows still point at OpenBao paths that no longer
 #    exist. Without this stage every coding-agent dispatch hangs in

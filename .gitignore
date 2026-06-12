@@ -27,6 +27,10 @@ deployments/.poc-api-platform-client.env
 # start; teardown wipes it.
 deployments/.kube/
 
+# Project git clones — bind-mounted into asdlc-api at ./data/repos
+deployments/data/repos/*
+!deployments/data/repos/.gitkeep
+
 # Test artifacts
 test-results/
 coverage/

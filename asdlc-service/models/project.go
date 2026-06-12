@@ -40,12 +40,13 @@ type CreateProjectRequest struct {
 
 // ProjectStatus represents the computed SDLC phase and artifact states.
 type ProjectStatus struct {
-	Phase        string `json:"phase"`        // "no-repo", "repo-cloning", "prompt", "spec", "architecture", "tasks", "components"
-	RepoStatus   string `json:"repoStatus"`   // "", "pending", "cloning", "ready", "error"
-	RepoURL      string `json:"repoUrl"`
-	HasSpec      bool   `json:"hasSpec"`
-	HasDesign    bool   `json:"hasDesign"`
-	HasTasks     bool   `json:"hasTasks"`
-	SpecStatus   string `json:"specStatus"`   // "", "draft", "approved"
-	DesignStatus string `json:"designStatus"` // "", "draft", "approved"
+	Phase            string `json:"phase"`      // "no-repo", "repo-cloning", "repo-error", "prompt", "spec", "architecture", "tasks", "components"
+	RepoStatus       string `json:"repoStatus"` // "", "pending", "cloning", "ready", "error"
+	RepoURL          string `json:"repoUrl"`
+	RepoErrorMessage string `json:"repoErrorMessage,omitempty"` // set when phase is "repo-error"
+	HasSpec          bool   `json:"hasSpec"`
+	HasDesign        bool   `json:"hasDesign"`
+	HasTasks         bool   `json:"hasTasks"`
+	SpecStatus       string `json:"specStatus"`   // "", "draft", "approved"
+	DesignStatus     string `json:"designStatus"` // "", "draft", "approved"
 }

@@ -165,16 +165,7 @@ func (s *projectService) GetProjectStatus(ctx context.Context, orgName, projectN
 		return status, nil
 	}
 
-	status.RepoStatus = repo.Status
-	status.RepoURL = repo.RepoURL
-
-	if repo.Status == "pending" || repo.Status == "cloning" {
-		status.Phase = "repo-cloning"
-		return status, nil
-	}
-
-	if repo.Status == "error" {
-		status.Phase = "no-repo"
+	if done := applyRepoToProjectStatus(status, repo); done {
 		return status, nil
 	}
 
@@ -230,6 +221,30 @@ func (s *projectService) GetProjectStatus(ctx context.Context, orgName, projectN
 
 	status.Phase = "components"
 	return status, nil
+}
+
+// applyRepoToProjectStatus maps a provisioned git_repositories row onto the
+// status fields that depend on repo lifecycle. Returns true when phase is
+// fully determined (no-repo, cloning, or error) and artifact checks can stop.
+func applyRepoToProjectStatus(status *models.ProjectStatus, repo *models.GitRepository) bool {
+	if repo == nil {
+		status.Phase = "no-repo"
+		return true
+	}
+
+	status.RepoStatus = repo.Status
+	status.RepoURL = repo.RepoURL
+
+	switch repo.Status {
+	case "pending", "cloning":
+		status.Phase = "repo-cloning"
+		return true
+	case "error":
+		status.Phase = "repo-error"
+		status.RepoErrorMessage = repo.ErrorMessage
+		return true
+	}
+	return false
 }
 
 // translateHTTPError lifts OC-level sentinel errors (openchoreo.ErrNotFound

@@ -542,6 +542,25 @@ PY
     echo "✅ Public URLs synced"
 }
 
+# ensure_repo_storage prepares the host bind mount for asdlc-api's
+# REPO_BASE_PATH (/data/repos). asdlc-api runs as uid 1000 (appuser); on
+# Linux the host uid often differs, and Docker creates missing bind-mount
+# parents as root — both cause "permission denied" on clone. Mode 1777
+# (sticky, world-writable) is local-dev-only and avoids sudo chown.
+ensure_repo_storage() {
+    local repos_dir="$1"
+    if [ -z "$repos_dir" ]; then
+        echo "❌ ensure_repo_storage: path required"
+        return 1
+    fi
+    mkdir -p "$repos_dir"
+    if ! chmod 1777 "$repos_dir" 2>/dev/null; then
+        echo "❌ Cannot set permissions on $repos_dir"
+        echo "   Fix ownership/permissions so the container user (uid 1000) can write there."
+        return 1
+    fi
+}
+
 generate_machine_ids() {
     local cluster_name="$1"
     echo "🆔 Generating machine IDs..."
