@@ -38,7 +38,7 @@ spec:
           resources: {{- toYaml .Values.agentsService.resources | nindent 12 }}
           readinessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: {{ .Values.agentsService.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
