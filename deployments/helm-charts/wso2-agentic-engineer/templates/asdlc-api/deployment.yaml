@@ -18,6 +18,10 @@ spec:
         {{- include "asdlc.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "asdlc.serviceAccountName" . }}
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z {{ include "asdlc.postgresHost" . }}.{{ .Values.namespace }} 5432; do echo "waiting for postgres..."; sleep 2; done']
       containers:
         - name: asdlc-api
           image: {{ .Values.asdlcApi.image.repository }}:{{ .Values.asdlcApi.image.tag }}
