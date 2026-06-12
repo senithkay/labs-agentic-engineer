@@ -148,7 +148,8 @@ if kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/d
         rm -f "$INTERNAL_KUBECONFIG.bak"
         echo "✅ Wrote rewritten kubeconfig → $INTERNAL_KUBECONFIG"
     fi
-    chmod 600 "$INTERNAL_KUBECONFIG"
+    # 644 so non-root compose containers (appuser uid 1000) can read the bind mount.
+    chmod 644 "$INTERNAL_KUBECONFIG"
 else
     echo "⚠️  Cluster unreachable — leaving existing $INTERNAL_KUBECONFIG (may be stale)"
     [ -f "$INTERNAL_KUBECONFIG" ] || touch "$INTERNAL_KUBECONFIG"
@@ -162,6 +163,8 @@ TASK_KEY_PATH="$DEPLOY_DIR/keys/task-signing.pem"
 if [ ! -f "$TASK_KEY_PATH" ]; then
     echo "⚠️  BFF Task JWT signing key missing at $TASK_KEY_PATH — coding-agent dispatch will fail."
     echo "   Run setup-asdlc.sh to generate it."
+else
+    chmod 644 "$TASK_KEY_PATH"
 fi
 
 # 5. Sync public URLs (.env → cluster). Touches Thunder ConfigMap, OIDC
