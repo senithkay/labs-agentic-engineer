@@ -1,0 +1,239 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asdlc-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "asdlc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: asdlc-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: asdlc-api
+  template:
+    metadata:
+      labels:
+        app: asdlc-api
+        {{- include "asdlc.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "asdlc.serviceAccountName" . }}
+      containers:
+        - name: asdlc-api
+          image: {{ .Values.asdlcApi.image.repository }}:{{ .Values.asdlcApi.image.tag }}
+          imagePullPolicy: {{ .Values.asdlcApi.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.asdlcApi.port }}
+          env:
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            - name: SERVER_PORT
+              value: {{ .Values.asdlcApi.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.asdlcApi.logLevel }}
+            - name: DEPLOYMENT_TIER
+              value: {{ .Values.asdlcApi.deploymentTier }}
+            - name: TEST_MODE
+              value: "false"
+            - name: LOCAL_OPENBAO_REPAIR
+              value: "false"
+
+            # ── Database ──────────────────────────────────────────────────────
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "asdlc.postgresSecretName" . }}
+                  key: password
+            - name: DATABASE_URL
+              value: "postgres://{{ .Values.postgres.auth.username }}:$(POSTGRES_PASSWORD)@{{ include "asdlc.postgresHost" . }}.{{ .Values.namespace }}:5432/{{ .Values.postgres.auth.database }}?sslmode=disable"
+
+            # ── OpenChoreo ────────────────────────────────────────────────────
+            - name: PLATFORM_API_SERVICE_BASE_URL
+              value: {{ .Values.openchoreo.apiBaseURL }}
+            - name: PLATFORM_API_SERVICE_HOST
+              value: {{ .Values.openchoreo.apiGatewayHost }}
+
+            # ── Sister services ───────────────────────────────────────────────
+            - name: AGENTS_SERVICE_BASE_URL
+              value: "http://agents-service.{{ .Values.namespace }}:{{ .Values.agentsService.port }}"
+            - name: AGENTS_SERVICE_URL
+              value: "http://agents-service.{{ .Values.namespace }}:{{ .Values.agentsService.port }}"
+            - name: AGENT_PLATFORM_URL
+              value: "http://asdlc-api.{{ .Values.namespace }}:{{ .Values.asdlcApi.port }}"
+
+            # ── Identity Provider ─────────────────────────────────────────────
+            - name: JWKS_URL
+              value: {{ .Values.idp.jwksURL }}
+            - name: JWT_ISSUER
+              value: {{ .Values.idp.issuer }}
+            - name: JWT_AUDIENCE
+              value: "asdlc-*"
+            - name: THUNDER_ADMIN_URL
+              value: {{ .Values.idp.adminURL }}
+            - name: THUNDER_SYSTEM_CLIENT_ID
+              value: "asdlc-system-client"
+            - name: THUNDER_SYSTEM_CLIENT_SECRET
+              value: "asdlc-system-client-secret"
+            - name: PLATFORM_IDP_ISSUER
+              value: {{ .Values.idp.issuer }}
+            - name: PLATFORM_IDP_JWKS_URL
+              value: {{ .Values.idp.jwksURL }}
+            - name: USER_APPS_OIDC_ISSUER
+              value: {{ .Values.idp.issuer }}
+            - name: USER_APPS_OIDC_CLIENT_ID
+              value: {{ .Values.console.thunder.clientId }}
+            - name: USER_APPS_OIDC_SCOPES
+              value: "openid profile"
+
+            # ── Service auth ──────────────────────────────────────────────────
+            - name: SERVICE_AUTH_TOKEN_URL
+              value: {{ .Values.idp.tokenURL }}
+            - name: SERVICE_AUTH_CLIENT_ID
+              value: {{ .Values.asdlcApi.serviceAuth.clientId }}
+            - name: SERVICE_AUTH_CLIENT_SECRET
+              value: {{ .Values.asdlcApi.serviceAuth.clientSecret }}
+            - name: SERVICE_AUTH_HOST_HEADER
+              value: ""
+            - name: SERVICE_AUTH_GIT_TOKEN_URL
+              value: {{ .Values.idp.tokenURL }}
+            - name: SERVICE_AUTH_GIT_CLIENT_ID
+              value: "asdlc-bff-to-git-service"
+            - name: SERVICE_AUTH_GIT_CLIENT_SECRET
+              value: "asdlc-bff-to-git-service-secret"
+            - name: SERVICE_AUTH_GIT_HOST_HEADER
+              value: ""
+            - name: SERVICE_AUTH_AGENTS_TOKEN_URL
+              value: {{ .Values.idp.tokenURL }}
+            - name: SERVICE_AUTH_AGENTS_CLIENT_ID
+              value: {{ .Values.asdlcApi.agentsJwt.clientId }}
+            - name: SERVICE_AUTH_AGENTS_CLIENT_SECRET
+              value: {{ .Values.asdlcApi.agentsJwt.clientSecret }}
+            - name: SERVICE_AUTH_AGENTS_HOST_HEADER
+              value: ""
+
+            # ── Task JWT ──────────────────────────────────────────────────────
+            - name: BFF_TASK_SIGNING_KEY_PATH
+              value: "/app/keys/task-signing.pem"
+            - name: BFF_TASK_TOKEN_ISSUER
+              value: {{ .Values.taskSigning.issuer }}
+            - name: BFF_TASK_TOKEN_AUDIENCE
+              value: {{ .Values.taskSigning.audience }}
+            - name: BFF_JWKS_URL
+              value: "http://localhost:{{ .Values.asdlcApi.port }}/auth/external/jwks.json"
+            - name: TASK_JWT_ISSUER
+              value: {{ .Values.taskSigning.issuer }}
+            - name: TASK_JWT_AUDIENCE
+              value: {{ .Values.taskSigning.audience }}
+            - name: BFF_PUBLIC_URL
+              value: {{ .Values.console.publicURL }}
+
+            # ── GitHub (from auto-generated secret) ───────────────────────────
+            - name: GITHUB_APP_SLUG
+              value: {{ .Values.github.appSlug }}
+            - name: GITHUB_REPO_VISIBILITY
+              value: {{ .Values.github.repoVisibility }}
+            - name: GIT_COMMITTER_NAME
+              value: {{ .Values.github.committerName }}
+            - name: GIT_COMMITTER_EMAIL
+              value: {{ .Values.github.committerEmail }}
+            - name: GITHUB_APP_PRIVATE_KEY_PATH
+              value: "/etc/github-app/private-key.pem"
+            - name: GITHUB_WEBHOOK_DELIVERY_URL
+              value: ""
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "asdlc.appSecretName" . }}
+                  key: GITHUB_WEBHOOK_SECRET
+            - name: OAUTH_STATE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "asdlc.appSecretName" . }}
+                  key: OAUTH_STATE_SIGNING_KEY
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "asdlc.appSecretName" . }}
+                  key: GITHUB_APP_ID
+                  optional: true
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "asdlc.appSecretName" . }}
+                  key: GITHUB_CLIENT_ID
+                  optional: true
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "asdlc.appSecretName" . }}
+                  key: GITHUB_CLIENT_SECRET
+                  optional: true
+
+            # ── OpenBao ───────────────────────────────────────────────────────
+            - name: OPENBAO_ADDR
+              value: {{ .Values.openbao.addr }}
+            - name: OPENBAO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "asdlc.appSecretName" . }}
+                  key: OPENBAO_TOKEN
+
+            # ── Anthropic ─────────────────────────────────────────────────────
+            - name: ANTHROPIC_PLATFORM_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "asdlc.appSecretName" . }}
+                  key: ANTHROPIC_API_KEY
+
+            # ── Cloud service stubs ───────────────────────────────────────────
+            - name: SECRET_MANAGER_API_URL
+              value: {{ .Values.asdlcApi.smApiURL | default "" }}
+            - name: CLUSTER_GATEWAY_PROXY_URL
+              value: {{ .Values.asdlcApi.clusterGatewayProxyURL | default "" }}
+
+            # ── Observer ──────────────────────────────────────────────────────
+            - name: OBSERVER_URL
+              value: {{ .Values.observer.url }}
+            - name: OBSERVER_OAUTH_TOKEN_URL
+              value: {{ .Values.idp.tokenURL }}
+            - name: OBSERVER_OAUTH_CLIENT_ID
+              value: {{ .Values.observer.oauth.clientId }}
+            - name: OBSERVER_OAUTH_CLIENT_SECRET
+              value: {{ .Values.observer.oauth.clientSecret }}
+            - name: OBSERVER_OAUTH_HOST_HEADER
+              value: ""
+
+            - name: REPO_BASE_PATH
+              value: "/data/repos"
+
+          volumeMounts:
+            - name: task-signing-key
+              mountPath: /app/keys
+              readOnly: true
+            - name: github-app-key
+              mountPath: /etc/github-app
+              readOnly: true
+            - name: repo-storage
+              mountPath: /data/repos
+
+          resources: {{- toYaml .Values.asdlcApi.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.asdlcApi.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+      volumes:
+        - name: task-signing-key
+          secret:
+            secretName: {{ include "asdlc.taskSigningKeySecretName" . }}
+        - name: github-app-key
+          {{- if .Values.secrets.githubAppKeySecret }}
+          secret:
+            secretName: {{ .Values.secrets.githubAppKeySecret }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: repo-storage
+          emptyDir: {}

@@ -1,0 +1,14 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: asdlc-postgres
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: asdlc-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  clusterIP: None
+{{- end }}

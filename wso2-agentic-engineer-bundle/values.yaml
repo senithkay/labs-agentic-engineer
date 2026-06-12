@@ -1,0 +1,42 @@
+# ── Thunder bootstrap ─────────────────────────────────────────────────────────
+# Credentials used by the post-install Job to register OAuth clients in Thunder.
+# These only need to be correct once — the Job is idempotent on re-runs.
+thunder:
+  adminURL: "http://thunder-service.thunder.svc.cluster.local:8090"
+  adminUsername: "admin"
+  adminPassword: "admin"
+  # Image must have sh + curl. Override if your cluster has no Docker Hub access.
+  bootstrapImage: "alpine/curl:latest"
+
+# ── Bundle-level values ───────────────────────────────────────────────────────
+# HTTPRoute hostnames for exposing the platform through the OC gateway.
+# Set these to your actual DNS names and point them at the OC gateway LB IP.
+expose:
+  consoleHostname: "asdlc.example.com"
+  apiHostname: "asdlc-api.example.com"
+  # Namespace where the OC gateway is running
+  gatewayNamespace: "openchoreo-control-plane"
+  gatewayName: "gateway-default"
+
+# ── Platform services (wso2-agentic-engineer sub-chart) ───────────────────────
+# All values here are passed through to the platform services chart.
+# Only override what you need — defaults are production-ready.
+wso2-agentic-engineer:
+  console:
+    publicURL: "https://asdlc.example.com"
+    thunderPublicURL: "https://thunder.example.com"
+  anthropic:
+    apiKey: ""
+  openbao:
+    token: "root"
+  github:
+    appSlug: ""
+    appId: ""
+    clientId: ""
+    clientSecret: ""
+
+# ── OC registration (wso2-ae-platform-resources sub-chart) ───────────────────
+wso2-ae-platform-resources:
+  authz:
+    apiClientId: "asdlc-api-client"
+    administratorsGroup: "Administrators"

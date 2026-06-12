@@ -1,0 +1,188 @@
+# ClusterComponentType: deployment/web-application
+# Frontend SPAs with subdomain routing (each endpoint gets its own subdomain
+# via oc_dns_label so asset references work correctly).
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterComponentType
+metadata:
+  name: web-application
+spec:
+  workloadType: deployment
+  allowedWorkflows:
+    - kind: ClusterWorkflow
+      name: dockerfile-builder
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      properties:
+        replicas:
+          type: integer
+          default: 1
+          minimum: 1
+        resources:
+          type: object
+          default: {}
+          properties:
+            requests:
+              type: object
+              default: {}
+              properties:
+                cpu:
+                  type: string
+                  default: "50m"
+                memory:
+                  type: string
+                  default: "128Mi"
+            limits:
+              type: object
+              default: {}
+              properties:
+                cpu:
+                  type: string
+                  default: "200m"
+                memory:
+                  type: string
+                  default: "256Mi"
+  resources:
+    - id: deployment
+      template:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: "${metadata.componentName}"
+          namespace: "${metadata.namespace}"
+          labels: "${metadata.labels}"
+        spec:
+          replicas: "${environmentConfigs.replicas}"
+          selector:
+            matchLabels: "${metadata.podSelectors}"
+          template:
+            metadata:
+              labels: "${metadata.podSelectors}"
+            spec:
+              containers:
+                - name: main
+                  image: "${workload.container.image}"
+                  env: ${dependencies.toContainerEnvs()}
+                  envFrom: ${configurations.toContainerEnvFrom()}
+                  volumeMounts: ${configurations.toContainerVolumeMounts()}
+                  resources:
+                    requests:
+                      cpu: "${environmentConfigs.resources.requests.cpu}"
+                      memory: "${environmentConfigs.resources.requests.memory}"
+                    limits:
+                      cpu: "${environmentConfigs.resources.limits.cpu}"
+                      memory: "${environmentConfigs.resources.limits.memory}"
+              volumes: ${configurations.toVolumes()}
+
+    - id: env-config
+      forEach: ${configurations.toConfigEnvsByContainer()}
+      var: envConfig
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${envConfig.resourceName}
+          namespace: ${metadata.namespace}
+        data: |
+          ${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+    - id: file-config
+      forEach: ${configurations.toConfigFileList()}
+      var: config
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${config.resourceName}
+          namespace: ${metadata.namespace}
+        data:
+          ${config.name}: |
+            ${config.value}
+
+    - id: secret-env-external
+      forEach: ${configurations.toSecretEnvsByContainer()}
+      var: secretEnv
+      template:
+        apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: ${secretEnv.resourceName}
+          namespace: ${metadata.namespace}
+        spec:
+          refreshInterval: 15s
+          secretStoreRef:
+            name: ${dataplane.secretStore}
+            kind: ClusterSecretStore
+          target:
+            name: ${secretEnv.resourceName}
+            creationPolicy: Owner
+          data: |
+            ${secretEnv.envs.map(secret, {
+              "secretKey": secret.name,
+              "remoteRef": {
+                "key": secret.remoteRef.key,
+                "property": has(secret.remoteRef.property) ? secret.remoteRef.property : oc_omit()
+              }
+            })}
+
+    - id: secret-file-external
+      forEach: ${configurations.toSecretFileList()}
+      var: file
+      template:
+        apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: ${file.resourceName}
+          namespace: ${metadata.namespace}
+        spec:
+          refreshInterval: 15s
+          secretStoreRef:
+            name: ${dataplane.secretStore}
+            kind: ClusterSecretStore
+          target:
+            name: ${file.resourceName}
+            creationPolicy: Owner
+          data:
+            - secretKey: ${file.name}
+              remoteRef:
+                key: ${file.remoteRef.key}
+                property: |
+                  ${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
+    - id: service
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: "${metadata.componentName}"
+          namespace: "${metadata.namespace}"
+        spec:
+          selector: "${metadata.podSelectors}"
+          ports: "${workload.toServicePorts()}"
+
+    - id: httproute-external
+      forEach: '${workload.endpoints.transformList(name, ep, ("external" in ep.visibility && ep.type in ["HTTP", "REST", "GraphQL", "Websocket"]) ? [name] : []).flatten()}'
+      var: endpoint
+      template:
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        metadata:
+          name: ${oc_generate_name(metadata.componentName, endpoint)}
+          namespace: "${metadata.namespace}"
+          labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint, "openchoreo.dev/endpoint-visibility": "external"})}'
+        spec:
+          parentRefs:
+            - name: "${gateway.ingress.external.name}"
+              namespace: "${gateway.ingress.external.namespace}"
+          hostnames: |
+            ${[gateway.ingress.external.?http, gateway.ingress.external.?https]
+              .filter(g, g.hasValue()).map(g, g.value().host).distinct()
+              .map(h, oc_dns_label(endpoint, metadata.componentName, metadata.environmentName, metadata.componentNamespace) + "." + h)}
+          rules:
+            - matches:
+                - path:
+                    type: PathPrefix
+                    value: /
+              backendRefs:
+                - name: "${metadata.componentName}"
+                  port: "${workload.endpoints[endpoint].port}"

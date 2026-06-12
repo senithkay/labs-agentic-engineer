@@ -1,0 +1,9 @@
+dependencies:
+- name: wso2-agentic-engineer
+  repository: file://charts/wso2-agentic-engineer
+  version: 0.1.0
+- name: wso2-ae-platform-resources
+  repository: file://charts/wso2-ae-platform-resources
+  version: 0.1.0
+digest: sha256:ecccd46a25866fc16b19078296be148052415986f6e3cf4f196875571792a4b8
+generated: "2026-06-11T14:26:39.588972+05:30"

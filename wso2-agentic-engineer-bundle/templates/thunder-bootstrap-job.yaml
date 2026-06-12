@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wso2-ae-thunder-bootstrap
+  namespace: wso2-ae
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # Weight 0 — runs before oc-resources-apply (weight 5) so OC RBAC is
+    # set up after Thunder clients exist and can authenticate.
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+        app.kubernetes.io/component: thunder-bootstrap
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: bootstrap
+          image: {{ .Values.thunder.bootstrapImage }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          command:
+            - sh
+            - /scripts/thunder-bootstrap.sh
+          env:
+            - name: THUNDER_ADMIN_URL
+              value: {{ .Values.thunder.adminURL | quote }}
+            - name: CONSOLE_PUBLIC_URL
+              value: {{ index .Values "wso2-agentic-engineer" "console" "publicURL" | quote }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: scripts
+          configMap:
+            name: wso2-ae-thunder-bootstrap
+            defaultMode: 0555
+        - name: tmp
+          emptyDir: {}
