@@ -1,0 +1,129 @@
+{{- /*
+Post-install/upgrade job that adds the ASDLC console origin to Thunder's
+CORS allowedOrigins configmap and restarts Thunder so the browser can
+exchange authorization codes for tokens. Idempotent — safe to re-run.
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wso2-ae-thunder-cors
+  namespace: wso2-ae
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # Weight 1 — runs after thunder-bootstrap (weight 0), before oc-resources (weight 5).
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+        app.kubernetes.io/component: thunder-cors
+    spec:
+      restartPolicy: Never
+      serviceAccountName: wso2-ae-installer
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: thunder-cors
+          image: {{ .Values.thunder.bootstrapImage }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          env:
+            - name: CONSOLE_ORIGIN
+              value: {{ index .Values "wso2-agentic-engineer" "console" "publicURL" | quote }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              K8S="https://kubernetes.default.svc"
+              TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+              CM_URL="${K8S}/api/v1/namespaces/thunder/configmaps/thunder-config-map"
+              DEPLOY_URL="${K8S}/apis/apps/v1/namespaces/thunder/deployments/thunder-deployment"
+
+              log() { echo "[thunder-cors] $1"; }
+
+              log "Checking Thunder CORS for origin: ${CONSOLE_ORIGIN}"
+
+              CM=$(curl -sf --cacert "$CA" -H "Authorization: Bearer $TOKEN" "$CM_URL")
+
+              # ── Idempotency check ──────────────────────────────────────────
+              if printf '%s' "$CM" | grep -qF "\"${CONSOLE_ORIGIN}\""; then
+                log "Origin already present — nothing to do."
+                exit 0
+              fi
+
+              log "Adding ${CONSOLE_ORIGIN} ..."
+
+              # ── Patch: insert before the \\n\\npasskey: boundary ───────────
+              # In the raw JSON the YAML newlines are the 2-char sequence \n.
+              # The cors section ends with \n\npasskey: — we insert our origin
+              # line before that boundary.
+              ESC=$(printf '%s' "${CONSOLE_ORIGIN}" | sed 's/[\/&]/\\&/g')
+              PATCHED=$(printf '%s' "$CM" | sed \
+                "s|\\\\n\\\\npasskey:|\\\\n    - \\\\\"${ESC}\\\\\"\\\\n\\\\npasskey:|")
+
+              if ! printf '%s' "$PATCHED" | grep -qF "\"${CONSOLE_ORIGIN}\""; then
+                log "ERROR: sed substitution failed — Thunder configmap structure may have changed."
+                log "Add the origin manually: helm upgrade thunder ... --set 'thunder.cors.allowedOrigins[N]=${CONSOLE_ORIGIN}'"
+                exit 1
+              fi
+
+              # ── Apply ──────────────────────────────────────────────────────
+              curl -sf --cacert "$CA" \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Content-Type: application/json" \
+                -X PUT "$CM_URL" \
+                -d "$PATCHED" > /dev/null
+              log "Configmap updated."
+
+              # ── Rolling restart ────────────────────────────────────────────
+              RESTART_BODY=$(printf \
+                '{"spec":{"template":{"metadata":{"annotations":{"wso2-ae/restartedAt":"%s"}}}}}' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+              curl -sf --cacert "$CA" \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Content-Type: application/strategic-merge-patch+json" \
+                -X PATCH "$DEPLOY_URL" \
+                -d "$RESTART_BODY" > /dev/null
+              log "Thunder restart triggered."
+
+              # ── Wait for Thunder to be ready ───────────────────────────────
+              i=0
+              while [ $i -lt 36 ]; do
+                READY=$(curl -sf --cacert "$CA" -H "Authorization: Bearer $TOKEN" \
+                  "$DEPLOY_URL" \
+                  | grep -o '"readyReplicas":[0-9]*' | head -1 | cut -d: -f2 || echo 0)
+                DESIRED=$(curl -sf --cacert "$CA" -H "Authorization: Bearer $TOKEN" \
+                  "$DEPLOY_URL" \
+                  | grep -o '"replicas":[0-9]*' | head -1 | cut -d: -f2 || echo 1)
+                if [ "${READY:-0}" -ge "${DESIRED:-1}" ]; then
+                  log "Thunder ready (${READY}/${DESIRED})."
+                  break
+                fi
+                i=$((i+1))
+                log "Waiting for Thunder... (${READY:-0}/${DESIRED:-1}) attempt ${i}/36"
+                sleep 5
+              done
+
+              if [ $i -ge 36 ]; then
+                log "WARNING: Thunder readiness timeout. CORS update is applied but may not be active yet."
+              fi
+
+              log "Done."
+      volumes:
+        - name: tmp
+          emptyDir: {}
