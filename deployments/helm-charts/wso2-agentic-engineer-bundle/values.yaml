@@ -16,7 +16,7 @@ expose:
   apiHostname: "asdlc-api.example.com"
   # Namespace where the OC gateway is running
   gatewayNamespace: "openchoreo-control-plane"
-  gatewayName: "gateway-default"
+  gatewayName: "gateway"
 
 # ── Platform services (wso2-agentic-engineer sub-chart) ───────────────────────
 # All values here are passed through to the platform services chart.
