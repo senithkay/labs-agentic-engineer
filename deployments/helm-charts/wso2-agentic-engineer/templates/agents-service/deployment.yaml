@@ -27,7 +27,7 @@ spec:
             - name: AGENT_MODEL
               value: {{ .Values.agentsService.model }}
             - name: JWKS_URL
-              value: {{ .Values.idp.jwksURL }}
+              value: {{ .Values.idp.jwksInternalURL | default .Values.idp.jwksURL }}
             - name: JWT_ISSUER
               value: {{ .Values.idp.issuer }}
             - name: JWT_AUDIENCE
