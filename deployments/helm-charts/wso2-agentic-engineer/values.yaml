@@ -8,8 +8,16 @@ openchoreo:
 
 # ── Identity Provider (Thunder) ───────────────────────────────────────────────
 idp:
+  # Public URL — must match the `iss` claim in tokens Thunder issues.
+  # In a local cluster this is e.g. http://thunder.openchoreo.localhost:8080.
   issuer: "http://thunder-service.thunder.svc.cluster.local:8090"
+  # URL the browser/external clients use for discovery (same as issuer by default).
   jwksURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
+  # In-cluster URL the asdlc-api pod uses to fetch JWKS at runtime.
+  # Must be reachable from inside the pod — defaults to in-cluster Thunder service.
+  # Override this when idp.issuer is set to a public hostname that isn't
+  # resolvable inside the cluster.
+  jwksInternalURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
   tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
   adminURL: "http://thunder-service.thunder.svc.cluster.local:8090"
 

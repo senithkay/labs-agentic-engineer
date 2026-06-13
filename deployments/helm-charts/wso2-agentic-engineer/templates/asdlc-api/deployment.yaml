@@ -67,7 +67,7 @@ spec:
 
             # ── Identity Provider ─────────────────────────────────────────────
             - name: JWKS_URL
-              value: {{ .Values.idp.jwksURL }}
+              value: {{ .Values.idp.jwksInternalURL | default .Values.idp.jwksURL }}
             - name: JWT_ISSUER
               value: {{ .Values.idp.issuer }}
             - name: JWT_AUDIENCE
@@ -81,7 +81,7 @@ spec:
             - name: PLATFORM_IDP_ISSUER
               value: {{ .Values.idp.issuer }}
             - name: PLATFORM_IDP_JWKS_URL
-              value: {{ .Values.idp.jwksURL }}
+              value: {{ .Values.idp.jwksInternalURL | default .Values.idp.jwksURL }}
             - name: USER_APPS_OIDC_ISSUER
               value: {{ .Values.idp.issuer }}
             - name: USER_APPS_OIDC_CLIENT_ID

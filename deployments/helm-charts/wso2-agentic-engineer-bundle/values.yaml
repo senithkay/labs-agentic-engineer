@@ -25,11 +25,14 @@ wso2-agentic-engineer:
   console:
     publicURL: "https://asdlc.example.com"
     thunderPublicURL: "https://thunder.example.com"
-  # idp.issuer and idp.jwksURL must match Thunder's public URL since Thunder
-  # uses its public URL as the iss claim in issued tokens.
+  # idp.issuer must match Thunder's public URL — Thunder uses its publicUrl
+  # as the `iss` claim in issued tokens.
+  # idp.jwksInternalURL is the in-cluster URL the asdlc-api pod uses to
+  # fetch JWKS at runtime (not reachable via the public hostname inside the pod).
   idp:
     issuer: "https://thunder.example.com"
     jwksURL: "https://thunder.example.com/oauth2/jwks"
+    jwksInternalURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
   anthropic:
     apiKey: ""
   openbao:
