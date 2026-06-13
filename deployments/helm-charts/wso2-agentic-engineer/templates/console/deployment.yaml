@@ -22,7 +22,7 @@ spec:
           env:
             # nginx proxy target for /asdlc-api-service/ requests
             - name: ASDLC_API_PROXY_URL
-              value: "http://asdlc-api.{{ .Values.namespace }}:{{ .Values.asdlcApi.port }}"
+              value: "http://asdlc-api.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.asdlcApi.port }}"
             # React build-time vars (injected at container startup via entrypoint)
             - name: VITE_THUNDER_URL
               value: {{ .Values.console.thunderPublicURL }}
