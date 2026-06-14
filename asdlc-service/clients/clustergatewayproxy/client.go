@@ -54,6 +54,14 @@ import (
 // ErrNotFound is returned by Get* methods when the proxy returns 404.
 var ErrNotFound = errors.New("clustergatewayproxy: not found")
 
+// ErrPodNotReady is returned by StreamPodLog/TailPodLog when the pod
+// exists but its container hasn't started yet (k8s answers the log
+// endpoint with 400 "is waiting to start: ContainerCreating" /
+// "PodInitializing"). Callers tailing a freshly-scheduled Job should
+// treat this like ErrNotFound — empty progress, keep polling — rather
+// than surfacing it as a hard error.
+var ErrPodNotReady = errors.New("clustergatewayproxy: pod not ready")
+
 // AuthProvider supplies the Bearer token attached to proxy requests. It
 // matches the Token() method of *oauth.TokenProvider so that type satisfies
 // the interface as-is.
@@ -394,10 +402,28 @@ func (c *Client) StreamPodLog(ctx context.Context, namespace, podName string, op
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		_ = resp.Body.Close()
+		// A freshly-scheduled pod answers its log endpoint with 400
+		// "container … is waiting to start: ContainerCreating" (or
+		// "PodInitializing") until the container is up. That's a
+		// not-ready-yet signal, not a real failure — surface it as a
+		// typed sentinel so live-tail callers can keep polling silently.
+		if resp.StatusCode == http.StatusBadRequest && isContainerNotStarted(string(body)) {
+			return nil, ErrPodNotReady
+		}
 		return nil, fmt.Errorf("clustergatewayproxy: GET %s status %d: %s",
 			path, resp.StatusCode, string(body))
 	}
 	return resp.Body, nil
+}
+
+// isContainerNotStarted reports whether a k8s log-endpoint error body
+// indicates the container simply hasn't started yet (vs a genuine
+// failure). Matches the substrings k8s uses across ContainerCreating /
+// PodInitializing waiting states.
+func isContainerNotStarted(body string) bool {
+	return strings.Contains(body, "ContainerCreating") ||
+		strings.Contains(body, "PodInitializing") ||
+		strings.Contains(body, "waiting to start")
 }
 
 // TailPodLog reads the pod log in one shot — used by JobWatcher to
