@@ -1,20 +1,33 @@
-# ClusterComponentType: deployment/service
-# Backend APIs with path-prefix routing.
-# Allows dockerfile-builder workflow and api-configuration trait.
+# ClusterComponentType: deployment/platform-service
+# Used by ASDLC's own platform services (asdlc-api, agents-service).
+# Differs from the generic "service" type in two ways:
+#   1. No allowedWorkflows — platform services use pre-built images (BYOI) via
+#      ComponentRelease.workload, skipping CI entirely.
+#   2. Supports serviceAccountName as a Component parameter so platform services
+#      can run under a specific K8s ServiceAccount (e.g. for RBAC).
+#      Key/file mounts are handled via ReleaseBinding.workloadOverrides.container.files.
+#
 # Skip creation if OC already installed this resource (avoids Helm ownership conflict).
-{{- if not (lookup "openchoreo.dev/v1alpha1" "ClusterComponentType" "" "service") }}
+{{- if not (lookup "openchoreo.dev/v1alpha1" "ClusterComponentType" "" "platform-service") }}
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterComponentType
 metadata:
-  name: service
+  name: platform-service
 spec:
   workloadType: deployment
-  allowedWorkflows:
-    - kind: ClusterWorkflow
-      name: dockerfile-builder
+  # No allowedWorkflows: platform services are deployed via ComponentRelease
+  # with a pre-built image. CI (dockerfile-builder) is not used.
   allowedTraits:
     - kind: ClusterTrait
       name: api-configuration
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        serviceAccountName:
+          type: string
+          default: ""
+          description: "K8s ServiceAccount to run the pod under. Empty = default SA."
   environmentConfigs:
     openAPIV3Schema:
       type: object
@@ -33,20 +46,20 @@ spec:
               properties:
                 cpu:
                   type: string
-                  default: "50m"
+                  default: "100m"
                 memory:
                   type: string
-                  default: "128Mi"
+                  default: "256Mi"
             limits:
               type: object
               default: {}
               properties:
                 cpu:
                   type: string
-                  default: "200m"
+                  default: "1"
                 memory:
                   type: string
-                  default: "256Mi"
+                  default: "512Mi"
   resources:
     - id: deployment
       template:
@@ -64,12 +77,13 @@ spec:
             metadata:
               labels: "${metadata.podSelectors}"
             spec:
+              serviceAccountName: "${parameters.serviceAccountName != '' ? parameters.serviceAccountName : oc_omit()}"
               containers:
                 - name: main
                   image: "${workload.container.image}"
                   env: ${dependencies.toContainerEnvs()}
                   envFrom: ${configurations.toContainerEnvFrom()}
-                  volumeMounts: ${configurations.toContainerVolumeMounts()}
+                  volumeMounts: "${configurations.toContainerVolumeMounts()}"
                   resources:
                     requests:
                       cpu: "${environmentConfigs.resources.requests.cpu}"
@@ -77,7 +91,7 @@ spec:
                     limits:
                       cpu: "${environmentConfigs.resources.limits.cpu}"
                       memory: "${environmentConfigs.resources.limits.memory}"
-              volumes: ${configurations.toVolumes()}
+              volumes: "${configurations.toVolumes()}"
 
     - id: env-config
       forEach: ${configurations.toConfigEnvsByContainer()}
@@ -166,15 +180,15 @@ spec:
           ports: "${workload.toServicePorts()}"
 
     - id: httproute-external
-      forEach: '${workload.endpoints.transformList(name, ep, ("external" in ep.visibility && ep.type in ["HTTP", "REST", "GraphQL", "Websocket"]) ? [name] : []).flatten()}'
+      forEach: '${workload.endpoints.transformMap(name, ep, "external" in ep.visibility && ep.type in ["HTTP", "GraphQL", "Websocket"], ep)}'
       var: endpoint
       template:
         apiVersion: gateway.networking.k8s.io/v1
         kind: HTTPRoute
         metadata:
-          name: ${oc_generate_name(metadata.componentName, endpoint)}
+          name: ${oc_generate_name(metadata.componentName, endpoint.key)}
           namespace: "${metadata.namespace}"
-          labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint, "openchoreo.dev/endpoint-visibility": "external"})}'
+          labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint.key, "openchoreo.dev/endpoint-visibility": "external"})}'
         spec:
           parentRefs:
             - name: "${gateway.ingress.external.name}"
@@ -182,20 +196,10 @@ spec:
           hostnames: |
             ${[gateway.ingress.external.?http, gateway.ingress.external.?https]
               .filter(g, g.hasValue()).map(g, g.value().host).distinct()
-              .map(h, metadata.environmentName + "-" + metadata.componentNamespace + "." + h)}
+              .map(h, oc_dns_label(endpoint.key, metadata.componentName, metadata.environmentName, metadata.componentNamespace) + "." + h)}
           rules:
-            - matches:
-                - path:
-                    type: PathPrefix
-                    value: /${metadata.componentName}-${endpoint}
-              filters:
-                - type: URLRewrite
-                  urlRewrite:
-                    path:
-                      type: ReplacePrefixMatch
-                      replacePrefixMatch: '${workload.endpoints[endpoint].?basePath.orValue("") != "" ? workload.endpoints[endpoint].?basePath.orValue("") : "/"}'
-              backendRefs:
+            - backendRefs:
                 - name: "${metadata.componentName}"
-                  port: "${workload.endpoints[endpoint].port}"
+                  port: "${endpoint.value.port}"
 
 {{- end }}

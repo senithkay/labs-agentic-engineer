@@ -1,0 +1,15 @@
+# Grants the Thunder Administrators group admin access so human operators
+# logged into the console have immediate admin rights.
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterAuthzRoleBinding
+metadata:
+  name: administrators-group-binding
+spec:
+  effect: allow
+  entitlement:
+    claim: groups
+    value: {{ .Values.authz.administratorsGroup }}
+  roleMappings:
+    - roleRef:
+        kind: ClusterAuthzRole
+        name: admin

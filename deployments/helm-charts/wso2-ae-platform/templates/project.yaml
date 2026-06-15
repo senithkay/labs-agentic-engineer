@@ -1,0 +1,9 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: Project
+metadata:
+  name: asdlc-platform
+  namespace: {{ .Release.Namespace }}
+spec:
+  deploymentPipelineRef:
+    kind: DeploymentPipeline
+    name: default

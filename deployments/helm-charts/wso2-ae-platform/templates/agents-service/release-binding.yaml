@@ -1,0 +1,32 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: ReleaseBinding
+metadata:
+  name: agents-service-production
+  namespace: {{ .Release.Namespace }}
+spec:
+  environment: production
+  owner:
+    projectName: asdlc-platform
+    componentName: agents-service
+  releaseName: agents-service-{{ include "ae-platform.tagSuffix" .Values.agentsService.image.tag }}
+  componentTypeEnvironmentConfigs:
+    replicas: 1
+    resources: {{ toYaml .Values.agentsService.resources | nindent 6 }}
+  workloadOverrides:
+    container:
+      env:
+        - key: PORT
+          value: {{ .Values.agentsService.port | quote }}
+        - key: LOG_LEVEL
+          value: {{ .Values.agentsService.logLevel | quote }}
+        - key: AGENT_MODEL
+          value: {{ .Values.agentsService.model | quote }}
+        - key: JWKS_URL
+          value: {{ .Values.idp.jwksInternalURL | default .Values.idp.jwksURL | quote }}
+        - key: JWT_ISSUER
+          value: {{ .Values.idp.issuer | quote }}
+        - key: JWT_AUDIENCE
+          value: {{ .Values.agentsService.jwt.audience | quote }}
+        # Resolves per-org Anthropic key via the merged asdlc-api
+        - key: ASDLC_API_URL
+          value: "http://asdlc-api.{{ .Release.Namespace }}:{{ .Values.asdlcApi.port }}"

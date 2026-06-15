@@ -1,0 +1,14 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: Component
+metadata:
+  name: asdlc-api
+  namespace: {{ .Release.Namespace }}
+spec:
+  owner:
+    projectName: asdlc-platform
+  componentType:
+    kind: ClusterComponentType
+    name: deployment/platform-service
+  autoDeploy: false
+  parameters:
+    serviceAccountName: "asdlc-api"

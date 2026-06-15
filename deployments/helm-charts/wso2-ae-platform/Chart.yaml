@@ -1,0 +1,17 @@
+apiVersion: v2
+appVersion: 0.1.0
+description: >
+  Deploys ASDLC platform services (asdlc-api, agents-service, asdlc-console)
+  as OpenChoreo-native Components using Project/Component/ComponentRelease/ReleaseBinding,
+  and PostgreSQL as an OC-managed Resource via ClusterResourceType.
+keywords:
+  - wso2
+  - agentic-engineer
+  - openchoreo
+  - ai
+maintainers:
+  - name: WSO2
+    url: https://wso2.com
+name: wso2-ae-platform
+type: application
+version: 0.1.5

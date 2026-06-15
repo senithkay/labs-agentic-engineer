@@ -1,0 +1,14 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: Component
+metadata:
+  name: agents-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  owner:
+    projectName: asdlc-platform
+  componentType:
+    kind: ClusterComponentType
+    name: deployment/platform-service
+  autoDeploy: false
+  parameters:
+    serviceAccountName: ""

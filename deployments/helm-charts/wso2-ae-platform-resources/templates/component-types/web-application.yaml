@@ -1,6 +1,8 @@
 # ClusterComponentType: deployment/web-application
 # Frontend SPAs with subdomain routing (each endpoint gets its own subdomain
 # via oc_dns_label so asset references work correctly).
+# Skip creation if OC already installed this resource (avoids Helm ownership conflict).
+{{- if not (lookup "openchoreo.dev/v1alpha1" "ClusterComponentType" "" "web-application") }}
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterComponentType
 metadata:
@@ -186,3 +188,5 @@ spec:
               backendRefs:
                 - name: "${metadata.componentName}"
                   port: "${workload.endpoints[endpoint].port}"
+
+{{- end }}

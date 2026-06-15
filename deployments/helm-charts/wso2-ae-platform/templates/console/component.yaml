@@ -1,0 +1,13 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: Component
+metadata:
+  name: asdlc-console
+  namespace: {{ .Release.Namespace }}
+spec:
+  owner:
+    projectName: asdlc-platform
+  componentType:
+    kind: ClusterComponentType
+    name: deployment/web-application
+  autoDeploy: false
+  parameters: {}

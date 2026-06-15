@@ -1,0 +1,31 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: ReleaseBinding
+metadata:
+  name: asdlc-console-production
+  namespace: {{ .Release.Namespace }}
+spec:
+  environment: production
+  owner:
+    projectName: asdlc-platform
+    componentName: asdlc-console
+  releaseName: asdlc-console-{{ include "ae-platform.tagSuffix" .Values.console.image.tag }}
+  componentTypeEnvironmentConfigs:
+    replicas: 1
+    resources: {{ toYaml .Values.console.resources | nindent 6 }}
+  workloadOverrides:
+    container:
+      env:
+        # nginx proxy target for /asdlc-api-service/ requests
+        - key: ASDLC_API_PROXY_URL
+          value: "http://asdlc-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.asdlcApi.port }}"
+        # React build-time vars (injected at container startup via entrypoint)
+        - key: VITE_THUNDER_URL
+          value: {{ .Values.console.thunderPublicURL | quote }}
+        - key: VITE_THUNDER_CLIENT_ID
+          value: {{ .Values.console.thunder.clientId | quote }}
+        - key: VITE_THUNDER_SCOPES
+          value: {{ .Values.console.thunder.scopes | quote }}
+        - key: VITE_SIGN_IN_REDIRECT_URL
+          value: {{ .Values.console.publicURL | quote }}
+        - key: VITE_SIGN_OUT_REDIRECT_URL
+          value: "{{ .Values.console.publicURL }}/login"

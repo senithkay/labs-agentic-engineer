@@ -1,0 +1,20 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: Environment
+metadata:
+  name: production
+  namespace: {{ .Release.Namespace }}
+spec:
+  dataPlaneRef:
+    kind: ClusterDataPlane
+    name: default
+---
+apiVersion: openchoreo.dev/v1alpha1
+kind: DeploymentPipeline
+metadata:
+  name: default
+  namespace: {{ .Release.Namespace }}
+spec:
+  promotionPaths:
+    - sourceEnvironmentRef:
+        name: production
+      targetEnvironmentRefs: []

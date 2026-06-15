@@ -22,16 +22,17 @@ spec:
         app.kubernetes.io/component: thunder-bootstrap
     spec:
       restartPolicy: Never
+      # Runs as root so apk can install jq. This is a short-lived post-install
+      # Job with no persistent storage — risk is acceptable for a dev/local cluster.
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 65534
+        runAsNonRoot: false
       containers:
         - name: bootstrap
           image: {{ .Values.thunder.bootstrapImage }}
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false
           command:
             - sh
             - /scripts/thunder-bootstrap.sh
@@ -39,7 +40,7 @@ spec:
             - name: THUNDER_ADMIN_URL
               value: {{ .Values.thunder.adminURL | quote }}
             - name: CONSOLE_PUBLIC_URL
-              value: {{ index .Values "wso2-agentic-engineer" "console" "publicURL" | quote }}
+              value: {{ index .Values "wso2-ae-platform" "console" "publicURL" | quote }}
           volumeMounts:
             - name: scripts
               mountPath: /scripts

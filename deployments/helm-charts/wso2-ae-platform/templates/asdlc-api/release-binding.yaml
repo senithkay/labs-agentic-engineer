@@ -1,0 +1,183 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: ReleaseBinding
+metadata:
+  name: asdlc-api-production
+  namespace: {{ .Release.Namespace }}
+spec:
+  environment: production
+  owner:
+    projectName: asdlc-platform
+    componentName: asdlc-api
+  releaseName: asdlc-api-{{ include "ae-platform.tagSuffix" .Values.asdlcApi.image.tag }}
+  componentTypeEnvironmentConfigs:
+    replicas: {{ .Values.asdlcApi.replicas | default 1 }}
+    resources: {{ toYaml .Values.asdlcApi.resources | nindent 6 }}
+  workloadOverrides:
+    container:
+      env:
+        - key: SERVER_HOST
+          value: "0.0.0.0"
+        - key: SERVER_PORT
+          value: {{ .Values.asdlcApi.port | quote }}
+        - key: LOG_LEVEL
+          value: {{ .Values.asdlcApi.logLevel | quote }}
+        - key: DEPLOYMENT_TIER
+          value: {{ .Values.asdlcApi.deploymentTier | quote }}
+        - key: TEST_MODE
+          value: "false"
+        - key: LOCAL_OPENBAO_REPAIR
+          value: "false"
+
+        # ── Database ──────────────────────────────────────────────────────────
+        - key: POSTGRES_PASSWORD
+          value: {{ .Values.postgres.auth.password | quote }}
+        - key: DATABASE_URL
+          value: "postgres://{{ .Values.postgres.auth.username }}:{{ .Values.postgres.auth.password }}@asdlc-db:5432/{{ .Values.postgres.auth.database }}?sslmode=disable"
+
+        # ── OpenChoreo ────────────────────────────────────────────────────────
+        - key: PLATFORM_API_SERVICE_BASE_URL
+          value: {{ .Values.openchoreo.apiBaseURL | quote }}
+        - key: PLATFORM_API_SERVICE_HOST
+          value: {{ .Values.openchoreo.apiGatewayHost | quote }}
+
+        # ── Sister services ───────────────────────────────────────────────────
+        - key: AGENTS_SERVICE_BASE_URL
+          value: "http://agents-service.{{ .Release.Namespace }}:{{ .Values.agentsService.port }}"
+        - key: AGENTS_SERVICE_URL
+          value: "http://agents-service.{{ .Release.Namespace }}:{{ .Values.agentsService.port }}"
+        - key: AGENT_PLATFORM_URL
+          value: "http://asdlc-api.{{ .Release.Namespace }}:{{ .Values.asdlcApi.port }}"
+
+        # ── Identity Provider ─────────────────────────────────────────────────
+        - key: JWKS_URL
+          value: {{ .Values.idp.jwksInternalURL | default .Values.idp.jwksURL | quote }}
+        - key: JWT_ISSUER
+          value: {{ .Values.idp.issuer | quote }}
+        - key: JWT_AUDIENCE
+          value: "asdlc-*"
+        - key: THUNDER_ADMIN_URL
+          value: {{ .Values.idp.adminURL | quote }}
+        - key: THUNDER_SYSTEM_CLIENT_ID
+          value: {{ .Values.thunderSystemClient.clientId | quote }}
+        - key: THUNDER_SYSTEM_CLIENT_SECRET
+          value: {{ .Values.thunderSystemClient.clientSecret | quote }}
+        - key: PLATFORM_IDP_ISSUER
+          value: {{ .Values.idp.issuer | quote }}
+        - key: PLATFORM_IDP_JWKS_URL
+          value: {{ .Values.idp.jwksInternalURL | default .Values.idp.jwksURL | quote }}
+        - key: USER_APPS_OIDC_ISSUER
+          value: {{ .Values.idp.issuer | quote }}
+        - key: USER_APPS_OIDC_CLIENT_ID
+          value: {{ .Values.console.thunder.clientId | quote }}
+        - key: USER_APPS_OIDC_SCOPES
+          value: "openid profile"
+
+        # ── Service auth ──────────────────────────────────────────────────────
+        - key: SERVICE_AUTH_TOKEN_URL
+          value: {{ .Values.idp.tokenURL | quote }}
+        - key: SERVICE_AUTH_CLIENT_ID
+          value: {{ .Values.asdlcApi.serviceAuth.clientId | quote }}
+        - key: SERVICE_AUTH_CLIENT_SECRET
+          value: {{ .Values.asdlcApi.serviceAuth.clientSecret | quote }}
+        - key: SERVICE_AUTH_HOST_HEADER
+          value: ""
+        - key: SERVICE_AUTH_GIT_TOKEN_URL
+          value: {{ .Values.idp.tokenURL | quote }}
+        - key: SERVICE_AUTH_GIT_CLIENT_ID
+          value: "asdlc-bff-to-git-service"
+        - key: SERVICE_AUTH_GIT_CLIENT_SECRET
+          value: "asdlc-bff-to-git-service-secret"
+        - key: SERVICE_AUTH_GIT_HOST_HEADER
+          value: ""
+        - key: SERVICE_AUTH_AGENTS_TOKEN_URL
+          value: {{ .Values.idp.tokenURL | quote }}
+        - key: SERVICE_AUTH_AGENTS_CLIENT_ID
+          value: {{ .Values.asdlcApi.agentsJwt.clientId | quote }}
+        - key: SERVICE_AUTH_AGENTS_CLIENT_SECRET
+          value: {{ .Values.asdlcApi.agentsJwt.clientSecret | quote }}
+        - key: SERVICE_AUTH_AGENTS_HOST_HEADER
+          value: ""
+
+        # ── Task JWT ──────────────────────────────────────────────────────────
+        - key: BFF_TASK_SIGNING_KEY_PATH
+          value: "/app/keys/task-signing.pem"
+        - key: BFF_TASK_TOKEN_ISSUER
+          value: {{ .Values.taskSigning.issuer | quote }}
+        - key: BFF_TASK_TOKEN_AUDIENCE
+          value: {{ .Values.taskSigning.audience | quote }}
+        - key: BFF_JWKS_URL
+          value: "http://localhost:{{ .Values.asdlcApi.port }}/auth/external/jwks.json"
+        - key: TASK_JWT_ISSUER
+          value: {{ .Values.taskSigning.issuer | quote }}
+        - key: TASK_JWT_AUDIENCE
+          value: {{ .Values.taskSigning.audience | quote }}
+        - key: BFF_PUBLIC_URL
+          value: {{ .Values.console.publicURL | quote }}
+
+        # ── GitHub ────────────────────────────────────────────────────────────
+        - key: GITHUB_APP_SLUG
+          value: {{ .Values.github.appSlug | quote }}
+        - key: GITHUB_REPO_VISIBILITY
+          value: {{ .Values.github.repoVisibility | quote }}
+        - key: GIT_COMMITTER_NAME
+          value: {{ .Values.github.committerName | quote }}
+        - key: GIT_COMMITTER_EMAIL
+          value: {{ .Values.github.committerEmail | quote }}
+        - key: GITHUB_APP_PRIVATE_KEY_PATH
+          value: "/etc/github-app/private-key.pem"
+        - key: GITHUB_WEBHOOK_DELIVERY_URL
+          value: ""
+        - key: GITHUB_WEBHOOK_SECRET
+          value: {{ .Values.github.webhookSecret | quote }}
+        - key: OAUTH_STATE_SIGNING_KEY
+          value: {{ .Values.github.oauthStateKey | quote }}
+        - key: GITHUB_APP_ID
+          value: {{ .Values.github.appId | quote }}
+        - key: GITHUB_CLIENT_ID
+          value: {{ .Values.github.clientId | quote }}
+        - key: GITHUB_CLIENT_SECRET
+          value: {{ .Values.github.clientSecret | quote }}
+
+        # ── OpenBao ───────────────────────────────────────────────────────────
+        - key: OPENBAO_ADDR
+          value: {{ .Values.openbao.addr | quote }}
+        - key: OPENBAO_TOKEN
+          value: {{ .Values.openbao.token | quote }}
+
+        # ── Anthropic ─────────────────────────────────────────────────────────
+        - key: ANTHROPIC_PLATFORM_KEY
+          value: {{ .Values.anthropic.apiKey | quote }}
+
+        # ── Cloud service stubs ───────────────────────────────────────────────
+        - key: SECRET_MANAGER_API_URL
+          value: {{ .Values.asdlcApi.smApiURL | default "" | quote }}
+        - key: CLUSTER_GATEWAY_PROXY_URL
+          value: {{ .Values.asdlcApi.clusterGatewayProxyURL | default "" | quote }}
+
+        # ── Observer ──────────────────────────────────────────────────────────
+        - key: OBSERVER_URL
+          value: {{ .Values.observer.url | quote }}
+        - key: OBSERVER_OAUTH_TOKEN_URL
+          value: {{ .Values.observer.oauth.tokenURL | quote }}
+        - key: OBSERVER_OAUTH_CLIENT_ID
+          value: {{ .Values.observer.oauth.clientId | quote }}
+        - key: OBSERVER_OAUTH_CLIENT_SECRET
+          value: {{ .Values.observer.oauth.clientSecret | quote }}
+        - key: OBSERVER_OAUTH_HOST_HEADER
+          value: ""
+
+        - key: REPO_BASE_PATH
+          value: "/data/repos"
+
+      files:
+        # Task signing RSA private key — OC mounts the ConfigMap at mountPath as a directory;
+        # the file is accessible at <mountPath>/<key> = /app/keys/task-signing.pem
+        - key: task-signing.pem
+          mountPath: /app/keys
+          value: {{ .Values.taskSigning.privateKeyPem | quote }}
+        {{- if .Values.github.appPrivateKeyPem }}
+        # GitHub App private key — accessible at /etc/github-app/private-key.pem
+        - key: private-key.pem
+          mountPath: /etc/github-app
+          value: {{ .Values.github.appPrivateKeyPem | quote }}
+        {{- end }}
