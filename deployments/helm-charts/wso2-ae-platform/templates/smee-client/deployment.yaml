@@ -1,0 +1,50 @@
+{{- if .Values.smee.url }}
+---
+# smee-client forwards GitHub webhook events from the public smee.io channel
+# to the BFF's /webhooks/github endpoint. Only deployed when smee.url is set.
+# The BFF's GITHUB_WEBHOOK_DELIVERY_URL must also be set to the same smee.io
+# URL so GitHub registers webhooks against the public channel address.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smee-client
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: smee-client
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smee-client
+  template:
+    metadata:
+      labels:
+        app: smee-client
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      containers:
+        - name: smee-client
+          image: "{{ .Values.smee.image | default "node:20-alpine" }}"
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              npm install -g smee-client --quiet
+              smee --url "$(SMEE_URL)" --target "$(SMEE_TARGET)" --path /
+          env:
+            - name: SMEE_URL
+              value: {{ .Values.smee.url | quote }}
+            - name: SMEE_TARGET
+              value: "http://asdlc-api.{{ .Release.Namespace }}:{{ .Values.asdlcApi.port }}/webhooks/github"
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+      restartPolicy: Always
+{{- end }}

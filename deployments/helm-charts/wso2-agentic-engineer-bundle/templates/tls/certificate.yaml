@@ -1,0 +1,19 @@
+{{- if .Values.tls.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.tls.secretName }}
+  namespace: {{ .Values.tls.gatewayNamespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  secretName: {{ .Values.tls.secretName }}
+  issuerRef:
+    name: wso2-ae-selfsigned
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.{{ .Values.tls.domain }}"
+    - {{ .Values.tls.domain | quote }}
+    - {{ .Values.thunder.publicURL | trimPrefix "http://" | trimPrefix "https://" | quote }}
+{{- end }}

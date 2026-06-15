@@ -1,0 +1,90 @@
+{{- if .Values.tls.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wso2-ae-gateway-https-patch
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+        app.kubernetes.io/component: gateway-https-patch
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: wso2-ae-gateway-patcher
+      containers:
+        - name: patcher
+          image: {{ .Values.tls.patchImage }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+
+              GATEWAY_NS="{{ .Values.tls.gatewayNamespace }}"
+              GATEWAY_NAME="{{ .Values.tls.gatewayName }}"
+              CERT_NAME="{{ .Values.tls.secretName }}"
+              HTTPS_PORT="{{ .Values.tls.gatewayPort }}"
+              SECRET_NAME="{{ .Values.tls.secretName }}"
+
+              echo "Waiting for certificate ${CERT_NAME} to be ready..."
+              i=0
+              while [ "$i" -lt 60 ]; do
+                STATUS=$(kubectl get certificate "${CERT_NAME}" -n "${GATEWAY_NS}" \
+                  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+                if [ "$STATUS" = "True" ]; then
+                  echo "Certificate is ready."
+                  break
+                fi
+                i=$((i + 1))
+                if [ "$i" -eq 60 ]; then
+                  echo "Timed out waiting for certificate."
+                  exit 1
+                fi
+                echo "  not ready yet (attempt $i/60), retrying in 5s..."
+                sleep 5
+              done
+
+              echo "Checking if HTTPS listener already exists..."
+              EXISTING=$(kubectl get gateway "${GATEWAY_NAME}" -n "${GATEWAY_NS}" \
+                -o jsonpath='{.spec.listeners[?(@.name=="https")].name}' 2>/dev/null || true)
+
+              if [ "${EXISTING}" = "https" ]; then
+                echo "HTTPS listener already exists — skipping patch."
+                exit 0
+              fi
+
+              echo "Patching gateway ${GATEWAY_NAME} to add HTTPS listener on port ${HTTPS_PORT}..."
+              kubectl patch gateway "${GATEWAY_NAME}" -n "${GATEWAY_NS}" \
+                --type=json \
+                -p="[{
+                  \"op\": \"add\",
+                  \"path\": \"/spec/listeners/-\",
+                  \"value\": {
+                    \"name\": \"https\",
+                    \"port\": ${HTTPS_PORT},
+                    \"protocol\": \"HTTPS\",
+                    \"allowedRoutes\": {\"namespaces\": {\"from\": \"All\"}},
+                    \"tls\": {
+                      \"mode\": \"Terminate\",
+                      \"certificateRefs\": [{
+                        \"name\": \"${SECRET_NAME}\",
+                        \"namespace\": \"${GATEWAY_NS}\"
+                      }]
+                    }
+                  }
+                }]"
+
+              echo "Gateway patched successfully."
+{{- end }}

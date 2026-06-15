@@ -1,15 +1,33 @@
-apiVersion: batch/v1
-kind: Job
+---
+# ConfigMap holding the bootstrap script — referenced by the Job below.
+apiVersion: v1
+kind: ConfigMap
 metadata:
   name: wso2-ae-thunder-bootstrap
-  namespace: wso2-ae
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
   annotations:
     "helm.sh/hook": post-install,post-upgrade
-    # Weight 0 — runs before oc-resources-apply (weight 5) so OC RBAC is
-    # set up after Thunder clients exist and can authenticate.
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  thunder-bootstrap.sh: |
+{{ .Files.Get "files/thunder-bootstrap.sh" | indent 4 }}
+---
+# Post-install Job: registers all ASDLC OAuth clients in OC Thunder.
+# Idempotent — safe to re-run on helm upgrade.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wso2-ae-thunder-bootstrap
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "0"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
@@ -22,8 +40,7 @@ spec:
         app.kubernetes.io/component: thunder-bootstrap
     spec:
       restartPolicy: Never
-      # Runs as root so apk can install jq. This is a short-lived post-install
-      # Job with no persistent storage — risk is acceptable for a dev/local cluster.
+      # Runs as root so apk can install jq. Short-lived post-install Job — acceptable for bootstrap.
       securityContext:
         runAsNonRoot: false
       containers:
@@ -39,8 +56,18 @@ spec:
           env:
             - name: THUNDER_ADMIN_URL
               value: {{ .Values.thunder.adminURL | quote }}
+            - name: THUNDER_ADMIN_CLIENT_ID
+              value: {{ .Values.thunder.adminClientId | quote }}
+            - name: THUNDER_ADMIN_CLIENT_SECRET
+              value: {{ .Values.thunder.adminClientSecret | quote }}
+            - name: THUNDER_OU_HANDLE
+              value: {{ .Values.thunder.ouHandle | quote }}
+            - name: THUNDER_SYSTEM_CLIENT_ID
+              value: {{ .Values.thunder.systemClientId | quote }}
+            - name: THUNDER_SYSTEM_CLIENT_SECRET
+              value: {{ .Values.thunder.systemClientSecret | quote }}
             - name: CONSOLE_PUBLIC_URL
-              value: {{ index .Values "wso2-ae-platform" "console" "publicURL" | quote }}
+              value: {{ index .Values "wso2-ae-platform" "console" "publicURL" | default .Values.console.publicURL | quote }}
           volumeMounts:
             - name: scripts
               mountPath: /scripts

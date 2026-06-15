@@ -105,15 +105,17 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 		// Pick the credential for this call:
 		//
 		//   - User-facing call (an inbound user JWT is in ctx and the call is
-		//     NOT marked service-identity): forward the user JWT. platform-api
-		//     derives the org from the JWT's ouId; no impersonation header.
+		//     NOT marked service-identity, AND an ImpersonateOrgResolver is
+		//     configured): forward the user JWT. platform-api derives the org
+		//     from the JWT's ouId; no impersonation header.
 		//
 		//   - Service-identity call (orchestration / async — dispatch, webhooks,
 		//     watchers — marked via middleware.WithServiceIdentity, OR any call
-		//     with no inbound user JWT): authenticate as the BFF's M2M service
-		//     identity and impersonate the target org, taken from the namespace
-		//     in the request URL, so platform-api routes and bills THAT org
-		//     rather than the service identity's own (Admin) org.
+		//     with no inbound user JWT, OR direct-OC mode where
+		//     ImpersonateOrgResolver is nil): authenticate as the BFF's M2M
+		//     service identity. In direct-OC mode (helm bundle / k3d) OC's API
+		//     only trusts its own Thunder, not the platform's AE Thunder, so
+		//     forwarding the user JWT would always 401.
 		//
 		// The explicit service-identity marker is what makes the orchestration
 		// paths correct: they run inside the user's HTTP request (so a user JWT
@@ -121,7 +123,7 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 		// forward that user's JWT — otherwise the impersonation header is never
 		// set and the write mis-routes to the wrong namespace.
 		userJWT := middleware.GetAuthToken(ctx)
-		useServiceIdentity := middleware.IsServiceIdentity(ctx) || userJWT == ""
+		useServiceIdentity := middleware.IsServiceIdentity(ctx) || userJWT == "" || cfg.ImpersonateOrgResolver == nil
 
 		if !useServiceIdentity {
 			slog.DebugContext(ctx, "openchoreo: forwarding inbound user JWT",

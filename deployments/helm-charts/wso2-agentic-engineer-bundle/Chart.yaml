@@ -1,21 +1,18 @@
 apiVersion: v2
-appVersion: 0.3.0
+appVersion: 0.4.0
 dependencies:
-- name: wso2-ae-thunder-extension
-  repository: file://../wso2-ae-thunder-extension
-  version: 0.1.3
-  alias: ae-thunder
-  condition: ae-thunder.enabled
 - name: wso2-ae-oc-extensions
   repository: file://../wso2-ae-oc-extensions
-  version: 0.2.2
+  version: 0.3.0
 - name: wso2-ae-platform
   repository: file://../wso2-ae-platform
-  version: 0.1.5
-description: 'Single-command install of WSO2 Agentic Engineer on an OpenChoreo cluster.
-  Deploys ASDLC platform services as OC-native Components, PostgreSQL as a ClusterResourceType,
-  and registers all OpenChoreo extension resources (ClusterComponentTypes, ClusterWorkflows,
-  ClusterResourceType, ClusterTraits, RBAC) in one helm install.'
+  version: 0.2.0
+description: >
+  Single-command install of WSO2 Agentic Engineer on an OpenChoreo cluster.
+  Deploys ASDLC platform services (asdlc-api, agents-service, asdlc-console) as
+  plain Kubernetes Deployments in the OC control-plane namespace (wso2-ae), exposed
+  via the OC control-plane gateway. Reuses OC's existing Thunder for identity.
+  Registers all ASDLC OAuth clients in OC Thunder via a post-install bootstrap job.
 name: wso2-agentic-engineer-bundle
 type: application
-version: 0.3.0
+version: 0.4.0

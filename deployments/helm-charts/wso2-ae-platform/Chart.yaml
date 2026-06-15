@@ -1,9 +1,10 @@
 apiVersion: v2
-appVersion: 0.1.0
+appVersion: 0.2.0
 description: >
   Deploys ASDLC platform services (asdlc-api, agents-service, asdlc-console)
-  as OpenChoreo-native Components using Project/Component/ComponentRelease/ReleaseBinding,
-  and PostgreSQL as an OC-managed Resource via ClusterResourceType.
+  as plain Kubernetes Deployments in the OC control-plane namespace (wso2-ae),
+  exposed via the OC control-plane gateway using HTTPRoute + ReferenceGrant.
+  PostgreSQL is deployed as a direct StatefulSet (not an OC Resource).
 keywords:
   - wso2
   - agentic-engineer
@@ -14,4 +15,4 @@ maintainers:
     url: https://wso2.com
 name: wso2-ae-platform
 type: application
-version: 0.1.5
+version: 0.2.0
