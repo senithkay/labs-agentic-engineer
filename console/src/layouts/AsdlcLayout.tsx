@@ -1,3 +1,21 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 import { useEffect, useMemo, useState } from 'react';
 import { matchPath, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -51,6 +69,7 @@ import {
   projectCreatePath,
 } from '../lib/paths';
 import { resolveOuHandle } from '../utils/orgClaims';
+import wso2LogoUrl from '../assets/wso2-logo.svg';
 
 export default function AsdlcLayout() {
   const navigate = useNavigate();
@@ -291,23 +310,40 @@ export default function AsdlcLayout() {
     <AppShell>
       <AppShell.Navbar>
         <Header>
-          <Header.Toggle collapsed={collapsed} onToggle={() => setCollapsed((prev) => !prev)} />
-
           <Header.Brand>
             <Stack
-              direction="column"
+              component="button"
+              type="button"
+              direction="row"
+              alignItems="center"
+              gap={1}
               onClick={() => navigate(organizationOverviewPath(routeOrgId))}
-              sx={{ cursor: 'pointer', lineHeight: 1 }}
+              sx={{
+                cursor: 'pointer',
+                lineHeight: 1,
+                background: 'none',
+                border: 0,
+                p: 0,
+                m: 0,
+                textAlign: 'left',
+              }}
             >
-              <Box component="span" sx={{ lineHeight: 1.1, whiteSpace: 'nowrap' }}>
-                <Box component="span" sx={{ fontWeight: 700, fontSize: '1.25rem' }}>WSO2</Box>
-                <Box component="span" sx={{ fontWeight: 400, fontSize: '1rem' }}> Labs</Box>
-
-              </Box>
-              <Box component="span" sx={{ fontSize: '0.95rem', lineHeight: 1.1, whiteSpace: 'nowrap' }}>
-                <Box component="span" sx={{ fontWeight: 700 }}>Agentic</Box>
-                <Box component="span" sx={{ fontWeight: 400 }}> Engineer</Box>
-              </Box>
+              <Box
+                component="img"
+                src={wso2LogoUrl}
+                alt="WSO2"
+                sx={{ height: 36, width: 36, display: 'block' }}
+              />
+              <Stack direction="column" sx={{ lineHeight: 1 }}>
+                <Box component="span" sx={{ lineHeight: 1.1, whiteSpace: 'nowrap' }}>
+                  <Box component="span" sx={{ fontWeight: 700, fontSize: '1.25rem' }}>WSO2</Box>
+                  <Box component="span" sx={{ fontWeight: 400, fontSize: '1rem' }}> Labs</Box>
+                </Box>
+                <Box component="span" sx={{ fontSize: '0.95rem', lineHeight: 1.1, whiteSpace: 'nowrap' }}>
+                  <Box component="span" sx={{ fontWeight: 700 }}>Agentic</Box>
+                  <Box component="span" sx={{ fontWeight: 400 }}> Engineer</Box>
+                </Box>
+              </Stack>
             </Stack>
           </Header.Brand>
 

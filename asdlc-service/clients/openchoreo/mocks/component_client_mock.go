@@ -42,10 +42,10 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //			ListWorkflowRunsFunc: func(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*models.WorkflowRunList, error) {
 //				panic("mock out the ListWorkflowRuns method")
 //			},
-//			TriggerBuildFunc: func(ctx context.Context, orgName string, projectName string, componentName string, runName string) (*models.WorkflowRun, error) {
+//			TriggerBuildFunc: func(ctx context.Context, orgName string, projectName string, componentName string, secretRef string, runName string) (*models.WorkflowRun, error) {
 //				panic("mock out the TriggerBuild method")
 //			},
-//			TriggerBuildAtCommitFunc: func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, runName string) (*models.WorkflowRun, error) {
+//			TriggerBuildAtCommitFunc: func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*models.WorkflowRun, error) {
 //				panic("mock out the TriggerBuildAtCommit method")
 //			},
 //			TriggerCodingAgentFunc: func(ctx context.Context, params openchoreo.CodingAgentParams) (*models.WorkflowRun, error) {
@@ -59,6 +59,9 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //			},
 //			UpdateComponentWorkflowEnvVarsFunc: func(ctx context.Context, orgName string, projectName string, componentName string, envVars []models.WorkflowEnvVarRef) error {
 //				panic("mock out the UpdateComponentWorkflowEnvVars method")
+//			},
+//			UpdateComponentWorkflowFilesFunc: func(ctx context.Context, orgName string, projectName string, componentName string, files []models.WorkflowFileVar) error {
+//				panic("mock out the UpdateComponentWorkflowFiles method")
 //			},
 //		}
 //
@@ -89,10 +92,10 @@ type ComponentClientMock struct {
 	ListWorkflowRunsFunc func(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*models.WorkflowRunList, error)
 
 	// TriggerBuildFunc mocks the TriggerBuild method.
-	TriggerBuildFunc func(ctx context.Context, orgName string, projectName string, componentName string, runName string) (*models.WorkflowRun, error)
+	TriggerBuildFunc func(ctx context.Context, orgName string, projectName string, componentName string, secretRef string, runName string) (*models.WorkflowRun, error)
 
 	// TriggerBuildAtCommitFunc mocks the TriggerBuildAtCommit method.
-	TriggerBuildAtCommitFunc func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, runName string) (*models.WorkflowRun, error)
+	TriggerBuildAtCommitFunc func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*models.WorkflowRun, error)
 
 	// TriggerCodingAgentFunc mocks the TriggerCodingAgent method.
 	TriggerCodingAgentFunc func(ctx context.Context, params openchoreo.CodingAgentParams) (*models.WorkflowRun, error)
@@ -105,6 +108,9 @@ type ComponentClientMock struct {
 
 	// UpdateComponentWorkflowEnvVarsFunc mocks the UpdateComponentWorkflowEnvVars method.
 	UpdateComponentWorkflowEnvVarsFunc func(ctx context.Context, orgName string, projectName string, componentName string, envVars []models.WorkflowEnvVarRef) error
+
+	// UpdateComponentWorkflowFilesFunc mocks the UpdateComponentWorkflowFiles method.
+	UpdateComponentWorkflowFilesFunc func(ctx context.Context, orgName string, projectName string, componentName string, files []models.WorkflowFileVar) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -199,6 +205,8 @@ type ComponentClientMock struct {
 			ProjectName string
 			// ComponentName is the componentName argument value.
 			ComponentName string
+			// SecretRef is the secretRef argument value.
+			SecretRef string
 			// RunName is the runName argument value.
 			RunName string
 		}
@@ -214,6 +222,8 @@ type ComponentClientMock struct {
 			ComponentName string
 			// CommitSHA is the commitSHA argument value.
 			CommitSHA string
+			// SecretRef is the secretRef argument value.
+			SecretRef string
 			// RunName is the runName argument value.
 			RunName string
 		}
@@ -263,6 +273,19 @@ type ComponentClientMock struct {
 			// EnvVars is the envVars argument value.
 			EnvVars []models.WorkflowEnvVarRef
 		}
+		// UpdateComponentWorkflowFiles holds details about calls to the UpdateComponentWorkflowFiles method.
+		UpdateComponentWorkflowFiles []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OrgName is the orgName argument value.
+			OrgName string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// ComponentName is the componentName argument value.
+			ComponentName string
+			// Files is the files argument value.
+			Files []models.WorkflowFileVar
+		}
 	}
 	lockCreateComponent                        sync.RWMutex
 	lockDeleteComponent                        sync.RWMutex
@@ -277,6 +300,7 @@ type ComponentClientMock struct {
 	lockUpdateComponentTraitEnvironmentConfigs sync.RWMutex
 	lockUpdateComponentTraits                  sync.RWMutex
 	lockUpdateComponentWorkflowEnvVars         sync.RWMutex
+	lockUpdateComponentWorkflowFiles           sync.RWMutex
 }
 
 // CreateComponent calls CreateComponentFunc.
@@ -596,7 +620,7 @@ func (mock *ComponentClientMock) ListWorkflowRunsCalls() []struct {
 }
 
 // TriggerBuild calls TriggerBuildFunc.
-func (mock *ComponentClientMock) TriggerBuild(ctx context.Context, orgName string, projectName string, componentName string, runName string) (*models.WorkflowRun, error) {
+func (mock *ComponentClientMock) TriggerBuild(ctx context.Context, orgName string, projectName string, componentName string, secretRef string, runName string) (*models.WorkflowRun, error) {
 	if mock.TriggerBuildFunc == nil {
 		panic("ComponentClientMock.TriggerBuildFunc: method is nil but ComponentClient.TriggerBuild was just called")
 	}
@@ -605,18 +629,20 @@ func (mock *ComponentClientMock) TriggerBuild(ctx context.Context, orgName strin
 		OrgName       string
 		ProjectName   string
 		ComponentName string
+		SecretRef     string
 		RunName       string
 	}{
 		Ctx:           ctx,
 		OrgName:       orgName,
 		ProjectName:   projectName,
 		ComponentName: componentName,
+		SecretRef:     secretRef,
 		RunName:       runName,
 	}
 	mock.lockTriggerBuild.Lock()
 	mock.calls.TriggerBuild = append(mock.calls.TriggerBuild, callInfo)
 	mock.lockTriggerBuild.Unlock()
-	return mock.TriggerBuildFunc(ctx, orgName, projectName, componentName, runName)
+	return mock.TriggerBuildFunc(ctx, orgName, projectName, componentName, secretRef, runName)
 }
 
 // TriggerBuildCalls gets all the calls that were made to TriggerBuild.
@@ -628,6 +654,7 @@ func (mock *ComponentClientMock) TriggerBuildCalls() []struct {
 	OrgName       string
 	ProjectName   string
 	ComponentName string
+	SecretRef     string
 	RunName       string
 } {
 	var calls []struct {
@@ -635,6 +662,7 @@ func (mock *ComponentClientMock) TriggerBuildCalls() []struct {
 		OrgName       string
 		ProjectName   string
 		ComponentName string
+		SecretRef     string
 		RunName       string
 	}
 	mock.lockTriggerBuild.RLock()
@@ -644,7 +672,7 @@ func (mock *ComponentClientMock) TriggerBuildCalls() []struct {
 }
 
 // TriggerBuildAtCommit calls TriggerBuildAtCommitFunc.
-func (mock *ComponentClientMock) TriggerBuildAtCommit(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, runName string) (*models.WorkflowRun, error) {
+func (mock *ComponentClientMock) TriggerBuildAtCommit(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*models.WorkflowRun, error) {
 	if mock.TriggerBuildAtCommitFunc == nil {
 		panic("ComponentClientMock.TriggerBuildAtCommitFunc: method is nil but ComponentClient.TriggerBuildAtCommit was just called")
 	}
@@ -654,6 +682,7 @@ func (mock *ComponentClientMock) TriggerBuildAtCommit(ctx context.Context, orgNa
 		ProjectName   string
 		ComponentName string
 		CommitSHA     string
+		SecretRef     string
 		RunName       string
 	}{
 		Ctx:           ctx,
@@ -661,12 +690,13 @@ func (mock *ComponentClientMock) TriggerBuildAtCommit(ctx context.Context, orgNa
 		ProjectName:   projectName,
 		ComponentName: componentName,
 		CommitSHA:     commitSHA,
+		SecretRef:     secretRef,
 		RunName:       runName,
 	}
 	mock.lockTriggerBuildAtCommit.Lock()
 	mock.calls.TriggerBuildAtCommit = append(mock.calls.TriggerBuildAtCommit, callInfo)
 	mock.lockTriggerBuildAtCommit.Unlock()
-	return mock.TriggerBuildAtCommitFunc(ctx, orgName, projectName, componentName, commitSHA, runName)
+	return mock.TriggerBuildAtCommitFunc(ctx, orgName, projectName, componentName, commitSHA, secretRef, runName)
 }
 
 // TriggerBuildAtCommitCalls gets all the calls that were made to TriggerBuildAtCommit.
@@ -679,6 +709,7 @@ func (mock *ComponentClientMock) TriggerBuildAtCommitCalls() []struct {
 	ProjectName   string
 	ComponentName string
 	CommitSHA     string
+	SecretRef     string
 	RunName       string
 } {
 	var calls []struct {
@@ -687,6 +718,7 @@ func (mock *ComponentClientMock) TriggerBuildAtCommitCalls() []struct {
 		ProjectName   string
 		ComponentName string
 		CommitSHA     string
+		SecretRef     string
 		RunName       string
 	}
 	mock.lockTriggerBuildAtCommit.RLock()
@@ -872,5 +904,53 @@ func (mock *ComponentClientMock) UpdateComponentWorkflowEnvVarsCalls() []struct 
 	mock.lockUpdateComponentWorkflowEnvVars.RLock()
 	calls = mock.calls.UpdateComponentWorkflowEnvVars
 	mock.lockUpdateComponentWorkflowEnvVars.RUnlock()
+	return calls
+}
+
+// UpdateComponentWorkflowFiles calls UpdateComponentWorkflowFilesFunc.
+func (mock *ComponentClientMock) UpdateComponentWorkflowFiles(ctx context.Context, orgName string, projectName string, componentName string, files []models.WorkflowFileVar) error {
+	if mock.UpdateComponentWorkflowFilesFunc == nil {
+		panic("ComponentClientMock.UpdateComponentWorkflowFilesFunc: method is nil but ComponentClient.UpdateComponentWorkflowFiles was just called")
+	}
+	callInfo := struct {
+		Ctx           context.Context
+		OrgName       string
+		ProjectName   string
+		ComponentName string
+		Files         []models.WorkflowFileVar
+	}{
+		Ctx:           ctx,
+		OrgName:       orgName,
+		ProjectName:   projectName,
+		ComponentName: componentName,
+		Files:         files,
+	}
+	mock.lockUpdateComponentWorkflowFiles.Lock()
+	mock.calls.UpdateComponentWorkflowFiles = append(mock.calls.UpdateComponentWorkflowFiles, callInfo)
+	mock.lockUpdateComponentWorkflowFiles.Unlock()
+	return mock.UpdateComponentWorkflowFilesFunc(ctx, orgName, projectName, componentName, files)
+}
+
+// UpdateComponentWorkflowFilesCalls gets all the calls that were made to UpdateComponentWorkflowFiles.
+// Check the length with:
+//
+//	len(mockedComponentClient.UpdateComponentWorkflowFilesCalls())
+func (mock *ComponentClientMock) UpdateComponentWorkflowFilesCalls() []struct {
+	Ctx           context.Context
+	OrgName       string
+	ProjectName   string
+	ComponentName string
+	Files         []models.WorkflowFileVar
+} {
+	var calls []struct {
+		Ctx           context.Context
+		OrgName       string
+		ProjectName   string
+		ComponentName string
+		Files         []models.WorkflowFileVar
+	}
+	mock.lockUpdateComponentWorkflowFiles.RLock()
+	calls = mock.calls.UpdateComponentWorkflowFiles
+	mock.lockUpdateComponentWorkflowFiles.RUnlock()
 	return calls
 }

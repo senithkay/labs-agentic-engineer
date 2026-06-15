@@ -1,3 +1,21 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 // Per-task workspace provisioning.
 //
 // On dispatch the BFF creates a WorkflowRun of `app-factory-coding-agent`
@@ -27,6 +45,7 @@ import { exec } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import http from "node:http";
+import https from "node:https";
 import { config } from "../config.js";
 import { credHelperScript, ghWrapperScript } from "./credhelper.js";
 
@@ -50,6 +69,11 @@ export interface ProvisionRequest {
   identity: { name: string; email: string; login?: string };
   gitServiceUrl: string;
   correlationId?: string;
+  // WS2.4 — full refresh URL override (defaults to
+  // `${gitServiceUrl}/api/v1/credentials/refresh`). oneshot.ts sets this
+  // to the path-scoped `${platformUrl}/api/v1/tasks/{taskId}/credentials/refresh`
+  // when publisher cc creds drive auth.
+  refreshUrl?: string;
 }
 
 // computeLayout names every path the dispatch flow touches. Pure function
@@ -82,9 +106,16 @@ async function resolvePATForClone(
     throw new Error("bearer file is empty");
   }
 
-  const url = new URL(req.gitServiceUrl);
-  if (!url.pathname.endsWith("/")) url.pathname += "/";
-  url.pathname += "api/v1/credentials/refresh";
+  // WS2.4 — refreshUrl overrides the legacy git-service path when
+  // publisher cc creds drive auth (oneshot.ts sets it).
+  let url: URL;
+  if (req.refreshUrl && req.refreshUrl !== "") {
+    url = new URL(req.refreshUrl);
+  } else {
+    url = new URL(req.gitServiceUrl);
+    if (!url.pathname.endsWith("/")) url.pathname += "/";
+    url.pathname += "api/v1/credentials/refresh";
+  }
 
   const headers: Record<string, string> = {
     "Authorization": `Bearer ${bearer.trim()}`,
@@ -94,8 +125,14 @@ async function resolvePATForClone(
     headers["X-Correlation-ID"] = req.correlationId;
   }
 
+  // Pick the transport by URL scheme: in cloud the BFF/git endpoint is https
+  // (gateway), locally it's http. Node's http.request rejects https URLs with
+  // "Protocol \"https:\" not supported", so this must branch on the scheme
+  // (mirrors skills_pull.ts).
+  const lib = url.protocol === "https:" ? https : http;
+
   return new Promise((resolve, reject) => {
-    const hReq = http.request(
+    const hReq = lib.request(
       url,
       { method: "POST", headers, timeout: 10000 },
       (res) => {

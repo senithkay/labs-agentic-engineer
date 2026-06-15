@@ -1,4 +1,22 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package config
+
+import "time"
 
 // Config holds all application configuration.
 type Config struct {
@@ -11,6 +29,16 @@ type Config struct {
 
 	// Test mode — enables test-only endpoints like _test/reset.
 	TestMode bool
+
+	// LocalOpenBaoRepairEnabled gates the _test/sm-api-resync endpoint —
+	// distinct from TestMode because the resync surface emits decrypted
+	// per-org plaintext (Anthropic API keys, GitHub PATs) and TestMode is
+	// set on the wso2cloud dev release binding for the existing destructive
+	// _test/reset route. Splitting the two means the resync route only
+	// mounts where deployments/docker-compose.yml explicitly opts in;
+	// cloud release bindings never set this var so the route never
+	// registers in deployed environments.
+	LocalOpenBaoRepairEnabled bool
 
 	// DeploymentTier guards dev-only destructive migrations and seed paths.
 	// Phase 0 used this for the platform-PAT startup gate (now retired in PR
@@ -49,16 +77,6 @@ type Config struct {
 	// set to 0 to force exhaustion on the first auth failure.
 	BuildAuthRetryBudget int
 
-	// FeatureEmitAPITrait gates Phase 2 of the api-platform-integration
-	// plan (docs/design/api-platform-integration.md §6 Phase 2). When
-	// true: dispatch emits the `api-configuration` ClusterTrait based on
-	// design.md `api.security`, design PUT triggers trait_sync, and the
-	// drift watcher reconciles. When false: every code path behaves like
-	// pre-Phase-2 — no trait emission, no watcher reconcile. Per §14
-	// Rollout, default is on in dev / off in prod until a corpus of
-	// existing components passes baseline-diff.
-	FeatureEmitAPITrait bool
-
 	// Phase 3 (api-platform-integration) — Thunder admin client config
 	// for per-org publisher OAuth app lifecycle. Loaded from env vars
 	// THUNDER_ADMIN_URL / THUNDER_SYSTEM_CLIENT_ID / THUNDER_SYSTEM_CLIENT_SECRET.
@@ -73,33 +91,17 @@ type Config struct {
 	// keymanager in gateway-config.yaml.
 	PlatformIDP PlatformIDPDefaults
 
-	// UserAppsOIDC is the OIDC config the BFF hands to every user web-app
-	// component with design.auth.kind == "oidc-spa". One shared OAuth
-	// client (`ASDLC_USER_APPS` in Thunder, pre-seeded by setup-prerequisites)
-	// is used for all user webapps in v1 — per-project clients are a v2
-	// follow-up tracked in docs/design/oauth-protected-webapp.md.
-	UserAppsOIDC UserAppsOIDCConfig
-
 	Observability   ObservabilityConfig
 	AgentsService   AgentsServiceConfig
 	ServiceAuth     ServiceAuthConfig
-	GitService      GitServiceConfig
 	DatabaseService DatabaseServiceConfig
 
-	// AgentGitServiceURL is the URL the coding-agent runner pod uses to reach
-	// git-service for /credentials/refresh. The pod runs in the per-tenant
-	// WorkflowPlane namespace (`workflows-<ouHandle>`), so this must be a
-	// cross-namespace FQDN (e.g.
-	// http://app-factory-git-service.<dp-ns>.svc.cluster.local:3300).
-	// Falls back to GitService.BaseURL when empty.
-	AgentGitServiceURL string
-
 	// AgentPlatformURL is the URL the coding-agent runner pod uses to call
-	// back to the BFF (F3c — POST /api/v1/tasks/{id}/verification-failed).
-	// Reachable from the WorkflowPlane namespace; same cross-namespace FQDN
-	// shape as AgentGitServiceURL. When empty, the runner skips the
-	// verification-failed callback and only records the diagnostic on the
-	// GitHub issue.
+	// back to the BFF (every former git-service endpoint is served by the
+	// merged asdlc-api now). Reachable from the WorkflowPlane namespace
+	// (`workflows-<ouHandle>`) via cross-namespace FQDN. When empty, the
+	// runner skips the verification-failed callback and only records the
+	// diagnostic on the GitHub issue.
 	AgentPlatformURL string
 
 	// JWKS settings for inbound JWT verification — Thunder publishes the
@@ -113,8 +115,87 @@ type Config struct {
 	// Per-target Service JWT clients used for outbound auth. Each one
 	// corresponds to a distinct Thunder OAuth2 client whose audience is
 	// pinned to the target service.
-	ServiceAuthGitService    ServiceAuthConfig
 	ServiceAuthAgentsService ServiceAuthConfig
+
+	// --- Folded in from git-service after WS0.1.g --------------------
+	// These were previously git-service/config.Config fields; the fold
+	// keeps the field names as-is so the copied services compile
+	// unchanged. Some overlap conceptually with the asdlc-side fields
+	// above (e.g. GitHubAppSlug vs GithubAppSlug); the loader sets both
+	// from the same env vars during the transition.
+
+	RepoBasePath string
+
+	GitHubRepoVisibility string
+	GitHubCommitterName  string
+	GitHubCommitterEmail string
+
+	// WebhookDeliveryURL is the URL the platform registers on each repo.
+	WebhookDeliveryURL string
+	// WebhookHMACSecret is the HMAC key for inbound webhook validation
+	// (single-tenant in Phase 0; per-org in Phase 2).
+	WebhookHMACSecret string
+
+	// CredentialEncryptionKey is the base64-encoded 32-byte AES-256 key
+	// used to encrypt per-org credentials at rest in org_secrets.
+	CredentialEncryptionKey string
+
+	// OpenBaoAddr / OpenBaoToken — retained until _platform secret
+	// env-mount migration lands.
+	OpenBaoAddr  string
+	OpenBaoToken string
+
+	GitHubAppID             string
+	GitHubAppClientID       string
+	GitHubAppClientSecret   string
+	GitHubAppSlug           string
+	GitHubAppPrivateKeyPath string
+
+	// CredentialValidatorInterval — Phase 2 PR D §6.10. Default 24h.
+	CredentialValidatorInterval time.Duration
+
+	// BFFJWKSURL is the BFF's JWKS endpoint used to verify Task JWTs.
+	BFFJWKSURL string
+
+	TaskJWTAllowedIssuer   string
+	TaskJWTAllowedAudience string
+
+	// AnthropicPlatformKey — platform-wide fallback Anthropic API key.
+	AnthropicPlatformKey string
+
+	// AgentsServiceURL — in-cluster base URL of asdlc-agents-service.
+	// (Folded-in name; the asdlc-side equivalent is AgentsService.BaseURL.)
+	AgentsServiceURL string
+
+	// --- Phase 1: Secret Manager API + cluster-gateway-proxy ----------
+	// SM-API URL the merged binary writes per-org credentials to (the
+	// `sm-api` secretmanagersvc provider). Empty disables the provider —
+	// the legacy `org_secrets` DB path keeps working but the new
+	// dispatch + cascade flows that depend on SecretReference / ESO
+	// will 503. ADR-0002: same provider in local + cloud.
+	SecretManagerAPIURL     string
+	SecretManagerAPITimeout time.Duration
+
+	// Cluster-gateway-proxy URL the merged binary POSTs Job +
+	// ExternalSecret manifests to on dispatch (ou-service shape;
+	// un-authed today). Empty disables the new dispatch path; the
+	// merged binary still boots and serves the spec/design endpoints.
+	ClusterGatewayProxyURL string
+
+	// AgentRunnerImage is the docker image the per-task coding-agent
+	// Job uses. Pinned at deploy time; `:latest` is OK in dev but the
+	// cloud release-binding should resolve to a digest.
+	AgentRunnerImage string
+
+	// AgentClusterSecretStore is the ESO ClusterSecretStore that backs
+	// per-run ExternalSecret reads in the remote-worker NS on DP.
+	// On cloud-dp-oc-dp this MUST be `application-secrets-read` (Vault
+	// AppRole `approle-creds-application-read-permission` — covers
+	// `user-app-secrets/*`). `secretstore-read` on the same cluster only
+	// covers platform-component paths (CA bundles, observability creds)
+	// and will silently no-op our reads. Local k3d reuses the existing
+	// `default` CSS (per WS1.1 compose wiring).
+	AgentClusterSecretStore string
 }
 
 // ThunderAdminConfig holds the asdlc-system-client OAuth2 credentials
@@ -134,26 +215,6 @@ type ThunderAdminConfig struct {
 type PlatformIDPDefaults struct {
 	Issuer  string
 	JWKSURL string
-}
-
-// UserAppsOIDCConfig is the OIDC client config the BFF hands to user
-// web-apps. Loaded from env vars USER_APPS_OIDC_ISSUER /
-// USER_APPS_OIDC_CLIENT_ID / USER_APPS_OIDC_SCOPES /
-// USER_APPS_OIDC_INTERNAL_PROXY_PASS. When ClientID is empty the
-// dispatch path skips the `## OIDC client provisioned` comment and
-// logs a warning — user apps with auth.kind=oidc-spa will deploy but
-// fail at sign-in.
-//
-// InternalProxyPass is the URL the SPA's own nginx `/oidc/` block uses
-// to proxy `POST /oidc/token` back to Thunder. It MUST be reachable
-// from a pod inside the cluster (the public Issuer hostname isn't —
-// `*.openchoreo.localhost` doesn't resolve from pod DNS). Default is
-// the in-cluster Thunder Service FQDN + the `/oauth2/` path prefix.
-type UserAppsOIDCConfig struct {
-	Issuer            string
-	ClientID          string
-	Scopes            string // space-separated, e.g. "openid profile"
-	InternalProxyPass string
 }
 
 // ServiceAuthConfig holds OAuth2 client_credentials settings for
@@ -193,15 +254,6 @@ type ObservabilityConfig struct {
 type PlatformAPIConfig struct {
 	BaseURL    string
 	HostHeader string
-}
-
-// GitServiceConfig holds connection settings for the git-service.
-//
-// PR 2 of the repo-storage-ownership refactor removed RepoBasePath: the
-// BFF no longer mounts the repo working tree (git-service is the sole
-// owner). All artifact reads/writes go over HTTP via BaseURL.
-type GitServiceConfig struct {
-	BaseURL string
 }
 
 // DatabaseServiceConfig holds connection settings for the database-service.

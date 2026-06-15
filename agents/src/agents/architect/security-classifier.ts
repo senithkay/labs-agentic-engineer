@@ -1,6 +1,24 @@
-// Pure rubric helper that mirrors the api.security classification rules
-// in prompt.ts ("API security classification (api.security)"). Kept as a
-// standalone function so the rubric is:
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+// Pure rubric helper that mirrors the `exposesAPI` classification rules
+// in prompt.ts ("API security classification (`exposesAPI`)"). Kept as
+// a standalone function so the rubric is:
 //   1. Unit-testable in CI without an LLM round-trip.
 //   2. Available as a deterministic fallback (e.g. for non-LLM design
 //      paths the BFF emits).
@@ -10,13 +28,11 @@
 //
 // Returns:
 //   - 'required' when the description triggers any of the protected
-//     keyword families.
+//     keyword families. Callers should map this to
+//     `exposesAPI: { auth: end-user-required, userContext: X-User-Id }`.
 //   - 'none' when nothing triggers (the canonical "public" hint).
-//
-// Note: 'none' is the suggestion to OMIT the api block entirely (the
-// BFF reads absence as public — see services.ResolveAPISecurityEnabled).
-// Callers that wire this into a Component shape should drop the api
-// field when 'none' is returned, not emit `security: none`.
+//     Callers should OMIT the `exposesAPI` block entirely (the BFF
+//     reads absence as public — see services.ResolveAPISecurityEnabled).
 
 export type APISecurityHint = "required" | "none";
 
@@ -90,7 +106,7 @@ const PROTECTED_RULES: KeywordRule[] = [
 ];
 
 /**
- * Classify a free-form description against the api.security rubric.
+ * Classify a free-form description against the `exposesAPI` rubric.
  *
  * @param text Combined description: typically the component's
  *   `componentAgentInstructions` plus, when available, the relevant

@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package services
 
 import (
@@ -88,22 +104,36 @@ type PlatformIDPConfig struct {
 }
 
 type idpService struct {
-	db        *gorm.DB
-	thunder   thundersvc.Client
-	platform  PlatformIDPConfig
+	db       *gorm.DB
+	thunder  thundersvc.Client
+	platform PlatformIDPConfig
+	smAPI    *SMAPIWriter
 }
 
 // NewIDPService builds the service. `thunder` may be nil in unit tests
 // — the service rejects EnsureOrgPublisher / RevokeOrgPublisher /
 // RegenerateClientSecret with ErrIDPThunderUnavailable when so. Read
-// methods (GetProfile, GetOrCreateProfile) keep working.
-func NewIDPService(db *gorm.DB, thunder thundersvc.Client, platform PlatformIDPConfig) IDPService {
+// methods (GetProfile, GetOrCreateProfile) keep working. Returns the
+// concrete type so WithSMAPIWriter (WS2.4) can chain at the composition
+// root; the concrete value still satisfies the IDPService interface for
+// consumers that store it as such.
+func NewIDPService(db *gorm.DB, thunder thundersvc.Client, platform PlatformIDPConfig) *idpService {
 	return &idpService{db: db, thunder: thunder, platform: platform}
 }
 
+// WithSMAPIWriter attaches the SM-API writer so EnsureOrgPublisher /
+// RegenerateClientSecret mirror the publisher cc credentials to SM-API
+// (WS2.4 — runner pods consume them via per-run ExternalSecret). nil
+// writer or one with Enabled()==false is a no-op; publisher provisioning
+// still works but dispatcher's runner-auth path stays disabled.
+func (s *idpService) WithSMAPIWriter(w *SMAPIWriter) *idpService {
+	s.smAPI = w
+	return s
+}
+
 // ErrIDPThunderUnavailable means the Thunder admin client isn't wired
-// (FEATURE_EMIT_API_TRAIT off, missing system credentials, etc).
-// Callers in the dispatch / design-edit path treat this as
+// (missing system credentials, etc). Callers in the dispatch / design-
+// edit path treat this as
 // non-fatal — protected components still deploy; per-org publisher
 // provisioning is best-effort and the next dispatch tries again.
 var ErrIDPThunderUnavailable = errors.New("idp_service: thunder admin client not configured")
@@ -132,6 +162,26 @@ func (s *idpService) GetOrCreateProfile(ctx context.Context, orgID string) (*mod
 		return nil, err
 	}
 	if existing != nil {
+		// Self-heal the cluster-level platform fields. Issuer/JWKSURL are
+		// cluster config, not per-org data, but they were cached onto the
+		// row at creation. If the config changed since (e.g. the cluster
+		// moved from an in-cluster Thunder URL to the gateway URL), refresh
+		// the row so the derived per-org publisher token URL stays correct.
+		if s.platform.JWKSURL != "" &&
+			(existing.JWKSURL != s.platform.JWKSURL || existing.Issuer != s.platform.Issuer) {
+			if err := s.db.WithContext(ctx).Model(existing).Where("org_id = ?", orgID).
+				Updates(map[string]interface{}{
+					"jwks_url":   s.platform.JWKSURL,
+					"issuer":     s.platform.Issuer,
+					"updated_at": time.Now().UTC(),
+				}).Error; err != nil {
+				slog.WarnContext(ctx, "idp_service: platform field self-heal failed (continuing)",
+					"orgID", orgID, "error", err)
+			} else {
+				existing.JWKSURL = s.platform.JWKSURL
+				existing.Issuer = s.platform.Issuer
+			}
+		}
 		return existing, nil
 	}
 
@@ -154,6 +204,21 @@ func (s *idpService) GetOrCreateProfile(ctx context.Context, orgID string) (*mod
 	return &profile, nil
 }
 
+// lookupOrgOUID returns the org's Thunder OU id (the JWT `ouId`, stored as
+// Organization.ThunderOrgUUID) so the publisher app can be registered under
+// the org's OU. Returns "" when the org row or its Thunder UUID is missing —
+// the Thunder client then falls back to the default OU.
+func (s *idpService) lookupOrgOUID(ctx context.Context, orgHandle string) string {
+	var org models.Organization
+	if err := s.db.WithContext(ctx).Where("name = ?", orgHandle).First(&org).Error; err != nil {
+		return ""
+	}
+	if org.ThunderOrgUUID == nil {
+		return ""
+	}
+	return org.ThunderOrgUUID.String()
+}
+
 func (s *idpService) EnsureOrgPublisher(ctx context.Context, orgID, actor string) (string, string, bool, error) {
 	if orgID == "" {
 		return "", "", false, fmt.Errorf("orgID required")
@@ -169,7 +234,18 @@ func (s *idpService) EnsureOrgPublisher(ctx context.Context, orgID, actor string
 
 	beforeJSON, _ := json.Marshal(profileSummary(profile))
 
-	clientID, clientSecret, created, terr := s.thunder.EnsurePublisherApp(ctx, orgID)
+	// Resolve the org's Thunder OU id (JWT ouId) so the publisher app is
+	// registered under the org's OU — its cc token then carries
+	// ouHandle == orgHandle, which the publisher-token verifier requires.
+	// Empty (org UUID not yet backfilled) falls back to the default OU.
+	orgOUID := s.lookupOrgOUID(ctx, orgID)
+	if orgOUID == "" {
+		slog.WarnContext(ctx, "idp_service: org Thunder OU id unknown — publisher app will use the default OU; runner token ouHandle may not match the org. Ensure the org row has thunder_org_uuid (user must have logged in with an ouId claim).",
+			"orgID", orgID)
+	} else {
+		slog.DebugContext(ctx, "idp_service: provisioning publisher under org OU", "orgID", orgID, "orgOU", orgOUID)
+	}
+	clientID, clientSecret, created, terr := s.thunder.EnsurePublisherApp(ctx, orgID, orgOUID)
 	if terr != nil {
 		s.audit(ctx, orgID, models.IDPAuditEnsurePublisher, actor, beforeJSON, nil, terr)
 		return "", "", false, fmt.Errorf("idp_service.EnsureOrgPublisher: %w", terr)
@@ -190,6 +266,19 @@ func (s *idpService) EnsureOrgPublisher(ctx context.Context, orgID, actor string
 		Updates(updates).Error; err != nil {
 		s.audit(ctx, orgID, models.IDPAuditEnsurePublisher, actor, beforeJSON, nil, err)
 		return "", "", false, fmt.Errorf("idp_service.EnsureOrgPublisher persist: %w", err)
+	}
+
+	// WS2.4 — mirror publisher creds to SM-API so the dispatcher can mint
+	// a per-run ExternalSecret for the runner's cc flow. Only on fresh
+	// create (Thunder doesn't return the secret on subsequent reads); pre-
+	// existing apps without SM-API mirroring recover via an explicit
+	// RegenerateClientSecret. Best-effort: SM-API outage doesn't fail
+	// publisher provisioning.
+	if created && clientSecret != "" && s.smAPI != nil && s.smAPI.Enabled() {
+		if _, smerr := s.smAPI.WritePublisher(ctx, orgID, clientID, clientSecret); smerr != nil {
+			slog.WarnContext(ctx, "idp_service: SM-API publisher write failed (continuing)",
+				"orgID", orgID, "error", smerr)
+		}
 	}
 
 	// Re-read for the audit "after" snapshot.
@@ -239,6 +328,16 @@ func (s *idpService) RevokeOrgPublisher(ctx context.Context, orgID, actor string
 		s.audit(ctx, orgID, models.IDPAuditRevokePublisher, actor, beforeJSON, nil, err)
 		return deleted, fmt.Errorf("idp_service.RevokeOrgPublisher persist: %w", err)
 	}
+
+	// WS2.4 — drop the SM-API publisher secret + clear the triplet. Best-
+	// effort so a missing SM-API doesn't strand the Thunder revoke.
+	if s.smAPI != nil && s.smAPI.Enabled() {
+		if smerr := s.smAPI.DeletePublisher(ctx, orgID); smerr != nil {
+			slog.WarnContext(ctx, "idp_service: SM-API publisher delete failed (continuing)",
+				"orgID", orgID, "error", smerr)
+		}
+	}
+
 	after, _ := s.GetProfile(ctx, orgID)
 	afterJSON, _ := json.Marshal(profileSummary(after))
 	s.audit(ctx, orgID, models.IDPAuditRevokePublisher, actor, beforeJSON, afterJSON, nil)
@@ -279,6 +378,17 @@ func (s *idpService) RegenerateClientSecret(ctx context.Context, orgID, actor st
 		s.audit(ctx, orgID, models.IDPAuditRegenerateSecret, actor, beforeJSON, nil, err)
 		return "", fmt.Errorf("idp_service.RegenerateClientSecret persist: %w", err)
 	}
+
+	// WS2.4 — mirror the rotated secret to SM-API; runner pods picking up
+	// from the next dispatch will receive the new secret via ExternalSecret
+	// refresh. Best-effort.
+	if s.smAPI != nil && s.smAPI.Enabled() {
+		if _, smerr := s.smAPI.WritePublisher(ctx, orgID, profile.PublisherClientID, newSecret); smerr != nil {
+			slog.WarnContext(ctx, "idp_service: SM-API publisher rewrite failed (continuing)",
+				"orgID", orgID, "error", smerr)
+		}
+	}
+
 	after, _ := s.GetProfile(ctx, orgID)
 	afterJSON, _ := json.Marshal(profileSummary(after))
 	s.audit(ctx, orgID, models.IDPAuditRegenerateSecret, actor, beforeJSON, afterJSON, nil)
@@ -365,10 +475,10 @@ func (s *idpService) UpdateProfile(ctx context.Context, orgID, actor string, req
 // happened on Thunder / in the DB).
 func (s *idpService) audit(ctx context.Context, orgID, action, actor string, before, after []byte, opErr error) {
 	row := models.IDPAuditEvent{
-		OrgID:      orgID,
-		Action:     action,
-		Actor:      coalesceActor(actor),
-		OccurredAt: time.Now().UTC(),
+		OrgID:       orgID,
+		Action:      action,
+		Actor:       coalesceActor(actor),
+		OccurredAt:  time.Now().UTC(),
 		BeforeState: before,
 		AfterState:  after,
 	}

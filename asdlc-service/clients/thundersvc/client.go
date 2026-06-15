@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // Package thundersvc is the BFF-side Thunder admin client. It mints
 // `scope=system` access tokens via client_credentials against a Thunder
 // OAuth app (asdlc-system-client) that has the Administrator role
@@ -52,7 +68,14 @@ type Client interface {
 	// it up in their secret store. When the secret was lost (e.g.
 	// OpenBao was wiped), use RegenerateClientSecret to issue a new
 	// one.
-	EnsurePublisherApp(ctx context.Context, orgHandle string) (clientID, clientSecret string, created bool, err error)
+	//
+	// orgOUID is the org's Thunder OU id (the JWT `ouId`). The app is
+	// registered under that OU so its client_credentials token carries
+	// `ouHandle == orgHandle` — the publisher-token verifier's cross-org
+	// check requires this. When orgOUID is empty the default OU is used
+	// (single-org / local dev), which only matches when the default OU
+	// is the org's OU.
+	EnsurePublisherApp(ctx context.Context, orgHandle, orgOUID string) (clientID, clientSecret string, created bool, err error)
 
 	// DeletePublisherApp deletes the publisher app for the given org.
 	// Returns true when the app existed and was deleted, false when it
@@ -68,7 +91,7 @@ type Client interface {
 	// EnsureRedirectURIs appends the given URIs to the named OAuth2
 	// app's `inboundAuthConfig[0].config.redirectUris` set, idempotent
 	// on each URI (already-present entries are skipped). Used by the
-	// BFF when a web-app component with `auth.kind: oidc-spa` lands
+	// BFF when a web-app component with `callerIdentity.mode: end-user` lands
 	// `deployed` — its public URL is unknown until then, but Thunder
 	// rejects /oauth2/authorize requests whose redirect_uri isn't on
 	// the registered list. `clientID` is the OAuth client_id string
@@ -76,6 +99,26 @@ type Client interface {
 	// findApp resolves it. Returns true when at least one URI was
 	// added, false when every URI was already present (a no-op).
 	EnsureRedirectURIs(ctx context.Context, clientID string, uris []string) (added bool, err error)
+
+	// EnsureProjectOAuthClient declares a per-project public OAuth2 SPA
+	// client in Thunder. The client_id is the project name verbatim
+	// (e.g. "todo-app"). On first call it creates the application with
+	// PKCE required, public_client=true, token_endpoint_auth_method=none,
+	// and the supplied redirectURIs. On subsequent calls it merges the
+	// redirectURIs set, just like EnsureRedirectURIs.
+	//
+	// Used by the BFF when the first web-app component in a project is
+	// about to deploy — the SPA's bundle reads the same client_id from
+	// `window._env_.THUNDER_CLIENT_ID` to drive PKCE against Thunder.
+	//
+	// Returns the assigned clientID + created=true on the create branch,
+	// false when the application already existed.
+	EnsureProjectOAuthClient(ctx context.Context, projectName string, redirectURIs []string) (clientID string, created bool, err error)
+
+	// DeleteProjectOAuthClient removes the per-project SPA client. Used
+	// by the project-delete path. Returns (true, nil) on actual delete,
+	// (false, nil) when the app didn't exist (idempotent).
+	DeleteProjectOAuthClient(ctx context.Context, projectName string) (bool, error)
 }
 
 // Config bundles the construction params. Mirrors the agent-manager
@@ -259,7 +302,7 @@ func (c *client) getDefaultOUID(ctx context.Context, token string) (string, erro
 
 // -- EnsurePublisherApp ---------------------------------------------------
 
-func (c *client) EnsurePublisherApp(ctx context.Context, orgHandle string) (string, string, bool, error) {
+func (c *client) EnsurePublisherApp(ctx context.Context, orgHandle, orgOUID string) (string, string, bool, error) {
 	if orgHandle == "" {
 		return "", "", false, fmt.Errorf("orgHandle required")
 	}
@@ -269,27 +312,99 @@ func (c *client) EnsurePublisherApp(ctx context.Context, orgHandle string) (stri
 	}
 	appName := PublisherAppName(orgHandle)
 
-	_, existingClientID, err := c.findApp(ctx, token, appName)
+	internalID, existingClientID, err := c.findApp(ctx, token, appName)
 	if err != nil {
-		return "", "", false, err
+		return "", "", false, fmt.Errorf("findApp %q: %w", appName, err)
 	}
 	if existingClientID != "" {
-		// Already exists. Thunder doesn't expose secrets on read so
-		// the caller must already have it in OpenBao; we return only
-		// the clientId + created=false.
-		return existingClientID, "", false, nil
+		// The app exists. Self-heal its OU: an app created under the wrong
+		// OU (e.g. the default OU, before this code registered under the
+		// org OU) issues cc tokens whose `ouHandle` won't match the org, so
+		// the publisher-token verifier rejects the runner. When we know the
+		// org OU and the existing app sits under a different one, delete +
+		// recreate it under the org OU. The client_id is deterministic
+		// (= app name) so it's unchanged; only the secret rotates, which
+		// the caller re-mirrors on the created=true branch.
+		if orgOUID == "" {
+			slog.WarnContext(ctx, "publisher app OU not verified — org OU unknown (falling back), token ouHandle may not match",
+				"appName", appName)
+			return existingClientID, "", false, nil
+		}
+		currentOU, ouErr := c.appOUID(ctx, token, internalID)
+		if ouErr != nil {
+			// Don't take a destructive heal on an uncertain read; log and
+			// keep the existing app so dispatch isn't blocked.
+			slog.WarnContext(ctx, "publisher app OU read failed — skipping OU self-heal",
+				"appName", appName, "appID", internalID, "error", ouErr)
+			return existingClientID, "", false, nil
+		}
+		if currentOU == "" || currentOU == orgOUID {
+			slog.DebugContext(ctx, "publisher app already under correct OU",
+				"appName", appName, "ouID", currentOU)
+			return existingClientID, "", false, nil
+		}
+		slog.InfoContext(ctx, "publisher app under wrong OU — re-registering under org OU",
+			"appName", appName, "appID", internalID, "currentOU", currentOU, "orgOU", orgOUID)
+		if _, derr := c.deleteApp(ctx, token, internalID); derr != nil {
+			// Thunder has been observed to return 5xx (SSE-5000) on delete
+			// even when the app was actually removed server-side. Don't abort
+			// the heal on that — re-check by name and, if the app is gone,
+			// continue to recreate so the heal completes in a single dispatch
+			// (otherwise the org is left with no publisher app until the next
+			// run). Only a genuinely-still-present app is a hard failure.
+			if _, stillID, ferr := c.findApp(ctx, token, appName); ferr != nil || stillID != "" {
+				return "", "", false, fmt.Errorf("heal publisher OU: delete %q (id=%s): %w", appName, internalID, derr)
+			}
+			slog.WarnContext(ctx, "publisher app delete returned an error but the app is gone — continuing to recreate",
+				"appName", appName, "appID", internalID, "deleteErr", derr)
+		}
+		id, secret, cerr := c.createApp(ctx, token, appName, orgOUID)
+		if cerr != nil {
+			// The old app is gone; the next dispatch re-enters the create
+			// path below and provisions fresh. Surface the error loudly.
+			return "", "", false, fmt.Errorf("heal publisher OU: recreate %q under OU %s: %w", appName, orgOUID, cerr)
+		}
+		slog.InfoContext(ctx, "publisher app re-registered under org OU (secret rotated)",
+			"appName", appName, "orgOU", orgOUID)
+		return id, secret, true, nil
 	}
 
-	ouID, err := c.getDefaultOUID(ctx, token)
-	if err != nil {
-		return "", "", false, err
+	// Register the app under the org's own OU so the cc token's `ouHandle`
+	// resolves to the org handle (the verifier's cross-org check). Fall
+	// back to the default OU only when the org OU is unknown.
+	ouID := orgOUID
+	if ouID == "" {
+		ouID, err = c.getDefaultOUID(ctx, token)
+		if err != nil {
+			return "", "", false, fmt.Errorf("getDefaultOUID: %w", err)
+		}
+		slog.WarnContext(ctx, "creating publisher app under DEFAULT OU — org OU unknown; token ouHandle may not match org",
+			"appName", appName, "defaultOU", ouID)
 	}
 
 	id, secret, err := c.createApp(ctx, token, appName, ouID)
 	if err != nil {
-		return "", "", false, err
+		return "", "", false, fmt.Errorf("createApp %q under OU %s: %w", appName, ouID, err)
 	}
+	slog.InfoContext(ctx, "publisher app created", "appName", appName, "ouID", ouID, "underOrgOU", orgOUID != "")
 	return id, secret, true, nil
+}
+
+// appOUID reads the OU id an existing Thunder application is registered
+// under, so EnsurePublisherApp can detect a wrong-OU app and heal it.
+// Returns "" (not an error) when the OU can't be determined from the app
+// body — callers treat that as "don't risk a destructive heal".
+func (c *client) appOUID(ctx context.Context, token, appID string) (string, error) {
+	app, err := c.getAppByID(ctx, token, appID)
+	if err != nil {
+		return "", err
+	}
+	for _, k := range []string{"ouId", "ou_id", "organizationUnitId"} {
+		if v, ok := app[k].(string); ok && v != "" {
+			return v, nil
+		}
+	}
+	return "", nil
 }
 
 func (c *client) DeletePublisherApp(ctx context.Context, orgHandle string) (bool, error) {
@@ -328,6 +443,139 @@ func (c *client) RegenerateClientSecret(ctx context.Context, orgHandle string) (
 		return "", fmt.Errorf("thunder app %s not found, cannot regenerate secret", appName)
 	}
 	return c.regenerateSecret(ctx, token, internalID)
+}
+
+// -- EnsureProjectOAuthClient --------------------------------------------
+
+// ProjectOAuthClientName is the canonical naming function — exposed so
+// tests and dispatch wiring can assert names without re-deriving the
+// shape. The application's display name in Thunder; the OAuth client_id
+// is just `projectName` so SPA code can read it from
+// `window._env_.THUNDER_CLIENT_ID`.
+func ProjectOAuthClientName(projectName string) string {
+	return "asdlc-project-" + projectName
+}
+
+func (c *client) EnsureProjectOAuthClient(ctx context.Context, projectName string, redirectURIs []string) (string, bool, error) {
+	if projectName == "" {
+		return "", false, fmt.Errorf("projectName required")
+	}
+	token, err := c.getSystemToken(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("getSystemToken: %w", err)
+	}
+	appName := ProjectOAuthClientName(projectName)
+
+	_, existingClientID, err := c.findApp(ctx, token, appName)
+	if err != nil {
+		return "", false, err
+	}
+	if existingClientID != "" {
+		// Already exists. Merge redirect URIs (idempotent).
+		if len(redirectURIs) > 0 {
+			if _, mergeErr := c.EnsureRedirectURIs(ctx, existingClientID, redirectURIs); mergeErr != nil {
+				return existingClientID, false, fmt.Errorf("merge redirect URIs: %w", mergeErr)
+			}
+		}
+		return existingClientID, false, nil
+	}
+
+	ouID, err := c.getDefaultOUID(ctx, token)
+	if err != nil {
+		return "", false, err
+	}
+
+	clientID, err := c.createSPAApp(ctx, token, appName, projectName, ouID, redirectURIs)
+	if err != nil {
+		return "", false, err
+	}
+	return clientID, true, nil
+}
+
+func (c *client) DeleteProjectOAuthClient(ctx context.Context, projectName string) (bool, error) {
+	if projectName == "" {
+		return false, fmt.Errorf("projectName required")
+	}
+	token, err := c.getSystemToken(ctx)
+	if err != nil {
+		return false, fmt.Errorf("getSystemToken: %w", err)
+	}
+	appName := ProjectOAuthClientName(projectName)
+	internalID, _, err := c.findApp(ctx, token, appName)
+	if err != nil {
+		return false, err
+	}
+	if internalID == "" {
+		return false, nil
+	}
+	return c.deleteApp(ctx, token, internalID)
+}
+
+// createSPAApp creates a public OAuth2 client for an SPA — PKCE
+// required, no client_secret, authorization_code + refresh_token grants.
+// Shape mirrors wso2cloud-deployment's per-project console entries.
+func (c *client) createSPAApp(ctx context.Context, token, appName, projectName, ouID string, redirectURIs []string) (string, error) {
+	urisIface := make([]any, 0, len(redirectURIs))
+	for _, u := range redirectURIs {
+		urisIface = append(urisIface, u)
+	}
+	payload := map[string]any{
+		"name": appName,
+		"ouId": ouID,
+		"inboundAuthConfig": []map[string]any{
+			{
+				"type": "oauth2",
+				"config": map[string]any{
+					"clientId":                projectName,
+					"grantTypes":              []string{"authorization_code", "refresh_token"},
+					"responseTypes":           []string{"code"},
+					"pkceRequired":            true,
+					"publicClient":            true,
+					"tokenEndpointAuthMethod": "none",
+					"redirectUris":            urisIface,
+				},
+			},
+		},
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/applications", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("thunder create SPA app: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("thunder create SPA app returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	slog.Info("Thunder project SPA client created", "appName", appName, "projectName", projectName, "status", resp.StatusCode)
+
+	var result struct {
+		ClientID    string `json:"clientId"`
+		InboundAuth []struct {
+			Config struct {
+				ClientID string `json:"clientId"`
+			} `json:"config"`
+		} `json:"inboundAuthConfig"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("thunder create SPA app decode: %w", err)
+	}
+	cid := result.ClientID
+	if cid == "" && len(result.InboundAuth) > 0 {
+		cid = result.InboundAuth[0].Config.ClientID
+	}
+	if cid == "" {
+		return "", fmt.Errorf("thunder create SPA app: clientId not found in response: %s", string(respBody))
+	}
+	return cid, nil
 }
 
 // -- EnsureRedirectURIs ---------------------------------------------------

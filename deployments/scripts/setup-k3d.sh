@@ -1,4 +1,20 @@
 #!/bin/bash
+# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -29,6 +45,36 @@ else
         echo "❌ k3d config not found at $K3D_CONFIG"
         echo "   Restore it with: git checkout HEAD -- deployments/k3d-local-config.yaml"
         exit 1
+    fi
+
+    # Dev plugin overlay (default ON) — bind-mount remote-worker/plugin into
+    # the k3d server node so the dev variant of app-factory-coding-agent can
+    # hostPath-mount it into the runner pod (live skill edits, no image
+    # rebuild). The mount must be baked into the cluster at create-time;
+    # k3d has no in-place equivalent. Opt out with ASDLC_PROD_RUNNER=1 to
+    # mirror the published-image flow (no host overlay).
+    if [ "${ASDLC_PROD_RUNNER:-0}" = "1" ]; then
+        echo "🏷  ASDLC_PROD_RUNNER=1 — skipping host plugin bind-mount (using baked-in image plugin)"
+    else
+        # Check existence BEFORE cd — under `set -e` a failed cd inside the
+        # command substitution would abort the script with a cryptic error
+        # before the friendly check below could run.
+        if [ ! -d "${SCRIPT_DIR}/../../remote-worker/plugin" ]; then
+            echo "❌ Dev plugin overlay enabled but plugin dir not found at ${SCRIPT_DIR}/../../remote-worker/plugin"
+            echo "   Set ASDLC_PROD_RUNNER=1 to skip the overlay, or restore the plugin dir."
+            exit 1
+        fi
+        PLUGIN_HOST_PATH="$(cd "${SCRIPT_DIR}/../../remote-worker/plugin" && pwd)"
+        K3D_CONFIG_DEV="/tmp/k3d-local-config.dev.yaml"
+        cp "$K3D_CONFIG" "$K3D_CONFIG_DEV"
+        cat >> "$K3D_CONFIG_DEV" <<EOF
+volumes:
+  - volume: ${PLUGIN_HOST_PATH}:/asdlc-dev/plugin
+    nodeFilters:
+      - server:*
+EOF
+        K3D_CONFIG="$K3D_CONFIG_DEV"
+        echo "🧪 dev plugin overlay — k3d node will bind-mount ${PLUGIN_HOST_PATH} → /asdlc-dev/plugin"
     fi
 
     if [ "$is_colima" = true ]; then

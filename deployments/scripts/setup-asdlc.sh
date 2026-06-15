@@ -1,4 +1,20 @@
 #!/bin/bash
+# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -57,8 +73,35 @@ apply_with_retry() {
 apply_with_retry "${SCRIPT_DIR}/../manifests/docker-build-workflow.yaml" "docker-build-workflow"
 echo "✅ ClusterWorkflow 'dockerfile-builder' installed"
 
-apply_with_retry "${SCRIPT_DIR}/../manifests/app-factory-coding-agent.yaml" "app-factory-coding-agent"
-echo "✅ ClusterWorkflow 'app-factory-coding-agent' installed (one-shot coding-agent pod)"
+# Default: splice a hostPath overlay onto /app/plugin in the runner pod so
+# the host's remote-worker/plugin is read live (skill edits without an image
+# rebuild). The prod manifest stays the single source of truth; yq layers
+# the dev-patch fragment over it at apply time so other fields can't drift.
+# Requires setup-k3d.sh to have baked the bind-mount onto the node.
+# Opt out with ASDLC_PROD_RUNNER=1 to mirror the published-image flow.
+CODING_AGENT_MANIFEST="${SCRIPT_DIR}/../manifests/app-factory-coding-agent.yaml"
+CODING_AGENT_PATCH="${SCRIPT_DIR}/../manifests/app-factory-coding-agent.dev-patch.yaml"
+
+if [ "${ASDLC_PROD_RUNNER:-0}" = "1" ]; then
+    apply_with_retry "$CODING_AGENT_MANIFEST" "app-factory-coding-agent"
+    echo "✅ ClusterWorkflow 'app-factory-coding-agent' installed (PROD — baked-in image plugin)"
+else
+    if ! command -v yq &>/dev/null; then
+        echo "❌ Dev plugin overlay needs yq for the patch merge — 'brew install yq'"
+        echo "   Or set ASDLC_PROD_RUNNER=1 to skip the overlay."
+        exit 1
+    fi
+    DEV_MANIFEST="$(mktemp -t app-factory-coding-agent.dev.XXXXXX.yaml)"
+    trap 'rm -f "$DEV_MANIFEST"' EXIT
+    yq eval "
+        .spec.runTemplate.spec.templates[0].container.volumeMounts +=
+          load(\"${CODING_AGENT_PATCH}\").volumeMounts |
+        .spec.runTemplate.spec.volumes +=
+          load(\"${CODING_AGENT_PATCH}\").volumes
+    " "$CODING_AGENT_MANIFEST" > "$DEV_MANIFEST"
+    apply_with_retry "$DEV_MANIFEST" "app-factory-coding-agent (dev — hostPath overlay)"
+    echo "✅ ClusterWorkflow 'app-factory-coding-agent' installed (DEV — /app/plugin overlay live from host)"
+fi
 
 # ============================================================================
 # OpenChoreo infrastructure resources
@@ -128,6 +171,21 @@ spec:
                 memory:
                   type: string
                   default: "256Mi"
+  # The Pod template + the four `forEach` ConfigMap/ExternalSecret resources
+  # below opt this CCT into OpenChoreo's `configurations.*` contract:
+  #   - container.env / container.files declared in the Workload, AND
+  #   - workloadOverrides.container.{env,files} declared in the ReleaseBinding
+  # both land in the pod via OC-computed envFrom + volumeMounts + volumes
+  # plus matching ConfigMap / ExternalSecret resources.
+  #
+  # Prior art: agent-manager's `agent-api` ComponentType
+  # (agent-manager/deployments/helm-charts/.../component-types/agent-api.yaml)
+  # uses the same pattern. OC docs:
+  # https://openchoreo.dev/docs/tutorials/deploy-with-configurations
+  #
+  # Skipping any of these helpers will silently drop the corresponding
+  # Workload / ReleaseBinding input — that is the failure mode Phase 1
+  # caught.
   resources:
     - id: deployment
       template:
@@ -148,6 +206,9 @@ spec:
               containers:
                 - name: main
                   image: "${workload.container.image}"
+                  env: ${dependencies.toContainerEnvs()}
+                  envFrom: ${configurations.toContainerEnvFrom()}
+                  volumeMounts: ${configurations.toContainerVolumeMounts()}
                   resources:
                     requests:
                       cpu: "${environmentConfigs.resources.requests.cpu}"
@@ -155,6 +216,83 @@ spec:
                     limits:
                       cpu: "${environmentConfigs.resources.limits.cpu}"
                       memory: "${environmentConfigs.resources.limits.memory}"
+              volumes: ${configurations.toVolumes()}
+
+    - id: env-config
+      forEach: ${configurations.toConfigEnvsByContainer()}
+      var: envConfig
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${envConfig.resourceName}
+          namespace: ${metadata.namespace}
+        data: |
+          ${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+    - id: file-config
+      forEach: ${configurations.toConfigFileList()}
+      var: config
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${config.resourceName}
+          namespace: ${metadata.namespace}
+        data:
+          ${config.name}: |
+            ${config.value}
+
+    - id: secret-env-external
+      forEach: ${configurations.toSecretEnvsByContainer()}
+      var: secretEnv
+      template:
+        apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: ${secretEnv.resourceName}
+          namespace: ${metadata.namespace}
+        spec:
+          refreshInterval: 15s
+          secretStoreRef:
+            name: ${dataplane.secretStore}
+            kind: ClusterSecretStore
+          target:
+            name: ${secretEnv.resourceName}
+            creationPolicy: Owner
+          data: |
+            ${secretEnv.envs.map(secret, {
+              "secretKey": secret.name,
+              "remoteRef": {
+                "key": secret.remoteRef.key,
+                "property": has(secret.remoteRef.property) ? secret.remoteRef.property : oc_omit()
+              }
+            })}
+
+    - id: secret-file-external
+      forEach: ${configurations.toSecretFileList()}
+      var: file
+      template:
+        apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: ${file.resourceName}
+          namespace: ${metadata.namespace}
+        spec:
+          refreshInterval: 15s
+          secretStoreRef:
+            name: ${dataplane.secretStore}
+            kind: ClusterSecretStore
+          target:
+            name: ${file.resourceName}
+            creationPolicy: Owner
+          data:
+            - secretKey: ${file.name}
+              remoteRef:
+                key: ${file.remoteRef.key}
+                property: |
+                  ${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
     - id: service
       template:
         apiVersion: v1
@@ -255,6 +393,9 @@ spec:
                 memory:
                   type: string
                   default: "256Mi"
+  # See the `service` CCT above for why these `configurations.*` helpers
+  # and forEach resources are mandatory. Same contract, same prior art
+  # (agent-manager's agent-api ComponentType).
   resources:
     - id: deployment
       template:
@@ -275,6 +416,9 @@ spec:
               containers:
                 - name: main
                   image: "${workload.container.image}"
+                  env: ${dependencies.toContainerEnvs()}
+                  envFrom: ${configurations.toContainerEnvFrom()}
+                  volumeMounts: ${configurations.toContainerVolumeMounts()}
                   resources:
                     requests:
                       cpu: "${environmentConfigs.resources.requests.cpu}"
@@ -282,6 +426,83 @@ spec:
                     limits:
                       cpu: "${environmentConfigs.resources.limits.cpu}"
                       memory: "${environmentConfigs.resources.limits.memory}"
+              volumes: ${configurations.toVolumes()}
+
+    - id: env-config
+      forEach: ${configurations.toConfigEnvsByContainer()}
+      var: envConfig
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${envConfig.resourceName}
+          namespace: ${metadata.namespace}
+        data: |
+          ${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+    - id: file-config
+      forEach: ${configurations.toConfigFileList()}
+      var: config
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${config.resourceName}
+          namespace: ${metadata.namespace}
+        data:
+          ${config.name}: |
+            ${config.value}
+
+    - id: secret-env-external
+      forEach: ${configurations.toSecretEnvsByContainer()}
+      var: secretEnv
+      template:
+        apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: ${secretEnv.resourceName}
+          namespace: ${metadata.namespace}
+        spec:
+          refreshInterval: 15s
+          secretStoreRef:
+            name: ${dataplane.secretStore}
+            kind: ClusterSecretStore
+          target:
+            name: ${secretEnv.resourceName}
+            creationPolicy: Owner
+          data: |
+            ${secretEnv.envs.map(secret, {
+              "secretKey": secret.name,
+              "remoteRef": {
+                "key": secret.remoteRef.key,
+                "property": has(secret.remoteRef.property) ? secret.remoteRef.property : oc_omit()
+              }
+            })}
+
+    - id: secret-file-external
+      forEach: ${configurations.toSecretFileList()}
+      var: file
+      template:
+        apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: ${file.resourceName}
+          namespace: ${metadata.namespace}
+        spec:
+          refreshInterval: 15s
+          secretStoreRef:
+            name: ${dataplane.secretStore}
+            kind: ClusterSecretStore
+          target:
+            name: ${file.resourceName}
+            creationPolicy: Owner
+          data:
+            - secretKey: ${file.name}
+              remoteRef:
+                key: ${file.remoteRef.key}
+                property: |
+                  ${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
     - id: service
       template:
         apiVersion: v1
@@ -321,6 +542,33 @@ spec:
                   port: "${workload.endpoints[endpoint].port}"
 OCEOF
 echo "✅ ClusterComponentType 'deployment/web-application' created"
+
+# ── Per-org NAMESPACED ComponentTypes (local stand-in for cloud's
+#    platform-api ProvisionOrgUnit) ────────────────────────────────────────
+# The BFF references the per-org namespaced ComponentType (kind=ComponentType),
+# not the cluster-scoped ClusterComponentType — see
+# asdlc-service/clients/openchoreo/component_client.go. In dev cloud,
+# platform-api's ProvisionOrgUnit creates `service`/`web-application`
+# ComponentTypes inside each org's namespace; locally nothing did, so a
+# kind=ComponentType reference resolved to `ComponentTypeNotFound` and user
+# components never deployed. Derive namespaced copies (in the org control-plane
+# ns `default`) from the cluster-scoped definitions above so the two can't
+# drift. Same NAME (`service`/`web-application`); only kind + namespace differ.
+echo ""
+echo "🧩 Provisioning per-org namespaced ComponentTypes (local ProvisionOrgUnit stand-in)..."
+for _ct in service web-application; do
+    kubectl get clustercomponenttype "$_ct" -o json \
+        | python3 -c 'import sys, json
+c = json.load(sys.stdin)
+print(json.dumps({
+    "apiVersion": c["apiVersion"],
+    "kind": "ComponentType",
+    "metadata": {"name": c["metadata"]["name"], "namespace": "default"},
+    "spec": c["spec"],
+}))' \
+        | kubectl apply -f -
+done
+echo "✅ Namespaced ComponentTypes 'service' + 'web-application' created in ns 'default'"
 
 # Environment: development — backed by the default ClusterDataPlane
 kubectl apply -f - <<'OCEOF'
@@ -530,6 +778,66 @@ LOCAL_DEV_ADMIN_GITHUB_OWNER=${LOCAL_DEV_ADMIN_GITHUB_OWNER_VAL}
 EOF
 
 echo "✅ .env file generated at $(realpath "$ENV_FILE")"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Local-only: pre-create the default org's base namespace `wc-<…>` that
+# SM-API writes SecretReference CRs into during Connect.
+#
+# On cloud, `ou-service` creates this NS at org-onboard time. Locally
+# there is no equivalent. Without this NS, Connect's SM-API mirror
+# returns 500 (`namespaces wc-… not found`) and the BFF falls back to
+# the legacy SSA path — silent on success, surprising during dispatch.
+#
+# Derives the NS deterministically from Thunder's ouId for the default
+# org (= `wc-<ouId8>-<sha256(ouId)[:8]>`), matching
+# `local-secret-manager-api/main.go::generateNamespaceName` (the in-repo
+# sm-api stub) and `services/codingagent/namespace.go::OrgBaseNamespace`.
+echo ""
+echo "🪪 Pre-creating default org base namespace (local-only, ou-service equivalent)..."
+THUNDER_URL="${THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
+SEEDER_CLIENT_ID="${SEEDER_CLIENT_ID:-asdlc-local-dev-seeder}"
+SEEDER_CLIENT_SECRET="${SEEDER_CLIENT_SECRET:-asdlc-local-dev-seeder-secret}"
+# Thunder may have come up moments ago and not yet be ready to serve
+# /oauth2/token (especially on the first setup after a fresh k3d
+# cluster). Retry up to ~30s with backoff before giving up — the
+# original one-shot curl left the NS unpopulated, which then surfaced
+# downstream as SM-API mirror 500s during the user's first Connect.
+TOKEN=""
+for ATTEMPT in 1 2 3 4 5 6 7 8 9 10; do
+    TOKEN_JSON=$(curl -sS -X POST "${THUNDER_URL}/oauth2/token" \
+        -d "grant_type=client_credentials&client_id=${SEEDER_CLIENT_ID}&client_secret=${SEEDER_CLIENT_SECRET}&scope=openid" 2>/dev/null || true)
+    TOKEN=$(printf '%s' "$TOKEN_JSON" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("access_token",""))' 2>/dev/null || true)
+    if [ -n "$TOKEN" ]; then
+        break
+    fi
+    if [ "$ATTEMPT" -lt 10 ]; then
+        sleep 3
+    fi
+done
+if [ -z "$TOKEN" ]; then
+    echo "⚠️  could not mint seeder token from Thunder after 30s; skipping NS pre-create"
+    echo "    (re-run setup.sh once Thunder is reachable, or kubectl create the wc-* NS manually)"
+else
+    # Decode JWT payload (middle base64url segment), extract ouId.
+    PAYLOAD=$(printf '%s' "$TOKEN" | cut -d. -f2)
+    # base64url → base64 with padding (Python handles missing padding).
+    OUID=$(printf '%s' "$PAYLOAD" | python3 -c '
+import sys, base64, json
+s = sys.stdin.read().strip().replace("-", "+").replace("_", "/")
+s += "=" * (-len(s) % 4)
+print(json.loads(base64.b64decode(s)).get("ouId", ""))' 2>/dev/null)
+    if [ -z "$OUID" ]; then
+        echo "⚠️  no ouId claim in seeder JWT; skipping NS pre-create"
+    else
+        # Compute NS = wc-<ouId8>-<sha256(ouId)[:8]>
+        CLEAN=$(printf '%s' "$OUID" | tr -d '-')
+        PREFIX=$(printf '%s' "$CLEAN" | cut -c1-8)
+        SALT=$(printf '%s' "$OUID" | shasum -a 256 | cut -c1-8)
+        ORG_NS="wc-${PREFIX}-${SALT}"
+        kubectl create namespace "$ORG_NS" --dry-run=client -o yaml | kubectl apply -f -
+        echo "✅ org base namespace ready: $ORG_NS (Thunder ouId=$OUID)"
+    fi
+fi
 
 echo ""
 echo "✅ ASDLC setup complete!"

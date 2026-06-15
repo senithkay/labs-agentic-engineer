@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: asdlc-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: asdlc-api
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  selector:
+    app: asdlc-api
+  ports:
+    - port: {{ .Values.asdlcApi.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  type: ClusterIP

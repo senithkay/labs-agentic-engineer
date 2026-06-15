@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // Package controllers — per-org Anthropic key surface.
 //
 // Routes:
@@ -6,20 +22,20 @@
 //	GET    /api/v1/organizations/{orgHandle}/anthropic — projection
 //	DELETE /api/v1/organizations/{orgHandle}/anthropic — disconnect
 //
-// All routes proxy to git-service's internal credential surface, gated by
-// the same Org JWT middleware that protects every other org-scoped route.
-// The raw API key never lands in this service's logs or memory beyond the
-// inbound request — it's forwarded directly to git-service.
+// All routes are gated by the same Org JWT middleware that protects every
+// other org-scoped route. The raw API key never lands in this service's
+// logs or memory beyond the inbound request.
 //
 // See docs/design/anthropic-key-dual-token.md.
 package controllers
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/gitservice"
+	"github.com/wso2/asdlc/asdlc-service/services"
 	"github.com/wso2/asdlc/asdlc-service/utils"
 )
 
@@ -31,15 +47,15 @@ type OrgAnthropicController interface {
 }
 
 type orgAnthropicController struct {
-	gitClient gitservice.Client
+	anthropicSvc *services.AnthropicCredentialService
 }
 
 // NewOrgAnthropicController wires the controller.
-func NewOrgAnthropicController(gitClient gitservice.Client) OrgAnthropicController {
-	return &orgAnthropicController{gitClient: gitClient}
+func NewOrgAnthropicController(anthropicSvc *services.AnthropicCredentialService) OrgAnthropicController {
+	return &orgAnthropicController{anthropicSvc: anthropicSvc}
 }
 
-// Connect proxies POST /api/v1/organizations/{orgHandle}/anthropic to git-service.
+// Connect handles POST /api/v1/organizations/{orgHandle}/anthropic.
 // Body: { "apiKey": "sk-ant-..." }. Returns the projection (no key bytes).
 func (c *orgAnthropicController) Connect(w http.ResponseWriter, r *http.Request) {
 	orgHandle := r.PathValue("orgHandle")
@@ -53,11 +69,11 @@ func (c *orgAnthropicController) Connect(w http.ResponseWriter, r *http.Request)
 		utils.WriteErrorResponse(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	proj, err := c.gitClient.CreateOrReplaceAnthropic(r.Context(), orgHandle, gitservice.AnthropicConnectRequest{
+	proj, err := c.anthropicSvc.Connect(r.Context(), orgHandle, services.AnthropicConnectRequest{
 		APIKey: body.APIKey,
 	})
 	if err != nil {
-		writeProxiedCredentialError(w, err)
+		writeCredentialServiceError(w, err)
 		return
 	}
 	slog.InfoContext(r.Context(), "anthropic.connected", "ocOrgId", orgHandle, "keyPrefix", proj.KeyPrefix)
@@ -72,29 +88,30 @@ func (c *orgAnthropicController) GetStatus(w http.ResponseWriter, r *http.Reques
 	if !requireOrgHandle(w, orgHandle) {
 		return
 	}
-	proj, err := c.gitClient.GetAnthropicProjection(r.Context(), orgHandle)
+	proj, err := c.anthropicSvc.Status(r.Context(), orgHandle)
 	if err != nil {
-		if gitservice.IsNotFound(err) {
+		var nfe *services.NotFoundError
+		if errors.As(err, &nfe) {
 			utils.WriteSuccessResponse(w, http.StatusOK, map[string]any{
 				"ocOrgId": orgHandle,
 				"status":  "not_connected",
 			})
 			return
 		}
-		writeProxiedCredentialError(w, err)
+		writeCredentialServiceError(w, err)
 		return
 	}
 	utils.WriteSuccessResponse(w, http.StatusOK, proj)
 }
 
-// Disconnect proxies DELETE /api/v1/organizations/{orgHandle}/anthropic.
+// Disconnect handles DELETE /api/v1/organizations/{orgHandle}/anthropic.
 func (c *orgAnthropicController) Disconnect(w http.ResponseWriter, r *http.Request) {
 	orgHandle := r.PathValue("orgHandle")
 	if !requireOrgHandle(w, orgHandle) {
 		return
 	}
-	if err := c.gitClient.DisconnectAnthropic(r.Context(), orgHandle); err != nil {
-		writeProxiedCredentialError(w, err)
+	if err := c.anthropicSvc.Disconnect(r.Context(), orgHandle); err != nil {
+		writeCredentialServiceError(w, err)
 		return
 	}
 	slog.InfoContext(r.Context(), "anthropic.disconnected", "ocOrgId", orgHandle)

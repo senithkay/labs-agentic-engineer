@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package services
 
 import (
@@ -14,7 +30,6 @@ import (
 	"strings"
 
 	"github.com/wso2/asdlc/asdlc-service/clients/agents"
-	"github.com/wso2/asdlc/asdlc-service/clients/gitservice"
 	"github.com/wso2/asdlc/asdlc-service/models"
 )
 
@@ -73,13 +88,17 @@ type DesignService interface {
 type designService struct {
 	store        *ArtifactStore
 	agentsClient agents.Client
-	gitClient    gitservice.Client
+	artifactSvc  ArtifactService
 	taskSvc      TaskService // for SaveAndProceed reconciliation; may be nil in tests
 	// traitSync, when non-nil, is invoked after a per-component design
-	// edit so an `api.security` toggle propagates to the OC Component +
+	// edit so an `exposesAPI.auth` toggle propagates to the OC Component +
 	// ReleaseBindings without waiting for the next dispatch. Set via
 	// SetTraitSync. Optional in tests.
 	traitSync *TraitSyncService
+	// skillSvc resolves the per-org skill catalogue for the architect input.
+	// Optional in tests; nil → architect runs with no skills attached
+	// (equivalent to pre-skills-system behaviour).
+	skillSvc *SkillService
 }
 
 // DesignServiceWithTaskHook lets the construction wire-up surface the
@@ -91,22 +110,29 @@ type DesignServiceWithTaskHook interface {
 }
 
 // DesignServiceWithTraitSync surfaces the trait_sync setter so an
-// `api.security` toggle on design.md propagates to OC after the file is
+// `exposesAPI.auth` toggle on design.md propagates to OC after the file is
 // written. Mirrors the DesignServiceWithTaskHook pattern.
 type DesignServiceWithTraitSync interface {
 	DesignService
 	SetTraitSync(traitSync *TraitSyncService)
 }
 
+// DesignServiceWithSkills surfaces the skill-catalogue setter so the
+// architect call ships the org's skill set as input.
+type DesignServiceWithSkills interface {
+	DesignService
+	SetSkillService(svc *SkillService)
+}
+
 func NewDesignService(
 	store *ArtifactStore,
 	agentsClient agents.Client,
-	gitClient gitservice.Client,
+	artifactSvc ArtifactService,
 ) DesignService {
 	return &designService{
 		store:        store,
 		agentsClient: agentsClient,
-		gitClient:    gitClient,
+		artifactSvc:  artifactSvc,
 	}
 }
 
@@ -116,6 +142,10 @@ func (s *designService) SetTaskService(taskSvc TaskService) {
 
 func (s *designService) SetTraitSync(traitSync *TraitSyncService) {
 	s.traitSync = traitSync
+}
+
+func (s *designService) SetSkillService(svc *SkillService) {
+	s.skillSvc = svc
 }
 
 func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) (*models.Design, error) {
@@ -136,8 +166,8 @@ func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) 
 	status := "draft"
 	var versions []models.ArtifactVersion
 
-	if s.gitClient != nil {
-		v, err := s.gitClient.ListDesignVersions(ctx, orgID, projectID)
+	if s.artifactSvc != nil {
+		v, err := s.artifactSvc.ListDesignVersions(ctx, projectID)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to list design versions", "error", err)
 		} else {
@@ -158,10 +188,10 @@ func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) 
 	unsaved := false
 	if tag == "" {
 		unsaved = true
-	} else if s.gitClient != nil {
+	} else if s.artifactSvc != nil {
 		current, err := s.store.ListDesignFiles(ctx, orgID, projectID)
 		if err == nil {
-			tagged, err := s.gitClient.GetDesignAtTag(ctx, orgID, projectID, tag)
+			tagged, err := s.artifactSvc.GetDesignAtTag(ctx, projectID, tag)
 			if err == nil && !designFilesEqual(current, tagged) {
 				unsaved = true
 			}
@@ -190,12 +220,12 @@ func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) 
 }
 
 func (s *designService) GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (*models.Design, error) {
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
-	files, err := s.gitClient.GetDesignAtTag(ctx, orgID, projectID, tag)
+	files, err := s.artifactSvc.GetDesignAtTag(ctx, projectID, tag)
 	if err != nil {
-		if errors.Is(err, gitservice.ErrArtifactNotFound) {
+		if errors.Is(err, ErrArtifactNotFound) {
 			return nil, ErrDesignNotFound
 		}
 		return nil, fmt.Errorf("get design at %s: %w", tag, err)
@@ -246,8 +276,8 @@ func (s *designService) StreamGenerateDesign(ctx context.Context, orgID, project
 
 	// Require an approved (tagged) requirements version before generating design.
 	var sourceTag string
-	if s.gitClient != nil {
-		versions, err := s.gitClient.ListRequirementsVersions(ctx, orgID, projectID)
+	if s.artifactSvc != nil {
+		versions, err := s.artifactSvc.ListRequirementsVersions(ctx, projectID)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to check requirements versions", "error", err)
 		} else if len(versions) == 0 {
@@ -278,12 +308,34 @@ func (s *designService) StreamGenerateDesign(ctx context.Context, orgID, project
 	}
 	sort.Strings(availableWireframes)
 
+	// Resolve the org's skill catalogue + split by kind. Builtins flow
+	// in as full bodies (inlined into the architect prompt); custom +
+	// imported flow in as descriptions (manifest only). See
+	// docs/design/skills-system.md > "Architect".
+	builtinRecords, orgDescriptions := s.resolveArchitectSkills(ctx, orgID)
+
+	// Carry forward currently-attached skill names (or seed the defaults
+	// when starting fresh). Until PR 3 ships the attach_skill tool, the
+	// seed-default helper attaches all four built-ins on every new design
+	// so propagation works end-to-end.
+	currentApplied := []string{}
+	if existingDesign != nil && len(existingDesign.SkillsApplied) > 0 {
+		currentApplied = append(currentApplied, existingDesign.SkillsApplied...)
+	} else {
+		for _, b := range builtinRecords {
+			currentApplied = append(currentApplied, b.Name)
+		}
+	}
+
 	upstream, err := s.agentsClient.StreamArchitect(ctx, orgID, agents.ArchitectRequest{
 		ProjectName:         projectID,
 		Spec:                specContent,
 		PreviousDesign:      previousDesign,
 		Wireframes:          wireframes,
 		AvailableWireframes: availableWireframes,
+		BuiltinSkills:       builtinRecords,
+		OrgSkills:           orgDescriptions,
+		SkillsApplied:       currentApplied,
 	})
 	if err != nil {
 		return fmt.Errorf("agents service request: %w", err)
@@ -346,9 +398,10 @@ func (s *designService) StreamGenerateDesign(ctx context.Context, orgID, project
 	}
 
 	designFile := &DesignFile{
-		Overview:   finalDesign.Design.Overview,
-		Components: finalDesign.Design.Components,
-		SourceSpec: sourceTag,
+		Overview:      finalDesign.Design.Overview,
+		Components:    finalDesign.Design.Components,
+		SourceSpec:    sourceTag,
+		SkillsApplied: seedDefaultSkillsApplied(currentApplied, builtinRecords),
 	}
 
 	// Identify components that existed in the working tree before this
@@ -404,12 +457,12 @@ func (s *designService) GetDesignBundle(ctx context.Context, orgID, projectID st
 // GetDesignBundleAtTag returns the file map + assembled Design at a specific
 // version tag. Used by the version selector when browsing history.
 func (s *designService) GetDesignBundleAtTag(ctx context.Context, orgID, projectID, tag string) (*DesignBundle, error) {
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
-	files, err := s.gitClient.GetDesignAtTag(ctx, orgID, projectID, tag)
+	files, err := s.artifactSvc.GetDesignAtTag(ctx, projectID, tag)
 	if err != nil {
-		if errors.Is(err, gitservice.ErrArtifactNotFound) {
+		if errors.Is(err, ErrArtifactNotFound) {
 			return nil, ErrDesignNotFound
 		}
 		return nil, fmt.Errorf("get design at %s: %w", tag, err)
@@ -425,7 +478,7 @@ func (s *designService) GetDesignBundleAtTag(ctx context.Context, orgID, project
 // the refreshed bundle.
 //
 // Side effect: when the written file is a per-component `design.md`,
-// fire `SyncComponentTraits` so an `api.security` toggle propagates to
+// fire `SyncComponentTraits` so an `exposesAPI.auth` toggle propagates to
 // the OC Component + ReleaseBindings before the next dispatch. Best-
 // effort — failures are logged but never bubble (design tree is the
 // canonical source; the trait_sync watcher reconciles on the next
@@ -451,7 +504,7 @@ func (s *designService) UpdateDesignFile(ctx context.Context, orgID, projectID, 
 // componentNameFromDesignPath returns the component name encoded in a
 // `components/<name>/design.md` sub-path, or false for any other path
 // (root design.md, openapi.yaml, etc.). Used by UpdateDesignFile to gate
-// the trait_sync hook to the one path where `api.security` lives.
+// the trait_sync hook to the one path where `exposesAPI.auth` lives.
 func componentNameFromDesignPath(subPath string) (string, bool) {
 	const prefix = "components/"
 	const suffix = "/design.md"
@@ -510,7 +563,7 @@ func (s *designService) DeleteComponent(ctx context.Context, orgID, projectID, c
 // Surfaces ErrSpecNotApproved (rendered as 409 by the controller) when
 // no requirements tag exists yet.
 func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID string) (*models.Design, error) {
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
 
@@ -525,7 +578,7 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID str
 		return nil, ErrDesignNotFound
 	}
 
-	res, err := s.gitClient.SaveDesign(ctx, orgID, projectID, gitservice.SaveArtifactRequest{
+	res, err := s.artifactSvc.SaveDesign(ctx, projectID, SaveRequest{
 		Message: "Update design",
 	})
 	if err != nil {
@@ -538,7 +591,7 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID str
 		return nil, fmt.Errorf("save design: %w", err)
 	}
 
-	versions, err := s.gitClient.ListDesignVersions(ctx, orgID, projectID)
+	versions, err := s.artifactSvc.ListDesignVersions(ctx, projectID)
 	if err != nil {
 		slog.WarnContext(ctx, "list versions after save failed", "error", err)
 	}
@@ -565,11 +618,11 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID str
 }
 
 func (s *designService) DiscardChanges(ctx context.Context, orgID, projectID string) (*models.Design, error) {
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
-	if _, err := s.gitClient.DiscardDesign(ctx, orgID, projectID); err != nil {
-		if errors.Is(err, gitservice.ErrArtifactNotFound) {
+	if _, err := s.artifactSvc.DiscardDesign(ctx, projectID); err != nil {
+		if errors.Is(err, ErrArtifactNotFound) {
 			return nil, fmt.Errorf("no saved version to revert to")
 		}
 		return nil, fmt.Errorf("discard design: %w", err)
@@ -578,10 +631,10 @@ func (s *designService) DiscardChanges(ctx context.Context, orgID, projectID str
 }
 
 func (s *designService) ListDesignVersions(ctx context.Context, orgID, projectID string) ([]models.ArtifactVersion, error) {
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return nil, nil
 	}
-	v, err := s.gitClient.ListDesignVersions(ctx, orgID, projectID)
+	v, err := s.artifactSvc.ListDesignVersions(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list design versions: %w", err)
 	}
@@ -632,6 +685,57 @@ func extractWireframeDsls(files map[string]string) map[string]string {
 		canvas := strings.TrimSuffix(name, ".dsl")
 		out[canvas] = content
 	}
+	return out
+}
+
+// resolveArchitectSkills splits the org's catalogue into (builtins with
+// full bodies, org-skills with descriptions only) for the architect
+// input. Returns empty slices when no SkillService is wired (tests).
+func (s *designService) resolveArchitectSkills(ctx context.Context, orgID string) ([]agents.SkillRecord, []agents.SkillDescription) {
+	if s.skillSvc == nil {
+		return nil, nil
+	}
+	all, err := s.skillSvc.List(ctx, orgID)
+	if err != nil {
+		slog.WarnContext(ctx, "design_service: skill list failed — running without skills", "orgID", orgID, "error", err)
+		return nil, nil
+	}
+	var builtins []agents.SkillRecord
+	var orgSkills []agents.SkillDescription
+	for _, sk := range all {
+		if sk.Kind == "builtin" {
+			builtins = append(builtins, agents.SkillRecord{
+				Name:        sk.Name,
+				Description: sk.Description,
+				Body:        sk.SkillMD,
+			})
+		} else {
+			orgSkills = append(orgSkills, agents.SkillDescription{
+				Name:        sk.Name,
+				Description: sk.Description,
+			})
+		}
+	}
+	return builtins, orgSkills
+}
+
+// seedDefaultSkillsApplied returns the skillsApplied list to persist on
+// the freshly-emitted design. PR 1 behaviour: if the caller passed a
+// non-empty existing set, use it; otherwise stamp every available
+// built-in so propagation works end-to-end without the architect having
+// an attach_skill tool yet (lands in PR 3). The seed runs at every
+// `StreamArchitect` finalize per docs/design/skills-system.md > PR 1.
+func seedDefaultSkillsApplied(current []string, builtins []agents.SkillRecord) []string {
+	if len(current) > 0 {
+		out := append([]string(nil), current...)
+		sort.Strings(out)
+		return out
+	}
+	out := make([]string, 0, len(builtins))
+	for _, b := range builtins {
+		out = append(out, b.Name)
+	}
+	sort.Strings(out)
 	return out
 }
 

@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package services
 
 import (
@@ -10,20 +26,45 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/gitservice"
 	"github.com/wso2/asdlc/asdlc-service/models"
 )
 
-// ArtifactStore wraps the git-service artifact endpoints. The BFF doesn't
-// touch /data/repos directly — every read/write is one HTTP call to
-// git-service which is the sole owner of the working tree on disk.
+// ArtifactStore wraps the in-process artifact service to add value beyond
+// pure file I/O: external-API catalog resolution and the typed `DesignFile`
+// shape (YAML split/assemble). The 7 downstream services (design_service,
+// requirements_service, requirements_chat_service, project_service,
+// component_service, trait_sync, runtime_config_service) consume this
+// layer.
 type ArtifactStore struct {
-	gitClient gitservice.Client
+	artifactSvc  ArtifactService
+	externalAPIs *ExternalAPICatalog
 }
 
-func NewArtifactStore(gitClient gitservice.Client) *ArtifactStore {
-	return &ArtifactStore{gitClient: gitClient}
+func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
+	store := &ArtifactStore{artifactSvc: artifactSvc, externalAPIs: DefaultExternalAPICatalog()}
+	registerSplitDesignCatalog(store.externalAPIs)
+	return store
 }
+
+// SetExternalAPICatalog overrides the catalog the store uses to resolve
+// architect-declared dependent-API names into concrete URLs. Optional —
+// without it, NewArtifactStore wires the shipped default catalog.
+func (s *ArtifactStore) SetExternalAPICatalog(c *ExternalAPICatalog) {
+	if s == nil {
+		return
+	}
+	s.externalAPIs = c
+	registerSplitDesignCatalog(c)
+}
+
+// splitDesignCatalogRef is a process-wide pointer the free-function
+// SplitDesign reads to strip catalog-resolved URLs on save. Set by
+// NewArtifactStore so production paths get the catalog automatically;
+// nil in tests / standalone SplitDesign callers.
+var splitDesignCatalogRef *ExternalAPICatalog
+
+func registerSplitDesignCatalog(c *ExternalAPICatalog) { splitDesignCatalogRef = c }
+func splitDesignCatalog() *ExternalAPICatalog          { return splitDesignCatalogRef }
 
 // ---- Requirements (multi-file Markdown directory) -----------------------
 
@@ -36,7 +77,7 @@ const RequirementsMainFile = "requirements.md"
 // `specs/requirements/`. A first-time project with no requirements yet
 // returns an empty map (not an error).
 func (s *ArtifactStore) ListRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	files, err := s.gitClient.ListRequirements(ctx, orgID, projectID)
+	files, err := s.artifactSvc.ListRequirementFiles(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +89,7 @@ func (s *ArtifactStore) ListRequirements(ctx context.Context, orgID, projectID s
 
 // ReadRequirementFile reads a single requirement file by basename.
 func (s *ArtifactStore) ReadRequirementFile(ctx context.Context, orgID, projectID, name string) (string, error) {
-	res, err := s.gitClient.GetRequirementFile(ctx, orgID, projectID, name)
+	res, err := s.artifactSvc.GetFile(ctx, projectID, path.Join(RequirementsDir, name))
 	if err != nil {
 		return "", err
 	}
@@ -59,7 +100,7 @@ func (s *ArtifactStore) ReadRequirementFile(ctx context.Context, orgID, projectI
 // The optional ifMatch sha (returned by the previous PUT) gives the
 // streaming caller optimistic concurrency control.
 func (s *ArtifactStore) WriteRequirementFile(ctx context.Context, orgID, projectID, name, content string) (sha string, err error) {
-	res, err := s.gitClient.PutRequirementFile(ctx, orgID, projectID, name, gitservice.PutFileRequest{Content: content})
+	res, err := s.artifactSvc.PutFile(ctx, projectID, path.Join(RequirementsDir, name), content, "")
 	if err != nil {
 		return "", fmt.Errorf("write requirement file %q: %w", name, err)
 	}
@@ -72,7 +113,7 @@ func (s *ArtifactStore) DeleteRequirementFile(ctx context.Context, orgID, projec
 	if name == RequirementsMainFile {
 		return fmt.Errorf("cannot delete %s", RequirementsMainFile)
 	}
-	if err := s.gitClient.DeleteRequirementFile(ctx, orgID, projectID, name); err != nil {
+	if err := s.artifactSvc.DeleteRequirementFile(ctx, projectID, name); err != nil {
 		return fmt.Errorf("delete requirement file %q: %w", name, err)
 	}
 	return nil
@@ -90,9 +131,10 @@ func (s *ArtifactStore) DeleteRequirementFile(ctx context.Context, orgID, projec
 //	                                       # (componentAgentInstructions)
 //	components/<name>/openapi.yaml         # OpenAPI 3.0.3 (service components only)
 type DesignFile struct {
-	Overview   string                   `json:"overview"`
-	Components []models.DesignComponent `json:"components"`
-	SourceSpec string                   `json:"sourceSpec,omitempty"`
+	Overview       string                   `json:"overview"`
+	Components     []models.DesignComponent `json:"components"`
+	SourceSpec     string                   `json:"sourceSpec,omitempty"`
+	SkillsApplied  []string                 `json:"skillsApplied,omitempty"`
 }
 
 // DesignRootFile is the canonical root design document. It cannot be deleted
@@ -107,7 +149,7 @@ const componentDirPrefix = "components/"
 // Keys are paths relative to that directory, using forward slashes (e.g.
 // `design.md`, `components/user-api/design.md`).
 func (s *ArtifactStore) ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	files, err := s.gitClient.ListDesign(ctx, orgID, projectID)
+	files, err := s.artifactSvc.ListDesignFiles(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +161,7 @@ func (s *ArtifactStore) ListDesignFiles(ctx context.Context, orgID, projectID st
 
 // ReadDesignFile reads a single design file by sub-path.
 func (s *ArtifactStore) ReadDesignFile(ctx context.Context, orgID, projectID, subPath string) (string, error) {
-	res, err := s.gitClient.GetDesignFile(ctx, orgID, projectID, subPath)
+	res, err := s.artifactSvc.GetFile(ctx, projectID, path.Join(DesignDir, subPath))
 	if err != nil {
 		return "", err
 	}
@@ -129,7 +171,7 @@ func (s *ArtifactStore) ReadDesignFile(ctx context.Context, orgID, projectID, su
 // WriteDesignFile creates or overwrites a single design file. The path is
 // relative to `specs/design/` (forward slashes; nested components allowed).
 func (s *ArtifactStore) WriteDesignFile(ctx context.Context, orgID, projectID, subPath, content string) (sha string, err error) {
-	res, err := s.gitClient.PutDesignFile(ctx, orgID, projectID, subPath, gitservice.PutFileRequest{Content: content})
+	res, err := s.artifactSvc.PutFile(ctx, projectID, path.Join(DesignDir, subPath), content, "")
 	if err != nil {
 		return "", fmt.Errorf("write design file %q: %w", subPath, err)
 	}
@@ -137,12 +179,12 @@ func (s *ArtifactStore) WriteDesignFile(ctx context.Context, orgID, projectID, s
 }
 
 // DeleteDesignFile removes a single design file. Refuses to delete the root
-// `design.md` (returns an error before reaching git-service).
+// `design.md`.
 func (s *ArtifactStore) DeleteDesignFile(ctx context.Context, orgID, projectID, subPath string) error {
 	if subPath == DesignRootFile {
 		return fmt.Errorf("cannot delete %s", DesignRootFile)
 	}
-	if err := s.gitClient.DeleteDesignFile(ctx, orgID, projectID, subPath); err != nil {
+	if err := s.artifactSvc.DeleteDesignFile(ctx, projectID, subPath); err != nil {
 		return fmt.Errorf("delete design file %q: %w", subPath, err)
 	}
 	return nil
@@ -152,7 +194,7 @@ func (s *ArtifactStore) DeleteDesignFile(ctx context.Context, orgID, projectID, 
 // its contents (e.g. `components/user-api` to remove a component's whole
 // subtree).
 func (s *ArtifactStore) DeleteDesignDirectory(ctx context.Context, orgID, projectID, subPath string) error {
-	if err := s.gitClient.DeleteDesignDirectory(ctx, orgID, projectID, subPath); err != nil {
+	if err := s.artifactSvc.DeleteDesignDirectory(ctx, projectID, subPath); err != nil {
 		return fmt.Errorf("delete design directory %q: %w", subPath, err)
 	}
 	return nil
@@ -161,16 +203,49 @@ func (s *ArtifactStore) DeleteDesignDirectory(ctx context.Context, orgID, projec
 // ReadDesign lists the working-tree design files and assembles them into the
 // flat `DesignFile` shape that the rest of the BFF expects (task generation,
 // OC provisioning, issue bodies, etc.). Returns
-// (nil, gitservice.ErrArtifactNotFound) when no design root exists yet.
+// (nil, ErrArtifactNotFound) when no design root exists yet.
 func (s *ArtifactStore) ReadDesign(ctx context.Context, orgID, projectID string) (*DesignFile, error) {
-	files, err := s.gitClient.ListDesign(ctx, orgID, projectID)
+	files, err := s.artifactSvc.ListDesignFiles(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 	if len(files) == 0 || strings.TrimSpace(files[DesignRootFile]) == "" {
 		return nil, nil
 	}
-	return AssembleDesign(files)
+	design, err := AssembleDesign(files)
+	if err != nil {
+		return nil, err
+	}
+	// Resolve architect-declared dependent-API names against the external
+	// API catalog so the in-memory design always has concrete URLs even
+	// when the on-disk frontmatter declared by intent only.
+	s.resolveExternalAPIs(design)
+	return design, nil
+}
+
+// resolveExternalAPIs fills in URLs for catalog-known dependent-API
+// entries whose URL was left blank by the architect. Idempotent — already-
+// populated URLs are left untouched.
+func (s *ArtifactStore) resolveExternalAPIs(d *DesignFile) {
+	if s == nil || s.externalAPIs == nil || d == nil {
+		return
+	}
+	for i := range d.Components {
+		for j := range d.Components[i].DependentApis {
+			dep := &d.Components[i].DependentApis[j]
+			if dep.URL != "" {
+				continue
+			}
+			entry := s.externalAPIs.Lookup(dep.Name)
+			if entry.URL == "" {
+				continue
+			}
+			dep.URL = entry.URL
+			if dep.Authentication == "" {
+				dep.Authentication = entry.Authentication
+			}
+		}
+	}
 }
 
 // WriteDesign splits the in-memory design into multiple files, then writes
@@ -194,8 +269,8 @@ func (s *ArtifactStore) WriteDesign(ctx context.Context, orgID, projectID string
 // ---- Helpers ------------------------------------------------------------
 
 // IsNotFound is sugar for callers that want to distinguish "no artifact yet"
-// from a real error without importing the gitservice package.
-func IsNotFound(err error) bool { return errors.Is(err, gitservice.ErrArtifactNotFound) }
+// from a real error.
+func IsNotFound(err error) bool { return errors.Is(err, ErrArtifactNotFound) }
 
 // designFilesEqual compares two design file maps after trimming whitespace
 // from each value. Used by the has-unsaved-changes check.
@@ -217,22 +292,39 @@ func designFilesEqual(a, b map[string]string) bool {
 
 // rootFrontmatter is the YAML frontmatter we accept on the root `design.md`.
 type rootFrontmatter struct {
-	SourceSpec string `yaml:"sourceSpec,omitempty"`
+	SourceSpec    string   `yaml:"sourceSpec,omitempty"`
+	SkillsApplied []string `yaml:"skillsApplied,omitempty"`
 }
 
 // componentFrontmatter is the YAML frontmatter we accept on each
 // `components/<name>/design.md`. Field names mirror the user-facing keys
 // (snake-free) so frontmatter the architect emits is human-editable.
 type componentFrontmatter struct {
-	Type          string               `yaml:"type"`
-	Language      string               `yaml:"language,omitempty"`
-	DependsOn     []string             `yaml:"dependsOn,omitempty"`
-	Buildpack     string               `yaml:"buildpack,omitempty"`
-	AppPath       string               `yaml:"appPath,omitempty"`
-	Entrypoint    string               `yaml:"entrypoint,omitempty"`
-	Api           *apiConfig           `yaml:"api,omitempty"`
-	Auth          *authConfig          `yaml:"auth,omitempty"`
-	DependentApis []dependentApiConfig `yaml:"dependentApis,omitempty"`
+	Type           string                `yaml:"type"`
+	Language       string                `yaml:"language,omitempty"`
+	DependsOn      []string              `yaml:"dependsOn,omitempty"`
+	Buildpack      string                `yaml:"buildpack,omitempty"`
+	AppPath        string                `yaml:"appPath,omitempty"`
+	Entrypoint     string                `yaml:"entrypoint,omitempty"`
+	ExposesAPI     *exposesAPIConfig     `yaml:"exposesAPI,omitempty"`
+	CallerIdentity *callerIdentityConfig `yaml:"callerIdentity,omitempty"`
+	DependentApis  []dependentApiConfig  `yaml:"dependentApis,omitempty"`
+}
+
+// exposesAPIConfig is the on-disk shape for a service component's API
+// exposure policy. `Auth: "end-user-required"` ⇒ gateway validates a
+// user JWT and injects UserContext upstream.
+type exposesAPIConfig struct {
+	Managed     bool   `yaml:"managed,omitempty"`
+	Auth        string `yaml:"auth,omitempty"`
+	UserContext string `yaml:"userContext,omitempty"`
+}
+
+// callerIdentityConfig is the on-disk shape for a web-app's caller-
+// identity intent. `Mode: "end-user"` ⇒ the SPA performs OIDC + PKCE
+// against the platform IDP.
+type callerIdentityConfig struct {
+	Mode string `yaml:"mode,omitempty"`
 }
 
 // dependentApiConfig is the on-disk shape for an external upstream API the
@@ -242,24 +334,6 @@ type dependentApiConfig struct {
 	URL            string `yaml:"url"`
 	Description    string `yaml:"description,omitempty"`
 	Authentication string `yaml:"authentication,omitempty"`
-}
-
-// apiConfig is the optional `api:` block in component frontmatter.
-// Absent / nil ⇒ public (no AP hop). `security: required` ⇒ AP enforces JWT
-// validation against the org's IDP. See docs/design/api-platform-integration.md
-// section 5.1.
-type apiConfig struct {
-	Security string `yaml:"security,omitempty"`
-}
-
-// authConfig is the optional `auth:` block in component frontmatter. Only
-// valid on web-app components. When `kind: oidc-spa`, the BFF dispatches the
-// SPA with a `## OIDC client provisioned` comment so the coding-agent bakes
-// the platform IDP's issuer / clientId / scopes / host into the SPA's
-// workload.yaml. See docs/design/oauth-protected-webapp.md.
-type authConfig struct {
-	Kind     string `yaml:"kind"`
-	Upstream string `yaml:"upstream,omitempty"`
 }
 
 // splitFrontmatter separates the leading YAML frontmatter block (delimited
@@ -324,8 +398,9 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 		}
 	}
 	out := &DesignFile{
-		Overview:   strings.TrimSpace(body),
-		SourceSpec: rfm.SourceSpec,
+		Overview:      strings.TrimSpace(body),
+		SourceSpec:    rfm.SourceSpec,
+		SkillsApplied: append([]string(nil), rfm.SkillsApplied...),
 	}
 
 	// Iterate component dirs in deterministic order.
@@ -366,21 +441,28 @@ func assembleComponent(name, designMd string, files map[string]string) (models.D
 	if dependsOn == nil {
 		dependsOn = []string{}
 	}
-	var api *models.APISecurity
-	if cfm.Api != nil && cfm.Api.Security != "" {
-		api = &models.APISecurity{Security: cfm.Api.Security}
+	var exposes *models.ExposesAPI
+	if cfm.ExposesAPI != nil && (cfm.ExposesAPI.Auth != "" || cfm.ExposesAPI.Managed || cfm.ExposesAPI.UserContext != "") {
+		exposes = &models.ExposesAPI{
+			Managed:     cfm.ExposesAPI.Managed,
+			Auth:        cfm.ExposesAPI.Auth,
+			UserContext: cfm.ExposesAPI.UserContext,
+		}
 	}
-	var auth *models.ComponentAuth
-	if cfm.Auth != nil && cfm.Auth.Kind != "" {
-		auth = &models.ComponentAuth{Kind: cfm.Auth.Kind, Upstream: cfm.Auth.Upstream}
+	var caller *models.CallerIdentity
+	if cfm.CallerIdentity != nil && cfm.CallerIdentity.Mode != "" {
+		caller = &models.CallerIdentity{Mode: cfm.CallerIdentity.Mode}
 	}
 	var depApis []models.DependentAPI
 	if len(cfm.DependentApis) > 0 {
 		depApis = make([]models.DependentAPI, 0, len(cfm.DependentApis))
 		for _, d := range cfm.DependentApis {
-			if d.Name == "" || d.URL == "" {
+			if d.Name == "" {
 				continue
 			}
+			// URL may be empty here — the architect can declare an
+			// intent by name only; the ArtifactStore's catalog post-
+			// process resolves it on the way out of ReadDesign.
 			depApis = append(depApis, models.DependentAPI{
 				Name:           d.Name,
 				URL:            d.URL,
@@ -399,8 +481,8 @@ func assembleComponent(name, designMd string, files map[string]string) (models.D
 		AppPath:                    cfm.AppPath,
 		OpenAPISpec:                openapi,
 		ComponentAgentInstructions: strings.TrimSpace(body),
-		Api:                        api,
-		Auth:                       auth,
+		ExposesAPI:                 exposes,
+		CallerIdentity:             caller,
 		DependentApis:              depApis,
 	}, nil
 }
@@ -438,11 +520,25 @@ func SplitDesign(d *DesignFile) (map[string]string, error) {
 	}
 	out := make(map[string]string, 1+2*len(d.Components))
 
-	// Root design.md — body only. SourceSpec is encoded in the design tag
-	// name (`v<N>-<M>`) and recovered at read time from `gitClient.ListDesignVersions`,
-	// so we don't write it to the file. This keeps the markdown editor's
-	// view clean (no visible YAML frontmatter as a stray heading).
-	out[DesignRootFile] = strings.TrimSpace(d.Overview) + "\n"
+	// Root design.md — body + optional frontmatter. SourceSpec is encoded
+	// in the design tag name (`v<N>-<M>`); we only write it to the file
+	// frontmatter when there is some other field that requires the block
+	// (currently: skillsApplied per docs/design/skills-system.md). The
+	// console's markdown preview strips frontmatter via splitFrontmatter,
+	// so the visible Overview prose is unchanged.
+	if len(d.SkillsApplied) > 0 {
+		// Sorted copy for stable diffs.
+		sortedSkills := append([]string(nil), d.SkillsApplied...)
+		sort.Strings(sortedSkills)
+		rfm := rootFrontmatter{SkillsApplied: sortedSkills}
+		rfmBytes, err := marshalFrontmatter(rfm)
+		if err != nil {
+			return nil, fmt.Errorf("encode root frontmatter: %w", err)
+		}
+		out[DesignRootFile] = joinFrontmatter(string(rfmBytes), strings.TrimSpace(d.Overview)+"\n")
+	} else {
+		out[DesignRootFile] = strings.TrimSpace(d.Overview) + "\n"
+	}
 
 	for _, comp := range d.Components {
 		if comp.Name == "" {
@@ -457,21 +553,45 @@ func SplitDesign(d *DesignFile) (map[string]string, error) {
 			AppPath:    comp.AppPath,
 			Entrypoint: comp.Entrypoint,
 		}
-		if comp.Api != nil && comp.Api.Security != "" {
-			cfm.Api = &apiConfig{Security: comp.Api.Security}
+		// Preserve any non-empty field — gating on `Auth != ""` would drop
+		// designs that set only `managed` or `userContext`.
+		if comp.ExposesAPI != nil && (comp.ExposesAPI.Auth != "" || comp.ExposesAPI.Managed || comp.ExposesAPI.UserContext != "") {
+			cfm.ExposesAPI = &exposesAPIConfig{
+				Managed:     comp.ExposesAPI.Managed,
+				Auth:        comp.ExposesAPI.Auth,
+				UserContext: comp.ExposesAPI.UserContext,
+			}
 		}
-		if comp.Auth != nil && comp.Auth.Kind != "" {
-			cfm.Auth = &authConfig{Kind: comp.Auth.Kind, Upstream: comp.Auth.Upstream}
+		if comp.CallerIdentity != nil && comp.CallerIdentity.Mode != "" {
+			cfm.CallerIdentity = &callerIdentityConfig{Mode: comp.CallerIdentity.Mode}
 		}
 		if len(comp.DependentApis) > 0 {
 			cfm.DependentApis = make([]dependentApiConfig, 0, len(comp.DependentApis))
 			for _, d := range comp.DependentApis {
-				if d.Name == "" || d.URL == "" {
+				if d.Name == "" {
+					continue
+				}
+				// Drop the URL on save when it matches the current
+				// catalog entry for this name — the in-memory URL came
+				// from ReadDesign's catalog substitution, not from the
+				// architect. Persisting it would defeat the
+				// "name-only declaration" contract and break catalog
+				// rotation. (catalog == nil in tests / standalone
+				// SplitDesign callers — fall through to write URL.)
+				url := d.URL
+				if catalog := splitDesignCatalog(); catalog != nil {
+					if entry := catalog.Lookup(d.Name); entry.URL != "" && entry.URL == d.URL {
+						url = ""
+					}
+				}
+				if url == "" && d.Description == "" && d.Authentication == "" {
+					// Name-only declaration — emit just the name.
+					cfm.DependentApis = append(cfm.DependentApis, dependentApiConfig{Name: d.Name})
 					continue
 				}
 				cfm.DependentApis = append(cfm.DependentApis, dependentApiConfig{
 					Name:           d.Name,
-					URL:            d.URL,
+					URL:            url,
 					Description:    d.Description,
 					Authentication: d.Authentication,
 				})

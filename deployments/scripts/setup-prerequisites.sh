@@ -1,4 +1,20 @@
 #!/bin/bash
+# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -108,7 +124,12 @@ spec:
             name: "external-secrets-openbao"
             namespace: "openbao"
 EOF
-echo "✅ ClusterSecretStore configured"
+echo "✅ ClusterSecretStore configured (default)"
+# NOTE: the former `default-from-compose` ClusterSecretStore was removed
+# when the cloud sm-api binary was replaced by the in-repo
+# `local-secret-manager-api` stub (which writes OpenBao directly over HTTP
+# and never resolves a CSS by name). The dispatcher's per-run
+# ExternalSecrets reference `default`.
 
 echo ""
 echo "6️⃣  WSO2 API Platform operator"

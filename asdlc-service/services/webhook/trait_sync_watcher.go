@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package webhook
 
 import (
@@ -38,10 +54,10 @@ import (
 // on every sweep. Recovery is automatic — the pause clears, the watcher
 // retries, and the failure counter starts over.
 type TraitSyncWatcher struct {
-	db          *gorm.DB
-	traitSync   *services.TraitSyncService
-	tokenInject func(ctx context.Context) context.Context
-	tick        time.Duration
+	db                *gorm.DB
+	traitSync         *services.TraitSyncService
+	asServiceIdentity func(ctx context.Context) context.Context
+	tick              time.Duration
 
 	// failureBudget — max consecutive failures before pausing a tuple.
 	failureBudget int
@@ -57,30 +73,29 @@ type tupleFailure struct {
 	pausedUntil time.Time
 }
 
-// NewTraitSyncWatcher builds a watcher. tokenInject is optional — when
-// non-nil it adds the BFF's service-credential token to outbound OC
-// calls. The watcher silently no-ops every tick when traitSync is
-// disabled (FEATURE_EMIT_API_TRAIT=false).
+// NewTraitSyncWatcher builds a watcher. asServiceIdentity is optional — when
+// non-nil it marks outbound OC calls as service-identity (M2M + per-org
+// impersonation).
 func NewTraitSyncWatcher(
 	db *gorm.DB,
 	traitSync *services.TraitSyncService,
-	tokenInject func(ctx context.Context) context.Context,
+	asServiceIdentity func(ctx context.Context) context.Context,
 ) *TraitSyncWatcher {
 	return &TraitSyncWatcher{
-		db:            db,
-		traitSync:     traitSync,
-		tokenInject:   tokenInject,
-		tick:          10 * time.Second,
-		failureBudget: 5,
-		pauseFor:      5 * time.Minute,
-		failures:      make(map[string]*tupleFailure),
+		db:                db,
+		traitSync:         traitSync,
+		asServiceIdentity: asServiceIdentity,
+		tick:              10 * time.Second,
+		failureBudget:     5,
+		pauseFor:          5 * time.Minute,
+		failures:          make(map[string]*tupleFailure),
 	}
 }
 
 // Run blocks until ctx is cancelled. Spawned as a goroutine from main.
 func (w *TraitSyncWatcher) Run(ctx context.Context) {
-	if w.traitSync == nil || !w.traitSync.Enabled() {
-		slog.InfoContext(ctx, "trait_sync watcher: disabled (FEATURE_EMIT_API_TRAIT=false)")
+	if w.traitSync == nil {
+		slog.InfoContext(ctx, "trait_sync watcher: traitSync nil; not starting")
 		return
 	}
 	ticker := time.NewTicker(w.tick)
@@ -101,8 +116,8 @@ func (w *TraitSyncWatcher) Run(ctx context.Context) {
 }
 
 func (w *TraitSyncWatcher) sweep(ctx context.Context) {
-	if w.tokenInject != nil {
-		ctx = w.tokenInject(ctx)
+	if w.asServiceIdentity != nil {
+		ctx = w.asServiceIdentity(ctx)
 	}
 
 	// Enumerate distinct (orgID, projectID, componentName) tuples from

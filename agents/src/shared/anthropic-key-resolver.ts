@@ -1,4 +1,22 @@
 /**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+/**
  * Anthropic key resolver.
  *
  * Per-request resolution of the effective Anthropic API key for a given OC
@@ -57,11 +75,11 @@ export function resetAnthropicCache(): void {
   cache.clear();
 }
 
-function gitServiceUrl(): string {
+function asdlcApiUrl(): string {
   const url =
-    process.env.GIT_SERVICE_URL ||
-    process.env.ASDLC_GIT_SERVICE_URL ||
-    "http://app-factory-git-service:3300";
+    process.env.ASDLC_API_URL ||
+    process.env.GIT_SERVICE_URL || // legacy fallback, removed in a follow-up
+    "http://asdlc-api:9090";
   return url.replace(/\/+$/, "");
 }
 
@@ -93,7 +111,7 @@ export async function resolveAnthropicKey(
   let resp: Response;
   try {
     resp = await fetch(
-      `${gitServiceUrl()}/internal/credentials/orgs/${encodeURIComponent(ocOrgId)}/anthropic/effective-key`,
+      `${asdlcApiUrl()}/internal/credentials/orgs/${encodeURIComponent(ocOrgId)}/anthropic/effective-key`,
       {
         method: "GET",
         headers: {
@@ -103,7 +121,7 @@ export async function resolveAnthropicKey(
     );
   } catch (err) {
     throw new AnthropicKeyError(
-      `git-service unreachable: ${(err as Error).message}`,
+      `asdlc-api unreachable: ${(err as Error).message}`,
       "resolver_unreachable",
       502,
     );
@@ -112,7 +130,7 @@ export async function resolveAnthropicKey(
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
     throw new AnthropicKeyError(
-      `git-service returned ${resp.status}: ${body.slice(0, 200)}`,
+      `asdlc-api returned ${resp.status}: ${body.slice(0, 200)}`,
       "resolver_error",
       502,
     );
@@ -121,7 +139,7 @@ export async function resolveAnthropicKey(
   const data = (await resp.json()) as EffectiveKey;
   if (!data || (data.source !== "org" && data.source !== "platform" && data.source !== "none")) {
     throw new AnthropicKeyError(
-      "git-service returned an unexpected effective-key shape",
+      "asdlc-api returned an unexpected effective-key shape",
       "resolver_error",
       502,
     );

@@ -1,0 +1,204 @@
+# ── OC control-plane gateway ──────────────────────────────────────────────────
+# The ASDLC HTTPRoutes are placed in this gateway's namespace so that the
+# control-plane gateway routes external traffic to the services in wso2-ae.
+ocGateway:
+  namespace: "openchoreo-control-plane"
+  name: "gateway-default"
+
+# ── OpenChoreo platform API ───────────────────────────────────────────────────
+openchoreo:
+  apiBaseURL: "http://openchoreo-api.openchoreo-control-plane:8080"
+  apiGatewayHost: "api.openchoreo.localhost"
+  # OC organisation handle — used to name the workflows-<orgHandle> namespace
+  # where the BFF pre-stages coding-agent secrets before each WorkflowRun.
+  orgHandle: "default"
+
+# ── Identity Provider (OC Thunder) ───────────────────────────────────────────
+idp:
+  # Public URL — must match the `iss` claim in tokens Thunder issues.
+  issuer: "http://thunder.openchoreo.localhost:8080"
+  # URL used by the browser / external clients for JWKS discovery.
+  jwksURL: "http://thunder.openchoreo.localhost:8080/oauth2/jwks"
+  # In-cluster URL the asdlc-api pod uses to fetch JWKS at runtime.
+  jwksInternalURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
+  tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
+  adminURL: "http://thunder-service.thunder.svc.cluster.local:8090"
+
+# ── BFF public URL ────────────────────────────────────────────────────────────
+# The stable gateway-routed URL for the BFF, reachable from:
+#   - GitHub (webhook delivery)
+#   - Coding-agent pods in WorkflowPlane (callback)
+bff:
+  publicURL: "http://asdlc-api.openchoreo.localhost:8080"
+
+# ── OpenBao ───────────────────────────────────────────────────────────────────
+openbao:
+  addr: "http://openbao.openbao.svc.cluster.local:8200"
+  # Dev default — override for production
+  token: "root"
+
+# ── Observer ──────────────────────────────────────────────────────────────────
+observer:
+  url: "http://observer.openchoreo-observability-plane.svc.cluster.local:8080"
+  oauth:
+    tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
+    clientId: "openchoreo-observer-resource-reader-client"
+    clientSecret: "openchoreo-observer-resource-reader-client-secret"
+
+# ── PostgreSQL (direct StatefulSet — not an OC Resource) ─────────────────────
+# Set postgres.url to use an external database and skip the bundled StatefulSet.
+postgres:
+  # If non-empty, use this as DATABASE_URL and skip bundled StatefulSet deployment.
+  url: ""
+  image: "postgres:16-alpine"
+  auth:
+    database: asdlc
+    username: asdlc
+    # WARNING: change this for production
+    password: "asdlc-dev-password"
+  storage: "5Gi"
+
+# ── Task JWT signing key ──────────────────────────────────────────────────────
+taskSigning:
+  issuer: "asdlc-bff"
+  audience: "git-service"
+  # RSA-2048 private key (PKCS#8 PEM). Replace with a real key for production.
+  # To generate: openssl genrsa -out key.pem 2048
+  # Then pass: --set-file taskSigning.privateKeyPem=key.pem
+  privateKeyPem: |
+    -----BEGIN PRIVATE KEY-----
+    MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDhmTw2cgBL8NKT
+    7QPvS868J4tO1koe6zyw8LtHAyWQvsLT5FTdX+ziHV0AWq/AN6iOS9WbPum8IvLb
+    3nX8p8IihAV4Esur+CaTsujtIMuMQXrD5/qzQ+VC0BpdVIF85M46EGL8rQb8qqwr
+    myxS8jFfx/oYVZAXz8ifTT12rrSKoUbvhQJL78xKstK5VEWPPnfnqEfft1R6NvBp
+    kjsUjSEm8hFOwpyajG3Z+gAQYztvNNvSA7w+CQp+qUyElpfH23fW5Xy8zKlhD/2L
+    wNazbw/kGpv6jSAxXngNDdiXHals8OYcsN1fkVlFl+Ey2KvdIsJuAg49x2GDvExb
+    1B0w07cpAgMBAAECggEAI+Xq120PkAX7tC9Ac4kYFgei2sItnDrpduxvmI6vIRfB
+    z87jFDDp9Fcgz+geVFNm/nGhxWje76GODJ+bHb+iHDTu29r9ztkXZmRPPUB9M03O
+    F7NnyLPSnO2ZbGWAj1unV0T5Q2TTGkycRfoUtQQ2CBw9tzaSTb+yGGtFjweg0fgo
+    YUu+Cvkc8kbMRuAd2xQhSGda1DDmFy9piGWA2C5YMtqg1UQLfbSgIqilG14pzE+p
+    MewJUjEV+cmcCM5LHq9gfdHWwCLby79uD4a9JOyo2pu0yQKj2Qfx0ba1IPwB3lCo
+    BjY/IRtcSFSU2rRGoA4L9k5iMs43FPNstEa1pmpbWwKBgQDzE2qT8N/ZPeK/74FG
+    x1gE6sHKIPImHUeOpismlHOqgm+FXjVxRBMfkLF/UIqb7DtrR0NffUhE5rPoDnti
+    6Bh/INuNw9m3Reb8Fz2V9WQtNluK1emN36B1Dt/8hjp9SpKdCPlrQXvUMLzQmTtQ
+    Pf6OMtdP8CO/1lJRCfBXru36NwKBgQDtl+4dCOiAqJbQSIUGVj4mlMBpTsnWnR22
+    Cqo5vD/+omDmG4N9s+z32GqX/wOdc0CXmJQe4tchjc5KqdIzyD6dtNcRbSUTG8GN
+    Z63QrRvwh49vGIByWnyIhLoIgW/pDHI8GCQQE3FVHz4vguqwStB+mm4BTX537eOz
+    IZfrbmGpnwKBgC2aG+mLTAOOh6aogSFNLqclf5uzGJqr7YvGgtvnB9gaRl/H79DD
+    C69lTtdqvcZIyFD0+p/EejVq7p9/cAh7MHVRLb9n2cV3WME8fvJOKjANPZlLTliu
+    doTfeIgAiqKMxfqt/1Tu4RNK3XFo/eas6r+0rA40KBDKXYEUk0Fv8Pd7AoGAVgAK
+    doQE9J0Rie7WB8cr0/c/9l5IfOB+IqiVmTRkzZylCmWnINcBzWyOmNn7ywAuvzDB
+    XLSrPkAADdKOfaPb1mXg+zPQmawQUUjYB5LBbD0FVCdARyQts5SnafDAO1EAAHSU
+    iSUgfrlCXxw6KvnJoinv65TLVEnNg8eDH/riau0CgYAi9dr6XJZHiUVaOZdtwx4p
+    3w72TQL88U/Oo+eHnRLhOjnmmJqRLgyRGHrCGDlfD1SiZB+mAJ0k45IGiZhY7EiR
+    oN+c4BLjYh/EGoex7E3Nsw8euG7XGsmN3/F6FSp70NRxyqv2uhUROOO+bgm2AlUd
+    V6O9MjpVr7CIwk8nzchWpg==
+    -----END PRIVATE KEY-----
+
+# ── Smee webhook relay (optional) ────────────────────────────────────────────
+# For local k3d clusters where GitHub cannot deliver webhooks directly.
+# Set smee.url to a smee.io channel URL (https://smee.io/new).
+# When set, the BFF's GITHUB_WEBHOOK_DELIVERY_URL is overridden to this URL
+# so GitHub registers webhooks against the public smee.io address.
+smee:
+  url: ""
+  image: "node:20-alpine"
+
+# ── GitHub ────────────────────────────────────────────────────────────────────
+github:
+  appSlug: "asdlc-platform"
+  repoVisibility: "private"
+  committerName: "ASDLC Bot"
+  committerEmail: "bot@asdlc.dev"
+  webhookSecret: "dev-webhook-secret"
+  oauthStateKey: "dev-oauth-state-key-32-chars-long!!"
+  appId: ""
+  clientId: ""
+  clientSecret: ""
+  # GitHub App private key PEM (optional — leave empty for PAT-based auth)
+  # Pass via: --set-file github.appPrivateKeyPem=key.pem
+  appPrivateKeyPem: ""
+
+# ── Anthropic ─────────────────────────────────────────────────────────────────
+anthropic:
+  apiKey: ""
+
+# ── asdlc-api (BFF) ──────────────────────────────────────────────────────────
+asdlcApi:
+  # Hostname for the OC control-plane gateway HTTPRoute
+  hostname: "asdlc-api.openchoreo.localhost"
+  image:
+    repository: ghcr.io/senithkay/asdlc-api
+    tag: latest
+    pullPolicy: Always
+  port: 9090
+  logLevel: info
+  deploymentTier: production
+  replicas: 1
+  # Service identity for OC API calls (registered in OC Thunder by bootstrap job)
+  serviceAuth:
+    clientId: "asdlc-api-client"
+    clientSecret: "asdlc-api-client-secret"
+    tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
+  # JWT for BFF → agents-service calls
+  agentsJwt:
+    clientId: "asdlc-bff-to-agents-service"
+    clientSecret: "asdlc-bff-to-agents-service-secret"
+  smApiURL: ""
+  clusterGatewayProxyURL: ""
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+
+# ── agents-service ────────────────────────────────────────────────────────────
+agentsService:
+  image:
+    repository: ghcr.io/senithkay/agents-service
+    tag: latest
+    pullPolicy: Always
+  port: 3400
+  logLevel: info
+  model: "claude-sonnet-4-6"
+  jwt:
+    audience: "asdlc-bff-to-agents-service"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+
+# ── console ───────────────────────────────────────────────────────────────────
+console:
+  # Hostname for the OC control-plane gateway HTTPRoute
+  hostname: "asdlc.openchoreo.localhost"
+  image:
+    repository: ghcr.io/senithkay/asdlc-console
+    tag: latest
+    pullPolicy: Always
+  # nginx port inside the container
+  port: 3000
+  publicURL: "http://asdlc.openchoreo.localhost:8080"
+  thunderPublicURL: "http://thunder.openchoreo.localhost:8080"
+  thunder:
+    clientId: "asdlc-console-client"
+    scopes: "openid profile email"
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+
+# ── Thunder system client ─────────────────────────────────────────────────────
+# Used by asdlc-api to provision per-org OAuth clients via Thunder admin API.
+# Must match the client registered in OC Thunder by the bootstrap job.
+thunderSystemClient:
+  clientId: "asdlc-system-client"
+  clientSecret: "asdlc-system-client-secret"

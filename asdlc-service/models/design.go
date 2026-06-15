@@ -1,20 +1,36 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package models
 
 // DesignComponent describes a single component within a design.
 // This matches the structured output schema from the AI Agent SDK.
 type DesignComponent struct {
-	Name                       string         `json:"name"`
-	ComponentType              string         `json:"componentType"`
-	Language                   string         `json:"language"`
-	DependsOn                  []string       `json:"dependsOn"`
-	Entrypoint                 string         `json:"entrypoint"`
-	Buildpack                  string         `json:"buildpack"`
-	AppPath                    string         `json:"appPath"`
-	OpenAPISpec                string         `json:"openAPISpec"`
-	ComponentAgentInstructions string         `json:"componentAgentInstructions"`
-	Api                        *APISecurity   `json:"api,omitempty"`
-	Auth                       *ComponentAuth `json:"auth,omitempty"`
-	DependentApis              []DependentAPI `json:"dependentApis,omitempty"`
+	Name                       string          `json:"name"`
+	ComponentType              string          `json:"componentType"`
+	Language                   string          `json:"language"`
+	DependsOn                  []string        `json:"dependsOn"`
+	Entrypoint                 string          `json:"entrypoint"`
+	Buildpack                  string          `json:"buildpack"`
+	AppPath                    string          `json:"appPath"`
+	OpenAPISpec                string          `json:"openAPISpec"`
+	ComponentAgentInstructions string          `json:"componentAgentInstructions"`
+	CallerIdentity             *CallerIdentity `json:"callerIdentity,omitempty"`
+	ExposesAPI                 *ExposesAPI     `json:"exposesAPI,omitempty"`
+	DependentApis              []DependentAPI  `json:"dependentApis,omitempty"`
 }
 
 // DependentAPI is an HTTP endpoint outside this project that a component
@@ -30,22 +46,22 @@ type DependentAPI struct {
 	Authentication string `json:"authentication,omitempty"`
 }
 
-// APISecurity carries the component's HTTP API security policy. Absent / nil
-// ⇒ public (no AP hop). `Security: "required"` ⇒ AP enforces JWT validation.
-// See docs/design/api-platform-integration.md section 5.1.
-type APISecurity struct {
-	Security string `json:"security,omitempty"`
+// ExposesAPI declares HTTP API exposure policy for a service component.
+// Absent / nil ⇒ public (no gateway hop). `Auth: "end-user-required"` ⇒
+// the API Platform gateway validates an end-user JWT and injects
+// UserContext (default "X-User-Id") before forwarding upstream.
+type ExposesAPI struct {
+	Managed     bool   `json:"managed,omitempty"`
+	Auth        string `json:"auth,omitempty"`        // "end-user-required" | "service-required" | "none"
+	UserContext string `json:"userContext,omitempty"` // injected header name
 }
 
-// ComponentAuth carries the OIDC relying-party configuration for a web-app
-// component. Only valid on componentType: "web-app". When present with
-// Kind: "oidc-spa", the dispatch path posts a `## OIDC client provisioned`
-// comment on the task's issue with the platform IDP's issuer / clientId /
-// scopes so the coding agent bakes them into the SPA's workload.yaml.
-// See docs/design/oauth-protected-webapp.md.
-type ComponentAuth struct {
-	Kind     string `json:"kind"`               // "oidc-spa"
-	Upstream string `json:"upstream,omitempty"` // sibling service the SPA signs in to call
+// CallerIdentity declares the caller-identity intent for a web-app
+// component. `Mode: "end-user"` ⇒ the SPA performs OIDC Authorization
+// Code + PKCE against the platform IDP and the BFF declares the
+// per-project OAuth client lazily on first dispatch.
+type CallerIdentity struct {
+	Mode string `json:"mode,omitempty"` // "end-user" | "service-account" | "none"
 }
 
 // DesignComponents is a slice of DesignComponent.

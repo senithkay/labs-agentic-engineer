@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package models
 
 import (
@@ -32,6 +48,14 @@ type OrganizationIDPProfile struct {
 	// purpose-built endpoint to fetch it.
 	PublisherClientSecret string    `gorm:"column:publisher_client_secret" json:"-"`
 	PublisherSecretRef    string    `gorm:"column:publisher_secret_ref" json:"publisherSecretRef,omitempty"`
+	// SM-API triplet (WS2.4) — populated by SMAPIWriter.WritePublisher
+	// after EnsureOrgPublisher provisions the Thunder cc app. Nullable
+	// rows pre-date WS2.4; the dispatcher short-circuits the per-run
+	// runner-auth ExternalSecret when missing.
+	SMAPISecretRefName *string    `gorm:"type:text;column:sm_api_secret_ref_name" json:"-"`
+	SMAPIKVPath        *string    `gorm:"type:text;column:sm_api_kv_path" json:"-"`
+	SMAPIProperty      *string    `gorm:"type:text;column:sm_api_property" json:"-"`
+	SMAPIWrittenAt     *time.Time `gorm:"column:sm_api_written_at" json:"-"`
 	CreatedAt           time.Time `gorm:"column:created_at" json:"createdAt"`
 	UpdatedAt           time.Time `gorm:"column:updated_at" json:"updatedAt"`
 }

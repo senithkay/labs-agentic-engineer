@@ -1,0 +1,236 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asdlc-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: asdlc-api
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  replicas: {{ .Values.asdlcApi.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: asdlc-api
+  template:
+    metadata:
+      labels:
+        app: asdlc-api
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      serviceAccountName: asdlc-api
+      containers:
+        - name: asdlc-api
+          image: "{{ .Values.asdlcApi.image.repository }}:{{ .Values.asdlcApi.image.tag }}"
+          imagePullPolicy: {{ .Values.asdlcApi.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.asdlcApi.port }}
+              name: http
+          resources: {{ toYaml .Values.asdlcApi.resources | nindent 12 }}
+          env:
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            - name: SERVER_PORT
+              value: {{ .Values.asdlcApi.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.asdlcApi.logLevel | quote }}
+            - name: DEPLOYMENT_TIER
+              value: {{ .Values.asdlcApi.deploymentTier | quote }}
+            - name: TEST_MODE
+              value: "false"
+            - name: LOCAL_OPENBAO_REPAIR
+              value: "false"
+
+            # ── Database ──────────────────────────────────────────────────────
+            {{- if .Values.postgres.url }}
+            - name: DATABASE_URL
+              value: {{ .Values.postgres.url | quote }}
+            {{- else }}
+            - name: DATABASE_URL
+              value: "postgres://{{ .Values.postgres.auth.username }}:{{ .Values.postgres.auth.password }}@asdlc-db:5432/{{ .Values.postgres.auth.database }}?sslmode=disable"
+            {{- end }}
+
+            # ── OpenChoreo ────────────────────────────────────────────────────
+            - name: PLATFORM_API_SERVICE_BASE_URL
+              value: {{ .Values.openchoreo.apiBaseURL | quote }}
+            - name: PLATFORM_API_SERVICE_HOST
+              value: {{ .Values.openchoreo.apiGatewayHost | quote }}
+
+            # ── Sister services ───────────────────────────────────────────────
+            - name: AGENTS_SERVICE_BASE_URL
+              value: "http://agents-service.{{ .Release.Namespace }}:{{ .Values.agentsService.port }}"
+            - name: AGENTS_SERVICE_URL
+              value: "http://agents-service.{{ .Release.Namespace }}:{{ .Values.agentsService.port }}"
+            - name: AGENT_PLATFORM_URL
+              value: {{ .Values.bff.publicURL | quote }}
+
+            # ── Identity Provider (OC Thunder) ────────────────────────────────
+            - name: JWKS_URL
+              value: {{ .Values.idp.jwksInternalURL | default .Values.idp.jwksURL | quote }}
+            - name: JWT_ISSUER
+              value: {{ .Values.idp.issuer | quote }}
+            - name: JWT_AUDIENCE
+              value: "asdlc-*"
+            - name: THUNDER_ADMIN_URL
+              value: {{ .Values.idp.adminURL | quote }}
+            - name: THUNDER_SYSTEM_CLIENT_ID
+              value: {{ .Values.thunderSystemClient.clientId | quote }}
+            - name: THUNDER_SYSTEM_CLIENT_SECRET
+              value: {{ .Values.thunderSystemClient.clientSecret | quote }}
+            - name: PLATFORM_IDP_ISSUER
+              value: {{ .Values.idp.issuer | quote }}
+            - name: PLATFORM_IDP_JWKS_URL
+              value: {{ .Values.idp.jwksInternalURL | default .Values.idp.jwksURL | quote }}
+            - name: USER_APPS_OIDC_ISSUER
+              value: {{ .Values.idp.issuer | quote }}
+            - name: USER_APPS_OIDC_CLIENT_ID
+              value: {{ .Values.console.thunder.clientId | quote }}
+            - name: USER_APPS_OIDC_SCOPES
+              value: "openid profile"
+
+            # ── Service auth (BFF service identity for OC API calls) ──────────
+            - name: SERVICE_AUTH_TOKEN_URL
+              value: {{ .Values.asdlcApi.serviceAuth.tokenURL | quote }}
+            - name: SERVICE_AUTH_CLIENT_ID
+              value: {{ .Values.asdlcApi.serviceAuth.clientId | quote }}
+            - name: SERVICE_AUTH_CLIENT_SECRET
+              value: {{ .Values.asdlcApi.serviceAuth.clientSecret | quote }}
+            - name: SERVICE_AUTH_HOST_HEADER
+              value: ""
+            - name: SERVICE_AUTH_GIT_TOKEN_URL
+              value: {{ .Values.idp.tokenURL | quote }}
+            - name: SERVICE_AUTH_GIT_CLIENT_ID
+              value: "asdlc-bff-to-git-service"
+            - name: SERVICE_AUTH_GIT_CLIENT_SECRET
+              value: "asdlc-bff-to-git-service-secret"
+            - name: SERVICE_AUTH_GIT_HOST_HEADER
+              value: ""
+            - name: SERVICE_AUTH_AGENTS_TOKEN_URL
+              value: {{ .Values.idp.tokenURL | quote }}
+            - name: SERVICE_AUTH_AGENTS_CLIENT_ID
+              value: {{ .Values.asdlcApi.agentsJwt.clientId | quote }}
+            - name: SERVICE_AUTH_AGENTS_CLIENT_SECRET
+              value: {{ .Values.asdlcApi.agentsJwt.clientSecret | quote }}
+            - name: SERVICE_AUTH_AGENTS_HOST_HEADER
+              value: ""
+
+            # ── Task JWT ──────────────────────────────────────────────────────
+            - name: BFF_TASK_SIGNING_KEY_PATH
+              value: "/app/keys/task-signing.pem"
+            - name: BFF_TASK_TOKEN_ISSUER
+              value: {{ .Values.taskSigning.issuer | quote }}
+            - name: BFF_TASK_TOKEN_AUDIENCE
+              value: {{ .Values.taskSigning.audience | quote }}
+            - name: BFF_JWKS_URL
+              value: "http://localhost:{{ .Values.asdlcApi.port }}/auth/external/jwks.json"
+            - name: TASK_JWT_ISSUER
+              value: {{ .Values.taskSigning.issuer | quote }}
+            - name: TASK_JWT_AUDIENCE
+              value: {{ .Values.taskSigning.audience | quote }}
+            - name: BFF_PUBLIC_URL
+              value: {{ .Values.bff.publicURL | quote }}
+
+            # ── GitHub ────────────────────────────────────────────────────────
+            - name: GITHUB_APP_SLUG
+              value: {{ .Values.github.appSlug | quote }}
+            - name: GITHUB_REPO_VISIBILITY
+              value: {{ .Values.github.repoVisibility | quote }}
+            - name: GIT_COMMITTER_NAME
+              value: {{ .Values.github.committerName | quote }}
+            - name: GIT_COMMITTER_EMAIL
+              value: {{ .Values.github.committerEmail | quote }}
+            - name: GITHUB_APP_PRIVATE_KEY_PATH
+              value: "/etc/github-app/private-key.pem"
+            - name: GITHUB_WEBHOOK_DELIVERY_URL
+              value: {{ .Values.smee.url | default .Values.bff.publicURL | quote }}
+            - name: GITHUB_WEBHOOK_SECRET
+              value: {{ .Values.github.webhookSecret | quote }}
+            - name: OAUTH_STATE_SIGNING_KEY
+              value: {{ .Values.github.oauthStateKey | quote }}
+            - name: GITHUB_APP_ID
+              value: {{ .Values.github.appId | quote }}
+            - name: GITHUB_CLIENT_ID
+              value: {{ .Values.github.clientId | quote }}
+            - name: GITHUB_CLIENT_SECRET
+              value: {{ .Values.github.clientSecret | quote }}
+
+            # ── OpenBao ───────────────────────────────────────────────────────
+            - name: OPENBAO_ADDR
+              value: {{ .Values.openbao.addr | quote }}
+            - name: OPENBAO_TOKEN
+              value: {{ .Values.openbao.token | quote }}
+
+            # ── Anthropic ─────────────────────────────────────────────────────
+            - name: ANTHROPIC_PLATFORM_KEY
+              value: {{ .Values.anthropic.apiKey | quote }}
+
+            # ── Cloud service stubs ───────────────────────────────────────────
+            - name: SECRET_MANAGER_API_URL
+              value: {{ .Values.asdlcApi.smApiURL | default "" | quote }}
+            - name: CLUSTER_GATEWAY_PROXY_URL
+              value: {{ .Values.asdlcApi.clusterGatewayProxyURL | default "" | quote }}
+
+            # ── Observer ──────────────────────────────────────────────────────
+            - name: OBSERVER_URL
+              value: {{ .Values.observer.url | quote }}
+            - name: OBSERVER_OAUTH_TOKEN_URL
+              value: {{ .Values.observer.oauth.tokenURL | quote }}
+            - name: OBSERVER_OAUTH_CLIENT_ID
+              value: {{ .Values.observer.oauth.clientId | quote }}
+            - name: OBSERVER_OAUTH_CLIENT_SECRET
+              value: {{ .Values.observer.oauth.clientSecret | quote }}
+            - name: OBSERVER_OAUTH_HOST_HEADER
+              value: ""
+
+            - name: REPO_BASE_PATH
+              value: "/data/repos"
+
+          volumeMounts:
+            - name: task-signing-key
+              mountPath: /app/keys
+              readOnly: true
+            {{- if .Values.github.appPrivateKeyPem }}
+            - name: github-app-key
+              mountPath: /etc/github-app
+              readOnly: true
+            {{- end }}
+            - name: repos
+              mountPath: /data/repos
+
+      volumes:
+        - name: task-signing-key
+          configMap:
+            name: asdlc-api-task-signing-key
+        {{- if .Values.github.appPrivateKeyPem }}
+        - name: github-app-key
+          configMap:
+            name: asdlc-api-github-app-key
+        {{- end }}
+        - name: repos
+          emptyDir: {}
+---
+# ConfigMap holding the task-signing RSA private key
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asdlc-api-task-signing-key
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+data:
+  task-signing.pem: {{ .Values.taskSigning.privateKeyPem | quote }}
+{{- if .Values.github.appPrivateKeyPem }}
+---
+# ConfigMap holding the GitHub App private key
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asdlc-api-github-app-key
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+data:
+  private-key.pem: {{ .Values.github.appPrivateKeyPem | quote }}
+{{- end }}

@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // Package agents is the client for the asdlc-agents-service (AI SDK v6-based,
 // ANTHROPIC_API_KEY auth). Streams AI SDK UI Message Stream SSE responses for
 // the streaming agents (business-analyst, architect, tech-lead).
@@ -80,11 +96,34 @@ type DocumentGenerationRequest struct {
 
 // ArchitectRequest is the body sent to the architect endpoint.
 type ArchitectRequest struct {
-	ProjectName         string            `json:"projectName"`
-	Spec                string            `json:"spec"`
-	PreviousDesign      *ArchitectDesign  `json:"previousDesign,omitempty"`
-	Wireframes          map[string]string `json:"wireframes,omitempty"`
-	AvailableWireframes []string          `json:"availableWireframes,omitempty"`
+	ProjectName         string             `json:"projectName"`
+	Spec                string             `json:"spec"`
+	PreviousDesign      *ArchitectDesign   `json:"previousDesign,omitempty"`
+	Wireframes          map[string]string  `json:"wireframes,omitempty"`
+	AvailableWireframes []string           `json:"availableWireframes,omitempty"`
+	// Skills propagation — see docs/design/skills-system.md.
+	// BuiltinSkills are inlined as full bodies under "Platform skills —
+	// MUST consult"; OrgSkills appear as a manifest with descriptions.
+	BuiltinSkills []SkillRecord      `json:"builtinSkills,omitempty"`
+	OrgSkills     []SkillDescription `json:"orgSkills,omitempty"`
+	SkillsApplied []string           `json:"skillsApplied,omitempty"`
+}
+
+// SkillDescription mirrors agents/src/agents/architect/schema.ts >
+// SkillDescription (name + description). Used in the architect's org
+// skills manifest and the tech-lead plan's attached-skills context.
+type SkillDescription struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// SkillRecord mirrors agents/src/agents/architect/schema.ts > SkillRecord
+// (name + description + full SKILL.md body). Used in the architect's
+// built-in inlining and the tech-lead detail's skillsResolved field.
+type SkillRecord struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Body        string `json:"body"`
 }
 
 // ArchitectDesign mirrors the architect output shape for incremental regen.
@@ -97,14 +136,18 @@ type ArchitectDesign struct {
 // agents/src/agents/tech-lead/schema.ts → TechLeadPlanInput plus the optional
 // validator diff context.
 type TechLeadPlanRequest struct {
-	ProjectName   string                          `json:"projectName"`
-	Spec          string                          `json:"spec"`
-	SlimDesign    []TechLeadSlimComponent         `json:"slimDesign"`
-	SpecDiff      string                          `json:"specDiff,omitempty"`
-	DesignDiff    string                          `json:"designDiff,omitempty"`
-	ExistingTasks []TechLeadExistingTaskSummary   `json:"existingTasks,omitempty"`
-	Mode          string                          `json:"mode"` // "fresh" | "incremental"
-	Diff          *TechLeadValidatorDiffContext   `json:"diff,omitempty"`
+	ProjectName    string                        `json:"projectName"`
+	Spec           string                        `json:"spec"`
+	SlimDesign     []TechLeadSlimComponent       `json:"slimDesign"`
+	SpecDiff       string                        `json:"specDiff,omitempty"`
+	DesignDiff     string                        `json:"designDiff,omitempty"`
+	ExistingTasks  []TechLeadExistingTaskSummary `json:"existingTasks,omitempty"`
+	Mode           string                        `json:"mode"` // "fresh" | "incremental"
+	Diff           *TechLeadValidatorDiffContext `json:"diff,omitempty"`
+	// AttachedSkills are the skills the architect attached to the
+	// project's design.md. Name + description only; bodies arrive in
+	// each TechLeadDetailItem.SkillsResolved at the detail phase.
+	AttachedSkills []SkillDescription `json:"attachedSkills,omitempty"`
 }
 
 type TechLeadSlimComponent struct {
@@ -142,6 +185,11 @@ type TechLeadDetailItem struct {
 	DesignSlice                string                  `json:"designSlice"`
 	DepSummaries               []TechLeadSlimComponent `json:"depSummaries"`
 	ExistingTitlesForComponent []TechLeadExistingTitle `json:"existingTitlesForComponent"`
+	// SkillsResolved are the full bodies of every skill attached to
+	// the project's design at tech-lead detail time. The tech-lead
+	// inlines them under "Skills active for this project" with "MUST
+	// consult" framing.
+	SkillsResolved []SkillRecord `json:"skillsResolved,omitempty"`
 }
 
 type TechLeadExistingTitle struct {

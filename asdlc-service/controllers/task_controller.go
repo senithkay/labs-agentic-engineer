@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package controllers
 
 import (
@@ -35,17 +51,32 @@ type TaskController interface {
 	VerificationFailed(w http.ResponseWriter, r *http.Request)
 	Retry(w http.ResponseWriter, r *http.Request)
 
+	// Skills (PR 3 of skills-system) is called by the dispatched agent
+	// inside the runner pod at init. Returns the snapshotted skill bodies
+	// for the task's (project_id, design_version). Authenticated via the
+	// per-task JWT.
+	Skills(w http.ResponseWriter, r *http.Request)
+
+	// RefreshCredentials (WS2.4) is the path-scoped equivalent of the
+	// legacy /api/v1/credentials/refresh endpoint. Accepts both the
+	// legacy BFF-signed TaskJWT and Thunder-issued publisher cc tokens
+	// via authorizeRunnerCallback. Used by the runner's credhelper.
+	RefreshCredentials(w http.ResponseWriter, r *http.Request)
+
 	// Progress endpoints — task-execution-progress.md §5.2.
 	GetTaskAgentProgress(w http.ResponseWriter, r *http.Request)
 	GetTaskBuildProgress(w http.ResponseWriter, r *http.Request)
 }
 
 type taskController struct {
-	service     services.TaskService
-	dispatchSvc services.DispatchService
-	progressSvc services.ProgressService
-	ocClient    openchoreo.ComponentClient
-	taskTokens  *services.TaskTokenManager
+	service           services.TaskService
+	dispatchSvc       services.DispatchService
+	progressSvc       services.ProgressService
+	ocClient          openchoreo.ComponentClient
+	taskTokens        *services.TaskTokenManager
+	publisherVerifier *services.PublisherTokenVerifier
+	skillsSvc         *services.TaskSkillsService
+	credsRefreshSvc   services.CredentialsRefreshService
 }
 
 func NewTaskController(
@@ -62,6 +93,80 @@ func NewTaskController(
 		ocClient:    ocClient,
 		taskTokens:  taskTokens,
 	}
+}
+
+// SetSkillsService wires the per-task skills pull endpoint. Optional —
+// when nil, the handler returns 503.
+func (c *taskController) SetSkillsService(s *services.TaskSkillsService) {
+	c.skillsSvc = s
+}
+
+// SetPublisherVerifier wires WS2.4's publisher cc token verifier so the
+// runner-callback handlers accept Thunder-issued cc tokens alongside the
+// legacy BFF-signed TaskJWTs. Optional — when nil, only TaskJWTs work.
+func (c *taskController) SetPublisherVerifier(v *services.PublisherTokenVerifier) {
+	c.publisherVerifier = v
+}
+
+// SetCredentialsRefreshService wires the credentials-refresh service so
+// the WS2.4 path-scoped /api/v1/tasks/{taskId}/credentials/refresh
+// endpoint can delegate. Optional — when nil, the handler returns 503
+// and the runner must fall back to the legacy /api/v1/credentials/refresh
+// route (TaskJWT path).
+func (c *taskController) SetCredentialsRefreshService(s services.CredentialsRefreshService) {
+	c.credsRefreshSvc = s
+}
+
+// authorizeRunnerCallback validates the inbound Authorization header for
+// runner-facing routes (Skills, VerificationFailed, the WS2.4
+// per-task /credentials/refresh). Tries the BFF TaskJWT first; on
+// failure tries the publisher cc verifier (WS2.4). Returns the canonical
+// org handle the caller may need for downstream lookups.
+//
+// On error, writes the HTTP error response and returns ok=false.
+func (c *taskController) authorizeRunnerCallback(w http.ResponseWriter, r *http.Request, taskID string) (orgHandle string, ok bool) {
+	authz := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(authz) <= len(prefix) || authz[:len(prefix)] != prefix {
+		utils.WriteErrorResponse(w, http.StatusUnauthorized, "bearer token required")
+		return "", false
+	}
+	tok := authz[len(prefix):]
+
+	if c.taskTokens != nil {
+		if claims, err := c.taskTokens.Verify(tok); err == nil {
+			if claims.TaskID != taskID {
+				slog.WarnContext(r.Context(), "runner callback: task bearer subject mismatch",
+					"task", taskID, "claimTaskId", claims.TaskID)
+				utils.WriteErrorResponse(w, http.StatusForbidden, "task bearer does not match path")
+				return "", false
+			}
+			return claims.OcOrgID, true
+		}
+	}
+
+	if c.publisherVerifier != nil {
+		if claims, err := c.publisherVerifier.Verify(tok); err == nil {
+			task, terr := c.service.GetTask(r.Context(), taskID)
+			if terr != nil || task == nil {
+				slog.WarnContext(r.Context(), "runner callback: task lookup failed",
+					"task", taskID, "error", terr)
+				utils.WriteErrorResponse(w, http.StatusForbidden, "task not found")
+				return "", false
+			}
+			if task.OrgID != claims.OrgHandle {
+				slog.WarnContext(r.Context(), "runner callback: publisher org mismatch",
+					"task", taskID, "taskOrg", task.OrgID, "publisherOrg", claims.OrgHandle)
+				utils.WriteErrorResponse(w, http.StatusForbidden, "publisher token does not match task org")
+				return "", false
+			}
+			return claims.OrgHandle, true
+		}
+	}
+
+	slog.WarnContext(r.Context(), "runner callback: bearer rejected by all verifiers", "task", taskID)
+	utils.WriteErrorResponse(w, http.StatusUnauthorized, "invalid bearer")
+	return "", false
 }
 
 func (c *taskController) ListTasks(w http.ResponseWriter, r *http.Request) {
@@ -366,22 +471,7 @@ func (c *taskController) VerificationFailed(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	authz := r.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if len(authz) <= len(prefix) || authz[:len(prefix)] != prefix {
-		utils.WriteErrorResponse(w, http.StatusUnauthorized, "bearer token required")
-		return
-	}
-	claims, err := c.taskTokens.Verify(authz[len(prefix):])
-	if err != nil {
-		slog.WarnContext(r.Context(), "verification-failed: invalid bearer", "task", taskID, "error", err)
-		utils.WriteErrorResponse(w, http.StatusUnauthorized, "invalid task bearer")
-		return
-	}
-	if claims.TaskID != taskID {
-		slog.WarnContext(r.Context(), "verification-failed: bearer subject mismatch",
-			"task", taskID, "claimTaskId", claims.TaskID)
-		utils.WriteErrorResponse(w, http.StatusForbidden, "task bearer does not match path")
+	if _, ok := c.authorizeRunnerCallback(w, r, taskID); !ok {
 		return
 	}
 
@@ -436,4 +526,69 @@ func (c *taskController) ExecTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.WriteSuccessResponse(w, http.StatusOK, map[string]string{"status": "task execution started"})
+}
+
+// Skills (PR 3 of skills-system) is called by the runner pod at init
+// time to fetch the snapshotted SKILL.md bodies for this task's
+// (project_id, design_version). Authenticated via the same per-task
+// bearer used by VerificationFailed.
+//
+// Response shape: {"skills": [{ id, materializedName, kind, skillMd, references }]}
+// Empty list (NOT 404) when the task has no snapshot — pre-PR-1
+// backfilled tasks or designs with no attached skills.
+func (c *taskController) Skills(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskId")
+	if !requireTaskID(w, taskID) {
+		return
+	}
+	if c.skillsSvc == nil || c.taskTokens == nil {
+		utils.WriteErrorResponse(w, http.StatusServiceUnavailable, "skills endpoint not configured")
+		return
+	}
+
+	if _, ok := c.authorizeRunnerCallback(w, r, taskID); !ok {
+		return
+	}
+
+	resp, err := c.skillsSvc.SkillsForTask(r.Context(), taskID)
+	if err != nil {
+		if errors.Is(err, services.ErrTaskNotFound) {
+			utils.WriteErrorResponse(w, http.StatusNotFound, "task not found")
+			return
+		}
+		slog.ErrorContext(r.Context(), "skills: lookup failed", "task", taskID, "error", err)
+		utils.WriteErrorResponse(w, http.StatusInternalServerError, "failed to read skills")
+		return
+	}
+
+	utils.WriteSuccessResponse(w, http.StatusOK, resp)
+}
+
+// RefreshCredentials (WS2.4) is the path-scoped credential refresh
+// endpoint that accepts either a legacy TaskJWT or a Thunder-issued
+// publisher cc token. The runner's credhelper.sh hits this after WS2.4
+// so the same auth-mode the runner uses for everything else also covers
+// /credentials/refresh. Legacy route `POST /api/v1/credentials/refresh`
+// still exists (TaskJWT only) and is deleted in WS2.6.
+func (c *taskController) RefreshCredentials(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskId")
+	if !requireTaskID(w, taskID) {
+		return
+	}
+	if c.credsRefreshSvc == nil {
+		utils.WriteErrorResponse(w, http.StatusServiceUnavailable, "credentials refresh not configured")
+		return
+	}
+	orgHandle, ok := c.authorizeRunnerCallback(w, r, taskID)
+	if !ok {
+		return
+	}
+	resp, err := c.credsRefreshSvc.Refresh(r.Context(), taskID, orgHandle)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "refresh credentials failed",
+			"taskId", taskID, "ocOrgId", orgHandle, "error", err)
+		utils.WriteErrorResponse(w, http.StatusInternalServerError, "failed to refresh credentials")
+		return
+	}
+	utils.WriteSuccessResponse(w, http.StatusOK, resp)
 }

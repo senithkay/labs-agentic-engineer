@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package services
 
 import (
@@ -5,14 +21,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"strings"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/gitservice"
-	"github.com/wso2/asdlc/asdlc-service/clients/thundersvc"
+	"github.com/google/uuid"
+
 	"github.com/wso2/asdlc/asdlc-service/models"
 	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/asdlc/asdlc-service/services/codingagent"
+	"gorm.io/gorm"
 )
 
 // DispatchResult represents the outcome of dispatching a single task.
@@ -57,81 +74,76 @@ type DispatchService interface {
 	// so a fresh WorkflowRun is created with a freshly minted bearer.
 	// Returns the resulting DispatchResult.
 	RetryTask(ctx context.Context, taskID string) (DispatchResult, error)
-	// AnnounceDependencyDeployed posts a `## Dependency endpoint resolved`
-	// comment on the GitHub issue of every task in this project that lists
-	// componentName in its DependsOnComponents and hasn't yet wrapped up
-	// (status ∈ {pending, on_hold, in_progress}). Fired by the
-	// cascade hook the moment a task lands `deployed`. Used by both
-	// cluster-flow and local-flow agents — the comment is the single
-	// source of truth for upstream URLs (the prompt no longer carries
-	// them). Best-effort: per-task failures are logged but never bubble.
-	AnnounceDependencyDeployed(ctx context.Context, orgID, projectID, componentName string)
-	// RegisterUserAppRedirectURI ensures the just-deployed component's
-	// external URL is registered as a redirect_uri on the user-apps
-	// OAuth client in Thunder. No-op when the component is not a
-	// web-app with auth.kind=oidc-spa, when the Thunder admin client
-	// is not configured, or when the URL hasn't materialised yet (we
-	// fail closed — manual register-after-deploy is always available).
-	// Best-effort: never returns an error; per-call failures are logged.
-	RegisterUserAppRedirectURI(ctx context.Context, orgID, projectID, componentName string)
 }
 
 type dispatchService struct {
-	taskRepo      repositories.TaskRepository
-	gitClient     gitservice.Client
-	componentSvc  ComponentService
-	configSvc     ConfigService
-	store         *ArtifactStore
-	taskTokens    *TaskTokenManager
-	tokenInject   func(ctx context.Context) context.Context
-	wfRunService  WorkflowRunService
-	projector     TaskStateProjector
-	gitServiceURL string // URL the agent pod uses to reach git-service; cross-namespace FQDN in cluster
-	platformURL   string // URL the agent pod uses to call the BFF F3c verification-failed callback
+	taskRepo          repositories.TaskRepository
+	repoSvc           RepoService
+	credSvc           *CredentialService
+	anthropicSvc      *AnthropicCredentialService
+	repoBoardSvc      RepoBoardService
+	componentSvc      ComponentService
+	configSvc         ConfigService
+	store             *ArtifactStore
+	taskTokens        *TaskTokenManager
+	asServiceIdentity func(ctx context.Context) context.Context
+	wfRunService      WorkflowRunService
+	projector         TaskStateProjector
+	gitServiceURL     string // URL the agent pod uses to reach git-service; cross-namespace FQDN in cluster
+	platformURL       string // URL the agent pod uses to call the BFF F3c verification-failed callback
 	// traitSync, when non-nil, is invoked after CreateComponent to
 	// reconcile per-environment trait configs (the part CreateComponent
 	// can't pre-stamp because RBs are created asynchronously by OC's
 	// autoDeploy controller). Set via WithTraitSync. Optional in tests.
 	traitSync *TraitSyncService
-	// userAppsOIDC, when ClientID is non-empty, drives the
-	// `## OIDC client provisioned` comment posted on the issues of
-	// web-app tasks whose design has auth.kind=oidc-spa. Wired via
-	// SetUserAppsOIDC from main.go's config. Optional in tests.
-	userAppsOIDC UserAppsOIDC
-	// thunderAdmin, when non-nil, is used to register a deployed
-	// user-webapp's external URL on the userAppsOIDC.ClientID app's
-	// redirectUris set (see RegisterUserAppRedirectURI). Wired via
-	// SetThunderAdminClient. Optional in tests — without it the
-	// register step logs and skips, and the operator must add the URL
-	// manually before browser sign-in works for that webapp.
-	thunderAdmin thundersvc.Client
+	// codingAgentDispatcher, when non-nil, is the WS2.3 proxy-based
+	// dispatch path (NS + SA + ExternalSecret×2 + Job). When the
+	// dispatcher is wired AND the per-org SM-API triplets are
+	// populated, the new path runs and the legacy
+	// wfRunService.TriggerCodingAgent is skipped. Both being absent
+	// keeps the legacy ClusterWorkflow path live.
+	codingAgentDispatcher *codingagent.Dispatcher
+
+	// db backs the SM-API triplet lookup; nil disables the new
+	// dispatch path even when codingAgentDispatcher is set. Wired by
+	// main.go after WS2.3.
+	db *gorm.DB
+
+	// clusterSecretStore is the ESO ClusterSecretStore name the
+	// per-run ExternalSecrets target. On DP this is `secretstore-read`;
+	// local k3d reuses `default` (see deployments/docker-compose.yml).
+	clusterSecretStore string
+
+	// runnerImage is the docker image the per-run Job uses. Pinned by
+	// the BFF from cfg.AgentRunnerImage.
+	runnerImage string
+
+	// runtimeConfig, when non-nil, writes `env-config.js` onto each
+	// web-app's ReleaseBindings after CreateComponent. The SPA loads
+	// the file synchronously before its bundle so `window._env_` is
+	// populated before any React module runs — no rebuild needed when
+	// per-env values change. Wired via SetRuntimeConfig.
+	runtimeConfig *RuntimeConfigService
+
+	// idp, when non-nil, provisions the per-org Thunder publisher
+	// client_credentials on demand so the coding-agent runner can
+	// authenticate to the BFF through the IdP-authed gateway (WS2.4).
+	// Decoupled from API security: trait_sync only provisions it on the
+	// first protected deploy, but the runner needs it for every component,
+	// so the dispatch pre-flight ensures it too. Wired via SetIDPService.
+	idp IDPService
 }
 
-// UserAppsOIDC is the BFF-side mirror of config.UserAppsOIDCConfig —
-// declared here to keep the services package independent of config.
-//
-// InternalProxyPass is the URL the SPA's own nginx writes verbatim as
-// the `proxy_pass` target for the same-origin `/oidc/` block. Must be
-// reachable from a pod inside the cluster — see UserAppsOIDCConfig.
-type UserAppsOIDC struct {
-	Issuer            string
-	ClientID          string
-	Scopes            string
-	InternalProxyPass string
-}
-
-// SetUserAppsOIDC installs the OIDC config the dispatch path hands to
-// user web-apps via issue comments. Call after NewDispatchService.
-func (s *dispatchService) SetUserAppsOIDC(cfg UserAppsOIDC) {
-	s.userAppsOIDC = cfg
-}
-
-// SetThunderAdminClient installs the Thunder REST client used to register
-// per-webapp redirect URIs on the user-apps OAuth client. Call after
-// NewDispatchService (in production) — when nil, RegisterUserAppRedirectURI
-// is a logged no-op and the operator must register URIs by hand.
-func (s *dispatchService) SetThunderAdminClient(c thundersvc.Client) {
-	s.thunderAdmin = c
+// WithCodingAgentDispatcher wires the WS2.3 proxy-based dispatch path.
+// db is required for the SM-API triplet lookup; clusterSecretStore +
+// runnerImage are pinned by the caller. Returns the receiver for
+// chained construction.
+func (s *dispatchService) WithCodingAgentDispatcher(d *codingagent.Dispatcher, db *gorm.DB, clusterSecretStore, runnerImage string) DispatchService {
+	s.codingAgentDispatcher = d
+	s.db = db
+	s.clusterSecretStore = clusterSecretStore
+	s.runnerImage = runnerImage
+	return s
 }
 
 // DispatchServiceWithTraitSync surfaces the trait_sync setter without
@@ -142,6 +154,21 @@ type DispatchServiceWithTraitSync interface {
 	SetTraitSync(traitSync *TraitSyncService)
 }
 
+// SetIDPService wires the per-org Thunder publisher provisioning hook used
+// by the proxy dispatch pre-flight (WS2.4 runner-auth). Optional — when
+// unset (e.g. local k3d without Thunder), the dispatch path falls back to
+// the per-task RS256 JWT.
+func (s *dispatchService) SetIDPService(idp IDPService) {
+	s.idp = idp
+}
+
+// SetRuntimeConfig installs the env-config.js emitter that writes
+// per-env values onto each web-app's ReleaseBindings. Call after
+// NewDispatchService in production wiring.
+func (s *dispatchService) SetRuntimeConfig(r *RuntimeConfigService) {
+	s.runtimeConfig = r
+}
+
 // SetTraitSync installs the shared trait_sync emitter. Call after
 // NewDispatchService in production wiring.
 func (s *dispatchService) SetTraitSync(traitSync *TraitSyncService) {
@@ -150,29 +177,35 @@ func (s *dispatchService) SetTraitSync(traitSync *TraitSyncService) {
 
 func NewDispatchService(
 	taskRepo repositories.TaskRepository,
-	gitClient gitservice.Client,
+	repoSvc RepoService,
+	credSvc *CredentialService,
+	anthropicSvc *AnthropicCredentialService,
+	repoBoardSvc RepoBoardService,
 	componentSvc ComponentService,
 	configSvc ConfigService,
 	store *ArtifactStore,
 	taskTokens *TaskTokenManager,
-	tokenInject func(ctx context.Context) context.Context,
+	asServiceIdentity func(ctx context.Context) context.Context,
 	wfRunService WorkflowRunService,
 	projector TaskStateProjector,
 	gitServiceURL string,
 	platformURL string,
 ) DispatchService {
 	return &dispatchService{
-		taskRepo:      taskRepo,
-		gitClient:     gitClient,
-		componentSvc:  componentSvc,
-		configSvc:     configSvc,
-		store:         store,
-		taskTokens:    taskTokens,
-		tokenInject:   tokenInject,
-		wfRunService:  wfRunService,
-		projector:     projector,
-		gitServiceURL: gitServiceURL,
-		platformURL:   platformURL,
+		taskRepo:          taskRepo,
+		repoSvc:           repoSvc,
+		credSvc:           credSvc,
+		anthropicSvc:      anthropicSvc,
+		repoBoardSvc:      repoBoardSvc,
+		componentSvc:      componentSvc,
+		configSvc:         configSvc,
+		store:             store,
+		taskTokens:        taskTokens,
+		asServiceIdentity: asServiceIdentity,
+		wfRunService:      wfRunService,
+		projector:         projector,
+		gitServiceURL:     gitServiceURL,
+		platformURL:       platformURL,
 	}
 }
 
@@ -182,7 +215,7 @@ func (s *dispatchService) DispatchTasks(ctx context.Context, orgID, projectID st
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
 
-	repoInfo, err := s.gitClient.GetRepo(ctx, orgID, projectID)
+	repoInfo, err := s.repoSvc.GetRepo(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("get repo: %w", err)
 	}
@@ -192,7 +225,7 @@ func (s *dispatchService) DispatchTasks(ctx context.Context, orgID, projectID st
 	if repoInfo.DefaultBranch == "" {
 		repoInfo.DefaultBranch = "main"
 	}
-	identity, err := s.gitClient.GetCredentialIdentity(ctx, orgID)
+	identity, err := s.credSvc.IdentityFor(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("get credential identity: %w", err)
 	}
@@ -230,7 +263,7 @@ func (s *dispatchService) DispatchTasks(ctx context.Context, orgID, projectID st
 				slog.WarnContext(ctx, "set on_hold", "task", task.ID, "error", err)
 			}
 			if task.IssueURL != "" {
-				if err := s.gitClient.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "On Hold"); err != nil {
+				if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "On Hold"); err != nil {
 					slog.WarnContext(ctx, "failed to move board item to On Hold",
 						"task", task.ID, "error", err)
 				}
@@ -266,8 +299,8 @@ func depsAllDeployed(task *models.ComponentTask, statusByComponent map[string]st
 func (s *dispatchService) dispatchOne(
 	ctx context.Context,
 	task *models.ComponentTask,
-	repoInfo *gitservice.RepoInfo,
-	identity *gitservice.IdentityProjection,
+	repoInfo *models.GitRepository,
+	identity *Identity,
 ) DispatchResult {
 	res := DispatchResult{TaskID: task.ID, ComponentName: task.ComponentName}
 
@@ -305,11 +338,10 @@ func (s *dispatchService) dispatchOne(
 	// the provider's spec.endpoints) and we fail loudly rather than
 	// dispatching a task that will fail to verify.
 	//
-	// The resolved URLs are NOT passed through the prompt. The agent
-	// receives them via `## Dependency endpoint resolved` comments on
-	// its GitHub issue, posted by AnnounceDependencyDeployed when each
-	// upstream landed `deployed`. Keeping the prompt thin makes the
-	// cluster and local flows read from the same source.
+	// The resolved URLs are NOT passed through the prompt. SPAs receive
+	// them at runtime via `window._env_` (BFF writes per-env values into
+	// `env-config.js` on each ReleaseBinding). Keeping the prompt thin
+	// matches both cluster and local flows.
 	depEndpoints, err := s.resolveDependencyEndpoints(ctx, task)
 	if err != nil {
 		const deferDeadline = 2 * time.Minute
@@ -332,7 +364,7 @@ func (s *dispatchService) dispatchOne(
 			slog.WarnContext(ctx, "dispatchOne: revert to on_hold failed", "task", task.ID, "error", err)
 		}
 		if task.IssueURL != "" {
-			if err := s.gitClient.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "On Hold"); err != nil {
+			if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "On Hold"); err != nil {
 				slog.WarnContext(ctx, "dispatchOne: move board item to On Hold", "task", task.ID, "error", err)
 			}
 		}
@@ -354,9 +386,9 @@ func (s *dispatchService) dispatchOne(
 	// the org row is missing or inactive; we surface that as a structured
 	// failure rather than markFailed so the console can offer "configure
 	// key" instead of "retry". See docs/design/anthropic-key-dual-token.md §6.2.
-	anthropicRes, err := s.gitClient.ApplyAnthropicWPSecret(ctx, task.OrgID)
+	anthropicRes, err := s.anthropicSvc.ApplyWPSecret(ctx, task.OrgID)
 	if err != nil {
-		if errors.Is(err, gitservice.ErrAnthropicKeyRequired) {
+		if errors.Is(err, ErrAnthropicKeyRequired) {
 			s.markFailed(ctx, task, "anthropic_key_required: configure an Anthropic API key in org settings before dispatching the remote coding agent")
 			res = failResult(res, task.ErrorMessage)
 			res.Error = "anthropic_key_required"
@@ -366,21 +398,36 @@ func (s *dispatchService) dispatchOne(
 		return failResult(res, task.ErrorMessage)
 	}
 
-	runName, err := s.wfRunService.TriggerCodingAgent(ctx, CodingAgentTrigger{
-		Task:               task,
-		RepoURL:            repoInfo.RepoURL,
-		IdentityName:       identity.Name,
-		IdentityEmail:      identity.Email,
-		IdentityLogin:      identity.Login,
-		Prompt:             prompt,
-		Bearer:             bearer,
-		GitServiceURL:      s.gitServiceURL,
-		PlatformURL:        s.platformURL,
-		AnthropicSecretRef: anthropicRes.SecretRefName,
-	})
+	// WS2.3 — new dispatch path. When the proxy-based dispatcher is
+	// wired AND the per-org SM-API triplets are populated, dispatch
+	// goes through cluster-gateway-proxy (NS + SA + ExternalSecret×2
+	// + Job) instead of the legacy ClusterWorkflow path. Fall back to
+	// the legacy `wfRunService.TriggerCodingAgent` when the proxy
+	// path's prerequisites aren't satisfied — keeps mixed dev
+	// environments working until WS2.6 cuts over fully.
+	var runName string
+	used, runName, err := s.tryDispatchViaProxy(ctx, task, repoInfo.RepoURL, prompt, identity, bearer)
 	if err != nil {
-		s.markFailed(ctx, task, fmt.Sprintf("trigger coding-agent: %v", err))
+		s.markFailed(ctx, task, fmt.Sprintf("dispatch via proxy: %v", err))
 		return failResult(res, task.ErrorMessage)
+	}
+	if !used {
+		runName, err = s.wfRunService.TriggerCodingAgent(ctx, CodingAgentTrigger{
+			Task:               task,
+			RepoURL:            repoInfo.RepoURL,
+			IdentityName:       identity.Name,
+			IdentityEmail:      identity.Email,
+			IdentityLogin:      identity.Login,
+			Prompt:             prompt,
+			Bearer:             bearer,
+			GitServiceURL:      s.gitServiceURL,
+			PlatformURL:        s.platformURL,
+			AnthropicSecretRef: anthropicRes.SecretRefName,
+		})
+		if err != nil {
+			s.markFailed(ctx, task, fmt.Sprintf("trigger coding-agent: %v", err))
+			return failResult(res, task.ErrorMessage)
+		}
 	}
 
 	now := time.Now()
@@ -395,7 +442,7 @@ func (s *dispatchService) dispatchOne(
 	// Move the GitHub Project board item to "In Progress" so the console
 	// kanban reflects dispatch state immediately (GitHub does not do this
 	// automatically on WorkflowRun creation).
-	if err := s.gitClient.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "In Progress"); err != nil {
+	if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "In Progress"); err != nil {
 		slog.WarnContext(ctx, "failed to move board item to In Progress",
 			"task", task.ID, "error", err)
 	}
@@ -406,6 +453,229 @@ func (s *dispatchService) dispatchOne(
 	res.RunName = runName
 	res.Status = "running"
 	return res
+}
+
+// tryDispatchViaProxy is WS2.3's proxy-based dispatch attempt. Returns
+// (used=true, runName, nil) when dispatch succeeded; (used=false, "", nil)
+// when prerequisites aren't met so the caller falls back to the legacy
+// ClusterWorkflow path; (used=false, "", err) on actual failure.
+//
+// Prerequisites:
+//   - codingAgentDispatcher wired (cluster-gateway-proxy client present);
+//   - db wired (for the SM-API triplet lookup);
+//   - runnerImage + clusterSecretStore configured;
+//   - the org's anthropic + github credential rows carry the SM-API
+//     triplet (populated by WS2.2's Connect flow);
+//   - the BFF has an Organization row with the OrgUUID for the NS derivation.
+//
+// When any of these fail, the function returns used=false with nil
+// error and the legacy path runs — operators see a single log line per
+// dispatch noting the fallback reason.
+func (s *dispatchService) tryDispatchViaProxy(
+	ctx context.Context,
+	task *models.ComponentTask,
+	repoURL, prompt string,
+	identity *Identity,
+	bearer string,
+) (bool, string, error) {
+	if s.codingAgentDispatcher == nil || s.db == nil {
+		return false, "", nil
+	}
+	if s.runnerImage == "" || s.clusterSecretStore == "" {
+		slog.WarnContext(ctx, "proxy dispatch: missing runnerImage or clusterSecretStore — falling back to legacy path",
+			"task", task.ID)
+		return false, "", nil
+	}
+
+	// SM-API triplets — fetched in one round-trip each from the
+	// per-org credential rows. The Connect flow guarantees these are
+	// stamped together (in the same tx as the encrypted blob), so a
+	// half-populated row is not expected.
+	var (
+		anthropicRow models.OrgAnthropicCredential
+		githubRow    models.OrgCredential
+	)
+	if err := s.db.WithContext(ctx).Where("oc_org_id = ?", task.OrgID).First(&anthropicRow).Error; err != nil {
+		slog.InfoContext(ctx, "proxy dispatch: anthropic row missing; falling back",
+			"task", task.ID, "ocOrgId", task.OrgID, "error", err)
+		return false, "", nil
+	}
+	if err := s.db.WithContext(ctx).Where("oc_org_id = ?", task.OrgID).First(&githubRow).Error; err != nil {
+		slog.InfoContext(ctx, "proxy dispatch: github row missing; falling back",
+			"task", task.ID, "ocOrgId", task.OrgID, "error", err)
+		return false, "", nil
+	}
+	if anthropicRow.SMAPIKVPath == nil || githubRow.SMAPIKVPath == nil {
+		slog.InfoContext(ctx, "proxy dispatch: SM-API triplet missing on credential row(s); falling back",
+			"task", task.ID,
+			"anthropicMissing", anthropicRow.SMAPIKVPath == nil,
+			"githubMissing", githubRow.SMAPIKVPath == nil)
+		return false, "", nil
+	}
+
+	// WS2.4 — publisher cc creds. The runner authenticates to the BFF through
+	// the IdP-authed gateway with a Thunder publisher client_credentials token
+	// (a real platform-idp JWT). trait_sync only provisions that publisher on
+	// the first *protected* deploy, but the coding-agent runs for every
+	// component, so ensure it here too (idempotent get-or-create + SM-API
+	// mirror). When the IDP profile carries the SM-API triplet, the dispatcher
+	// emits a third per-run ExternalSecret materialising PUBLISHER_CLIENT_ID +
+	// PUBLISHER_CLIENT_SECRET into the runner pod.
+	var (
+		publisherSR       *codingagent.SecretRef
+		publisherTokenURL string
+	)
+	if s.idp != nil {
+		if _, _, _, perr := s.idp.EnsureOrgPublisher(ctx, task.OrgID, "dispatch"); perr != nil {
+			slog.WarnContext(ctx, "proxy dispatch: EnsureOrgPublisher failed; publisher cc may be unavailable",
+				"task", task.ID, "org", task.OrgID, "error", perr)
+		}
+	}
+	var idpRow models.OrganizationIDPProfile
+	if err := s.db.WithContext(ctx).Where("org_id = ?", task.OrgID).First(&idpRow).Error; err == nil {
+		if idpRow.SMAPIKVPath != nil && idpRow.SMAPISecretRefName != nil {
+			publisherSR = &codingagent.SecretRef{
+				SecretRefName: derefStr(idpRow.SMAPISecretRefName),
+				KVPath:        derefStr(idpRow.SMAPIKVPath),
+				Property:      derefStr(idpRow.SMAPIProperty),
+			}
+			publisherTokenURL = deriveTokenURLFromJWKS(idpRow.JWKSURL)
+			if publisherTokenURL == "" {
+				slog.WarnContext(ctx, "proxy dispatch: publisher creds present but JWKS URL malformed; falling back to bearer only",
+					"task", task.ID, "jwksURL", idpRow.JWKSURL)
+				publisherSR = nil
+			}
+		}
+	}
+
+	// In cloud the runner reaches the BFF through the IdP-authed gateway, so a
+	// per-task RS256 JWT is rejected there (401) — the publisher cc is
+	// mandatory. Fail the dispatch loudly rather than launch a runner that
+	// cannot authenticate (which would surface as an opaque
+	// "git-service returned 401" deep in the runner). Local k3d (http platform
+	// URL, no gateway) keeps using the per-task bearer fallback.
+	if publisherSR != nil {
+		slog.InfoContext(ctx, "proxy dispatch: publisher cc path active",
+			"task", task.ID, "org", task.OrgID)
+	} else if isGatewayPlatformURL(s.platformURL) {
+		return false, "", fmt.Errorf("publisher cc not provisioned for org %q: the coding-agent runner cannot authenticate to the BFF through the gateway (a per-task JWT is rejected). Ensure Thunder + SM-API are healthy so the publisher can be provisioned and mirrored", task.OrgID)
+	}
+
+	// OrgUUID lookup. The BFF Organization row carries the UUID the
+	// NS derivation needs (`wc-<orgUUID8>-<orgHash8>-remote-worker`).
+	orgUUID, err := s.lookupOrgUUID(ctx, task.OrgID)
+	if err != nil {
+		slog.InfoContext(ctx, "proxy dispatch: org UUID not found; falling back",
+			"task", task.ID, "ocOrgId", task.OrgID, "error", err)
+		return false, "", nil
+	}
+
+	runName := codingAgentRunName(task)
+	job := codingagent.JobInputs{
+		RunName:       runName,
+		TaskID:        task.ID,
+		OrgID:         task.OrgID,
+		ProjectID:     task.ProjectID,
+		ComponentName: task.ComponentName,
+		RunnerImage:   s.runnerImage,
+		RepoURL:       repoURL,
+		Prompt:        prompt,
+		IdentityName:  identity.Name,
+		IdentityEmail: identity.Email,
+		IdentityLogin: identity.Login,
+		GitServiceURL: s.gitServiceURL,
+		CallbackURL:   s.platformURL,
+		// `ASDLC_BEARER` keeps the legacy per-task RS256 JWT path alive
+		// on the new dispatcher. The runner's `oneshot.ts` validates
+		// the env var at startup and uses it for /credentials/refresh
+		// callbacks. WS2.4 adds the publisher cc path alongside —
+		// PublisherSR (below) populates a 3rd per-run ExternalSecret;
+		// the TS runner prefers cc when PUBLISHER_CLIENT_ID is present
+		// and falls back to Bearer otherwise. Drop Bearer here once
+		// the TS runner is fully migrated.
+		Bearer:            bearer,
+		PublisherTokenURL: publisherTokenURL,
+	}
+
+	rn, err := s.codingAgentDispatcher.Dispatch(ctx, codingagent.Inputs{
+		OrgUUID:                orgUUID,
+		Job:                    job,
+		AnthropicSR:            codingagent.SecretRef{SecretRefName: derefStr(anthropicRow.SMAPISecretRefName), KVPath: derefStr(anthropicRow.SMAPIKVPath), Property: derefStr(anthropicRow.SMAPIProperty)},
+		GitHubSR:               codingagent.SecretRef{SecretRefName: derefStr(githubRow.SMAPISecretRefName), KVPath: derefStr(githubRow.SMAPIKVPath), Property: derefStr(githubRow.SMAPIProperty)},
+		PublisherSR:            publisherSR,
+		ClusterSecretStoreName: s.clusterSecretStore,
+	})
+	if err != nil {
+		return false, "", err
+	}
+	return true, rn, nil
+}
+
+func (s *dispatchService) lookupOrgUUID(ctx context.Context, ocOrgID string) (string, error) {
+	var org models.Organization
+	if err := s.db.WithContext(ctx).Where("name = ?", ocOrgID).First(&org).Error; err != nil {
+		return "", err
+	}
+	// Prefer the Thunder-issued ouId persisted on `thunder_org_uuid`
+	// (the authoritative UUID that SM-API also derives NS from).
+	// Fall back to the local PK `uuid` only when the row predates the
+	// orgensure lazy-fill — in that case the NS will mismatch and the
+	// proxy path will silently fail, but we let it through so legacy
+	// callers don't lose dispatch capability mid-rollout.
+	if org.ThunderOrgUUID != nil && *org.ThunderOrgUUID != uuid.Nil {
+		return org.ThunderOrgUUID.String(), nil
+	}
+	if org.UUID == uuid.Nil {
+		return "", fmt.Errorf("organization %s has no UUID", ocOrgID)
+	}
+	slog.WarnContext(ctx, "dispatch: thunder_org_uuid missing on org row; falling back to local PK (NS derivation will likely mismatch SM-API)",
+		"name", ocOrgID, "uuid", org.UUID.String())
+	return org.UUID.String(), nil
+}
+
+// codingAgentRunName derives a deterministic run name from the task ID
+// + a UTC minute bucket. Same task dispatched twice in the same minute
+// reuses the run name (the Job is immutable so ApplyJob does a
+// DELETE+POST, restarting the agent). Bucket is intentionally coarse
+// so retries within a minute are idempotent.
+func codingAgentRunName(task *models.ComponentTask) string {
+	min := time.Now().UTC().Format("0601021504")
+	shortID := task.ID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	name := fmt.Sprintf("ca-%s-%s", shortID, min)
+	if len(name) > 63 {
+		name = name[:63]
+	}
+	return name
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// isGatewayPlatformURL reports whether the runner reaches the BFF through the
+// IdP-authed cloud gateway (https) rather than an internal http URL (local
+// k3d). On the gateway path a per-task JWT is rejected, so the publisher cc is
+// required; off it (http) the bearer fallback still works.
+func isGatewayPlatformURL(u string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(u)), "https://")
+}
+
+// deriveTokenURLFromJWKS swaps the trailing `/oauth2/jwks` path on the
+// org's JWKS URL for `/oauth2/token`. The two endpoints live on the same
+// Thunder host so this is safe; returns "" on shapes we don't recognise
+// (caller skips the publisher path in that case).
+func deriveTokenURLFromJWKS(jwksURL string) string {
+	const suffix = "/oauth2/jwks"
+	if !strings.HasSuffix(jwksURL, suffix) {
+		return ""
+	}
+	return jwksURL[:len(jwksURL)-len(suffix)] + "/oauth2/token"
 }
 
 func failResult(r DispatchResult, msg string) DispatchResult {
@@ -423,7 +693,7 @@ func (s *dispatchService) markFailed(ctx context.Context, task *models.Component
 	slog.ErrorContext(ctx, "dispatch step failed", "task", task.ID, "error", msg)
 	// Sync the GitHub project board item so it surfaces in the Failed column.
 	if task.IssueURL != "" {
-		if err := s.gitClient.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "Failed"); err != nil {
+		if err := s.repoBoardSvc.MoveIssueToStatus(ctx, task.ProjectID, task.IssueURL, "Failed"); err != nil {
 			slog.WarnContext(ctx, "markFailed: move board item to Failed", "task", task.ID, "error", err)
 		}
 	}
@@ -491,7 +761,7 @@ func (s *dispatchService) RetryTask(ctx context.Context, taskID string) (Dispatc
 	// Re-dispatch — mirrors the DispatchTasks dispatchOne path. We don't
 	// reuse DispatchTasks because that batches across the project and
 	// would skip our just-cleared task (it's in_progress, not pending).
-	repoInfo, err := s.gitClient.GetRepo(ctx, task.OrgID, task.ProjectID)
+	repoInfo, err := s.repoSvc.GetRepo(ctx, task.ProjectID)
 	if err != nil {
 		return DispatchResult{}, fmt.Errorf("retry: get repo: %w", err)
 	}
@@ -501,7 +771,7 @@ func (s *dispatchService) RetryTask(ctx context.Context, taskID string) (Dispatc
 	if repoInfo.DefaultBranch == "" {
 		repoInfo.DefaultBranch = "main"
 	}
-	identity, err := s.gitClient.GetCredentialIdentity(ctx, task.OrgID)
+	identity, err := s.credSvc.IdentityFor(ctx, task.OrgID)
 	if err != nil {
 		return DispatchResult{}, fmt.Errorf("retry: get identity: %w", err)
 	}
@@ -512,147 +782,6 @@ func (s *dispatchService) RetryTask(ctx context.Context, taskID string) (Dispatc
 	slog.InfoContext(ctx, "task retried after verification_failed",
 		"task", taskID, "status", res.Status)
 	return res, nil
-}
-
-// AnnounceDependencyDeployed posts a `## Dependency endpoint resolved`
-// comment on every dependent task's issue. The comment trail on the issue
-// is the single source of truth for upstream URLs — both cluster-flow
-// agents (which would otherwise have to receive the URL inside a runtime
-// prompt block) and local-flow agents (which only ever see the issue) read
-// from the same place. The agent's skill instructs it to pick the most
-// recent matching comment per upstream component, so a redeploy with a
-// changed URL is self-healing on the next retry.
-//
-// Best-effort: never returns an error. Per-task failures (issue gone, git
-// service unreachable, etc.) are logged and the loop continues; the
-// deploy transition that triggered this call has already committed.
-func (s *dispatchService) AnnounceDependencyDeployed(ctx context.Context, orgID, projectID, deployedComponent string) {
-	if s.componentSvc == nil || s.gitClient == nil || s.taskRepo == nil {
-		return
-	}
-	if s.tokenInject != nil {
-		ctx = s.tokenInject(ctx)
-	}
-
-	url := s.resolveExternalURL(ctx, orgID, projectID, deployedComponent)
-	if url == "" {
-		// Don't bail loudly — the same condition is enforced at dispatch
-		// time by resolveDependencyEndpoints, where it becomes a §1.3
-		// invariant error. Here, with no consumer to fail, just log.
-		slog.WarnContext(ctx, "announce dep deployed: no external URL",
-			"project", projectID, "deployedComponent", deployedComponent)
-		return
-	}
-
-	tasks, err := s.taskRepo.ListByProjectID(ctx, orgID, projectID)
-	if err != nil {
-		slog.WarnContext(ctx, "announce dep deployed: list tasks failed",
-			"project", projectID, "error", err)
-		return
-	}
-
-	body := buildDepEndpointComment(deployedComponent, url)
-	posted := 0
-	for i := range tasks {
-		dependent := &tasks[i]
-		if !shouldAnnounceTo(dependent, deployedComponent) {
-			continue
-		}
-		if err := s.gitClient.CommentIssue(ctx, orgID, projectID, dependent.IssueNumber, body); err != nil {
-			slog.WarnContext(ctx, "announce dep deployed: comment failed",
-				"project", projectID,
-				"deployedComponent", deployedComponent,
-				"dependent", dependent.ID,
-				"issue", dependent.IssueNumber,
-				"error", err,
-			)
-			continue
-		}
-		posted++
-	}
-	slog.InfoContext(ctx, "announced dep deployed",
-		"project", projectID,
-		"deployedComponent", deployedComponent,
-		"url", url,
-		"dependentsCommented", posted,
-	)
-}
-
-// RegisterUserAppRedirectURI is the cascade-time hook that registers a
-// just-deployed OIDC-SPA web-app's external URL on the user-apps OAuth
-// client in Thunder (the redirect_uris set the SPA's /oauth2/authorize
-// call is checked against). Without this, browser sign-in fails with
-// "Invalid redirect URI" on the first load of the new webapp.
-//
-// Idempotent on each URI (re-running on an unchanged design is free).
-// Best-effort: never returns an error; failures log + skip.
-func (s *dispatchService) RegisterUserAppRedirectURI(ctx context.Context, orgID, projectID, componentName string) {
-	if s == nil || s.componentSvc == nil || s.store == nil || s.gitClient == nil {
-		return
-	}
-	if s.thunderAdmin == nil {
-		slog.DebugContext(ctx, "registerUserAppRedirect: thunder admin client not configured; skipping",
-			"project", projectID, "component", componentName)
-		return
-	}
-	if s.userAppsOIDC.ClientID == "" {
-		slog.DebugContext(ctx, "registerUserAppRedirect: USER_APPS_OIDC_CLIENT_ID not configured; skipping",
-			"project", projectID, "component", componentName)
-		return
-	}
-	if s.tokenInject != nil {
-		ctx = s.tokenInject(ctx)
-	}
-	design, err := s.store.ReadDesign(ctx, orgID, projectID)
-	if err != nil || design == nil {
-		slog.WarnContext(ctx, "registerUserAppRedirect: read design failed",
-			"project", projectID, "component", componentName, "error", err)
-		return
-	}
-	var comp *models.DesignComponent
-	for i := range design.Components {
-		if design.Components[i].Name == componentName {
-			comp = &design.Components[i]
-			break
-		}
-	}
-	if comp == nil || comp.ComponentType != "web-app" {
-		return
-	}
-	if comp.Auth == nil || comp.Auth.Kind != "oidc-spa" {
-		return
-	}
-	url := s.resolveExternalURL(ctx, orgID, projectID, componentName)
-	if url == "" {
-		slog.WarnContext(ctx, "registerUserAppRedirect: no external URL for webapp; skipping",
-			"project", projectID, "component", componentName)
-		return
-	}
-	// Append both the origin and origin/callback. Different SPA stacks
-	// pick different conventions (Asgardeo SDK uses the origin; the
-	// canonical SKILL recipe in this repo uses origin/callback) — we
-	// add both to be safe. EnsureRedirectURIs dedupes existing entries.
-	// Strip a trailing slash from the origin first — firstExternalURL
-	// often returns `http://host:port/` and naive concat yields
-	// `http://host:port//callback`, which Thunder treats as a distinct
-	// (non-matching) URI from the SPA's `${origin}/callback`.
-	origin := strings.TrimRight(url, "/")
-	uris := []string{origin, origin + "/callback"}
-	added, err := s.thunderAdmin.EnsureRedirectURIs(ctx, s.userAppsOIDC.ClientID, uris)
-	if err != nil {
-		slog.WarnContext(ctx, "registerUserAppRedirect: thunder update failed",
-			"project", projectID, "component", componentName,
-			"clientId", s.userAppsOIDC.ClientID, "error", err)
-		return
-	}
-	if added {
-		slog.InfoContext(ctx, "registerUserAppRedirect: redirect URIs registered",
-			"project", projectID, "component", componentName,
-			"clientId", s.userAppsOIDC.ClientID, "uris", uris)
-	} else {
-		slog.DebugContext(ctx, "registerUserAppRedirect: redirect URIs already present (no-op)",
-			"project", projectID, "component", componentName, "uris", uris)
-	}
 }
 
 // resolveExternalURL resolves a single component's first external URL, or
@@ -670,54 +799,12 @@ func (s *dispatchService) resolveExternalURL(ctx context.Context, orgID, project
 	return firstExternalURL(list)
 }
 
-// shouldAnnounceTo returns true when the dependent task lists
-// deployedComponent as one of its deps and is still in a state where the
-// comment is useful — i.e. the agent hasn't yet started its PR's
-// verification step. Once the task is past in_progress, its build is
-// underway / done and a new dep URL no longer affects the artifact.
-func shouldAnnounceTo(dependent *models.ComponentTask, deployedComponent string) bool {
-	if dependent == nil || dependent.IssueNumber == 0 {
-		return false
-	}
-	switch models.TaskStatus(dependent.Status) {
-	case models.TaskStatusPending,
-		models.TaskStatusOnHold,
-		models.TaskStatusInProgress:
-		// ok — agent hasn't yet opened a non-draft PR
-	default:
-		return false
-	}
-	for _, dep := range dependent.DependsOnComponents {
-		if dep == deployedComponent {
-			return true
-		}
-	}
-	return false
-}
-
-// buildDepEndpointComment renders the markdown for a single dep-resolved
-// comment. The format is structured enough for the asdlc skill to
-// scan-and-reduce comments to "latest URL per upstream component", while
-// still readable for a human browsing the issue.
-func buildDepEndpointComment(component, url string) string {
-	return fmt.Sprintf(
-		"## Dependency endpoint resolved\n"+
-			"\n"+
-			"- **%s**: %s\n"+
-			"\n"+
-			"Posted by the platform when `%s` reached `deployed`. Bake this URL "+
-			"into your component as a build-time constant (Vite/React: "+
-			"`VITE_<UPSTREAM>_URL`; other stacks: the idiomatic equivalent). "+
-			"If a later comment resolves the same component, use the most recent.",
-		component, url, component,
-	)
-}
-
-// DependencyEndpoint is one row in the legacy dep-prompt block. Kept for
-// resolveDependencyEndpoints' return shape — used at dispatch time as a
-// §1.3 invariant guard ("every dep this task lists has a non-empty
-// external URL"). The actual URL handoff to the agent now goes through
-// AnnounceDependencyDeployed → GitHub issue comments, not the prompt.
+// DependencyEndpoint is one row used by resolveDependencyEndpoints — the
+// dispatch-time §1.3 invariant guard ("every dep this task lists has a
+// non-empty external URL"). The URL handoff to the SPA now flows through
+// ReleaseBinding `env-config.js` (BFF emits per-env values into
+// workloadOverrides.container.files), not through GitHub issue comments
+// or the prompt.
 type DependencyEndpoint struct {
 	Component string
 	URL       string
@@ -726,16 +813,9 @@ type DependencyEndpoint struct {
 // buildAgentPrompt returns the user prompt given to the Claude agent. The
 // full task context lives in the GitHub issue body
 // (services/issue_body.go); the prompt only points the agent at the issue
-// and reminds it how to link the PR back. Dependency endpoint URLs come
-// through `## Dependency endpoint resolved` comments on the issue, posted
-// by AnnounceDependencyDeployed when each upstream lands `deployed` —
-// not through this prompt. Keeping the prompt thin means the cluster
-// flow (this prompt) and the local flow (no prompt; user types something
-// like "work on issue #N") read URLs from the same place.
-//
-// The asdlc skill loaded in the runner image carries the rest of the
-// workflow (read the issue + its comments, harvest dep URLs, bake them
-// in, verify before PR, recovery).
+// and reminds it how to link the PR back. Dependency URLs reach the SPA
+// at runtime via `window._env_` (written into `env-config.js` by the BFF
+// at ReleaseBinding time) — not through prompts or issue comments.
 func buildAgentPrompt(task *models.ComponentTask) string {
 	return fmt.Sprintf(
 		"Work on this GitHub issue: %s\n\n"+
@@ -761,8 +841,8 @@ func (s *dispatchService) resolveDependencyEndpoints(
 	if len(task.DependsOnComponents) == 0 || s.componentSvc == nil {
 		return nil, nil
 	}
-	if s.tokenInject != nil {
-		ctx = s.tokenInject(ctx)
+	if s.asServiceIdentity != nil {
+		ctx = s.asServiceIdentity(ctx)
 	}
 	out := make([]DependencyEndpoint, 0, len(task.DependsOnComponents))
 	for _, depComponent := range task.DependsOnComponents {
@@ -807,12 +887,14 @@ func firstExternalURL(list *models.DeploymentList) string {
 func (s *dispatchService) ensureOCComponent(
 	ctx context.Context,
 	task *models.ComponentTask,
-	repoInfo *gitservice.RepoInfo,
+	repoInfo *models.GitRepository,
 ) error {
-	if s.tokenInject != nil {
-		ctx = s.tokenInject(ctx)
+	if s.asServiceIdentity != nil {
+		ctx = s.asServiceIdentity(ctx)
 	}
 	componentName := toK8sName(task.ComponentName)
+	slog.InfoContext(ctx, "ensureOCComponent: creating OC component via service identity",
+		"task", task.ID, "org", task.OrgID, "project", task.ProjectID, "component", componentName)
 
 	comp, err := resolveDesignComponentVia(ctx, s.store, task)
 	if err != nil {
@@ -855,21 +937,12 @@ func (s *dispatchService) ensureOCComponent(
 	// ReleaseBindings don't exist yet — OC creates them after autoDeploy
 	// observes the build's Workload — so the next config save (or the
 	// caller's post-dispatch reconcile) is what lands env vars into them.
-	// Phase 2 — derive the `api-configuration` trait from design.md's
-	// optional `api.security` block. nil/none ⇒ no trait, no AP hop;
+	// Derive the `api-configuration` trait from design.md's optional
+	// `exposesAPI.auth` block. nil/none ⇒ no trait, no AP hop;
 	// `required` ⇒ trait attached with cors+jwtAuth enabled in every env.
 	// See services/trait_sync.go for the canonical emitter.
-	//
-	// Gated on FEATURE_EMIT_API_TRAIT — when off, both `apiSecurityEnabled`
-	// and `traits` stay zero-valued so the resulting Component is
-	// bit-identical to the pre-Phase-2 baseline (covered by
-	// tests/api/baseline_diff_test.go).
-	var apiSecurityEnabled bool
-	var traits []models.ComponentTrait
-	if s.traitSync != nil && s.traitSync.Enabled() {
-		apiSecurityEnabled = ResolveAPISecurityEnabled(*comp)
-		traits, _ = DesiredAPIConfigurationTrait(componentName, apiSecurityEnabled)
-	}
+	apiSecurityEnabled := ResolveAPISecurityEnabled(*comp)
+	traits, _ := DesiredAPIConfigurationTrait(componentName, apiSecurityEnabled)
 
 	_, err = s.componentSvc.CreateComponent(ctx, task.OrgID, task.ProjectID, &models.CreateComponentRequest{
 		Name:        componentName,
@@ -916,97 +989,20 @@ func (s *dispatchService) ensureOCComponent(
 		}
 	}
 
-	// Best-effort: post the `## OIDC client provisioned` comment on the
-	// issue for web-apps whose design has auth.kind=oidc-spa. The coding
-	// agent reads this comment (per the asdlc SKILL's OIDC-SPA section)
-	// and bakes the values into the SPA's workload.yaml env block.
-	s.announceOIDCConfigIfApplicable(ctx, task, comp)
+	// Web-apps only: emit env-config.js into each ReleaseBinding so the
+	// SPA's `window._env_` is populated at request time. Idempotent — the
+	// OC client soft no-ops when no RBs exist yet; the cascade re-fires
+	// after the first deploy lands a binding.
+	if comp.ComponentType == "web-app" && s.runtimeConfig != nil {
+		if rcErr := s.runtimeConfig.EmitForComponent(ctx, task.OrgID, task.ProjectID, componentName); rcErr != nil {
+			slog.WarnContext(ctx, "ensureOCComponent: runtime_config best-effort failed",
+				"orgID", task.OrgID,
+				"projectID", task.ProjectID,
+				"componentName", componentName,
+				"error", rcErr,
+			)
+		}
+	}
 
 	return nil
-}
-
-// announceOIDCConfigIfApplicable posts a `## OIDC client provisioned`
-// comment on the task's issue when (a) the component is a web-app, (b)
-// its design has auth.kind = "oidc-spa", and (c) the BFF has
-// USER_APPS_OIDC_CLIENT_ID configured. Idempotency: re-running dispatch
-// re-posts the comment; the agent uses the most recent matching comment,
-// so duplicates are harmless. Best-effort — failures log and don't bubble.
-func (s *dispatchService) announceOIDCConfigIfApplicable(ctx context.Context, task *models.ComponentTask, comp *models.DesignComponent) {
-	if comp == nil || comp.ComponentType != "web-app" {
-		return
-	}
-	if comp.Auth == nil || comp.Auth.Kind != "oidc-spa" {
-		return
-	}
-	if s.userAppsOIDC.ClientID == "" {
-		slog.WarnContext(ctx, "announceOIDC: USER_APPS_OIDC_CLIENT_ID not configured; skipping comment",
-			"task", task.ID, "component", task.ComponentName)
-		return
-	}
-	if task.IssueNumber == 0 {
-		return
-	}
-	body := buildOIDCCommentBody(s.userAppsOIDC)
-	if err := s.gitClient.CommentIssue(ctx, task.OrgID, task.ProjectID, task.IssueNumber, body); err != nil {
-		slog.WarnContext(ctx, "announceOIDC: comment failed",
-			"task", task.ID, "component", task.ComponentName, "error", err)
-		return
-	}
-	slog.InfoContext(ctx, "announceOIDC: comment posted",
-		"task", task.ID, "component", task.ComponentName,
-		"clientId", s.userAppsOIDC.ClientID, "issuer", s.userAppsOIDC.Issuer,
-	)
-}
-
-// buildOIDCCommentBody renders the markdown for a `## OIDC client
-// provisioned` comment. The format mirrors `## Dependency endpoint
-// resolved` so the asdlc SKILL can scan-and-reduce both comment kinds
-// the same way. Kept structured enough for the agent to parse
-// confidently while staying readable for a human reviewer.
-//
-// `host` is derived from the Issuer URL (hostname:port stripped of scheme).
-// It is needed by the SPA's nginx `/oidc/` same-origin proxy block, which
-// sets `proxy_set_header Host ${OIDC_HOST}` so Thunder sees its own
-// canonical hostname (kgateway routes by Host header).
-func buildOIDCCommentBody(cfg UserAppsOIDC) string {
-	host := cfg.Issuer
-	if u, err := url.Parse(cfg.Issuer); err == nil && u.Host != "" {
-		host = u.Host
-	}
-	return fmt.Sprintf(
-		"## OIDC client provisioned\n"+
-			"\n"+
-			"- **issuer**: %s\n"+
-			"- **clientId**: %s\n"+
-			"- **scopes**: %s\n"+
-			"- **host**: %s\n"+
-			"- **internalProxyPass**: %s\n"+
-			"\n"+
-			"Bake the first four values into `<appPath>/.env` BEFORE "+
-			"`npm run build` as `VITE_OIDC_ISSUER`, "+
-			"`VITE_OIDC_CLIENT_ID`, `VITE_OIDC_SCOPES`, "+
-			"`VITE_OIDC_HOST` (or the framework's equivalent "+
-			"prefix — CRA `REACT_APP_*`, Next `NEXT_PUBLIC_*`). "+
-			"Add `VITE_API_BASE_URL` from the upstream's "+
-			"`## Dependency endpoint resolved` comment. Read them "+
-			"via `import.meta.env.VITE_*` and throw at module "+
-			"top-level on missing — no silent `?? ''` fallback. "+
-			"ALSO write the `internalProxyPass` value above as the "+
-			"literal `proxy_pass` target in `nginx/default.conf` for "+
-			"the same-origin `/oidc/` proxy (it routes `/oidc/token` "+
-			"to Thunder's `/oauth2/token`, bypassing a kgateway "+
-			"CORS bug). The `internalProxyPass` is an in-cluster "+
-			"Service FQDN — the public `issuer` hostname does NOT "+
-			"resolve from inside a pod, so DO NOT use `${issuer}/oauth2/` "+
-			"as the `proxy_pass` target (nginx will fail to start with "+
-			"\"host not found in upstream\"). The redirect URI is "+
-			"`window.location.origin + '/callback'`. DO NOT use "+
-			"`workload.yaml` `configurations.env`, nginx "+
-			"envsubst, `/etc/nginx/templates/`, `/env-config.js`, "+
-			"or `window.__ENV__` — those runtime mechanisms are "+
-			"deprecated. See the `asdlc` SKILL's OIDC-SPA section "+
-			"for the reference `.env`, `nginx/default.conf`, and "+
-			"`src/auth.ts`.",
-		cfg.Issuer, cfg.ClientID, cfg.Scopes, host, cfg.InternalProxyPass,
-	)
 }

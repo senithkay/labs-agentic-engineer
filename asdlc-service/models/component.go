@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package models
 
 // -- Component ---------------------------------------------------------------
@@ -58,6 +74,19 @@ type WorkflowSecretKeyRef struct {
 	Key  string `json:"key"`
 }
 
+// WorkflowFileVar is the BFF-internal shape for a literal file injected
+// onto a ReleaseBinding's `spec.workloadOverrides.container.files`. OC's
+// controller materialises it as a ConfigMap mounted at the declared
+// mountPath, so the pod sees the file without any rebuild. Used by the
+// runtime-config pipeline to write `env-config.js` into the SPA pod's
+// `/usr/share/nginx/html/` directory (stock nginx serves it as plain
+// static).
+type WorkflowFileVar struct {
+	Key       string `json:"key"`
+	MountPath string `json:"mountPath"`
+	Value     string `json:"value"`
+}
+
 type ComponentWorkflowParameters struct {
 	Repository *WorkflowRepository `json:"repository,omitempty"`
 	Docker     *DockerParameters   `json:"docker,omitempty"`
@@ -79,7 +108,7 @@ type CreateComponentRequest struct {
 	Workflow    *ComponentWorkflowSpec `json:"workflow,omitempty"`
 	// Traits are ClusterTrait attachments emitted by the BFF based on
 	// design.md frontmatter (e.g. `api-configuration` when
-	// `api.security: required`). See services/trait_sync.go for the
+	// `exposesAPI.auth: end-user-required`). See services/trait_sync.go for the
 	// canonical emitter.
 	Traits []ComponentTrait `json:"traits,omitempty"`
 }

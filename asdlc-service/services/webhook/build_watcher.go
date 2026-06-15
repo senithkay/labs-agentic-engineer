@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package webhook
 
 import (
@@ -33,20 +49,20 @@ import (
 // same SHA up to authRetryBudget times. Budget exhaustion → terminal
 // failed with cause "build.auth_retry_exceeded".
 type BuildWatcher struct {
-	db          *gorm.DB
-	ocClient    openchoreo.ComponentClient
-	projector   *Projector
-	tokenInject func(ctx context.Context) context.Context
-	wfService   services.WorkflowRunService
-	tick        time.Duration
-	authBudget  int
+	db                *gorm.DB
+	ocClient          openchoreo.ComponentClient
+	projector         *Projector
+	asServiceIdentity func(ctx context.Context) context.Context
+	wfService         services.WorkflowRunService
+	tick              time.Duration
+	authBudget        int
 }
 
 func NewBuildWatcher(
 	db *gorm.DB,
 	ocClient openchoreo.ComponentClient,
 	projector *Projector,
-	tokenInject func(ctx context.Context) context.Context,
+	asServiceIdentity func(ctx context.Context) context.Context,
 	wfService services.WorkflowRunService,
 	authBudget int,
 ) *BuildWatcher {
@@ -54,13 +70,13 @@ func NewBuildWatcher(
 		authBudget = 3 // phase2.md §9.3
 	}
 	return &BuildWatcher{
-		db:          db,
-		ocClient:    ocClient,
-		projector:   projector,
-		tokenInject: tokenInject,
-		wfService:   wfService,
-		tick:        10 * time.Second,
-		authBudget:  authBudget,
+		db:                db,
+		ocClient:          ocClient,
+		projector:         projector,
+		asServiceIdentity: asServiceIdentity,
+		wfService:         wfService,
+		tick:              10 * time.Second,
+		authBudget:        authBudget,
 	}
 }
 
@@ -81,8 +97,8 @@ func (w *BuildWatcher) Run(ctx context.Context) {
 }
 
 func (w *BuildWatcher) sweep(ctx context.Context) {
-	if w.tokenInject != nil {
-		ctx = w.tokenInject(ctx)
+	if w.asServiceIdentity != nil {
+		ctx = w.asServiceIdentity(ctx)
 	}
 
 	// Acquire a batch of `building` tasks under FOR UPDATE SKIP LOCKED so
@@ -193,7 +209,7 @@ var authFailureMarkers = []string{
 	"fatal: Authentication failed",
 	"fatal: could not read Username",
 	"could not read password",
-	"unable to access ",       // git's HTTP 403 prefix
+	"unable to access ", // git's HTTP 403 prefix
 	"the requested URL returned error: 401",
 	"the requested URL returned error: 403",
 }

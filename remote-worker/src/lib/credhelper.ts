@@ -1,3 +1,21 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 // Templates for the workspace credential helpers.
 //
 // Two scripts live inside each task's `.asdlc/` directory:
@@ -31,9 +49,13 @@ export function credHelperScript(params: CredHelperParams): string {
   const { taskId, workspaceDir } = params;
   return `#!/usr/bin/env bash
 # Git credential helper for ASDLC platform-managed repos.
-# Reads the per-task bearer from $ASDLC_BEARER_FILE and asks
-# git-service for a fresh GitHub token. Stays silent on errors so git's
-# own error message reaches the user.
+# Two auth modes (WS2.4):
+#   (a) publisher cc — when PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL are set,
+#       mint a Thunder access token via client_credentials and call the
+#       path-scoped endpoint POST /api/v1/tasks/{taskId}/credentials/refresh.
+#   (b) legacy TaskJWT — read the per-task bearer from \$ASDLC_BEARER_FILE
+#       and call POST /api/v1/credentials/refresh.
+# Stays silent on errors so git's own error message reaches the user.
 #
 # Phase 2 PR D §6.6 anti-misroute: refuses if the refresh response's
 # taskId doesn't match this script's bound task — defends against a
@@ -49,20 +71,43 @@ set -e
 expected_task_id=${shellSingleQuote(taskId)}
 workspace_dir=${shellSingleQuote(workspaceDir)}
 
-bearer="$(cat "$ASDLC_BEARER_FILE" 2>/dev/null || true)"
-if [ -z "$bearer" ]; then
-  exit 1
-fi
 corr_header=()
 if [ -n "$ASDLC_CORRELATION_ID" ]; then
   corr_header=(-H "X-Correlation-ID: $ASDLC_CORRELATION_ID")
 fi
+
+bearer=""
+refresh_url=""
+if [ -n "$PUBLISHER_CLIENT_ID" ] && [ -n "$PUBLISHER_CLIENT_SECRET" ] && [ -n "$PUBLISHER_TOKEN_URL" ]; then
+  # WS2.4 — mint cc token via Basic auth, call path-scoped endpoint.
+  cc_resp="$(curl -fsS -X POST \\
+    -u "$PUBLISHER_CLIENT_ID:$PUBLISHER_CLIENT_SECRET" \\
+    -H "Content-Type: application/x-www-form-urlencoded" \\
+    -d 'grant_type=client_credentials' \\
+    "$PUBLISHER_TOKEN_URL" 2>/dev/null || true)"
+  if [ -n "$cc_resp" ] && command -v python3 >/dev/null 2>&1; then
+    bearer="$(printf '%s' "$cc_resp" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || true)"
+  elif [ -n "$cc_resp" ]; then
+    bearer="$(echo "$cc_resp" | sed -n 's/.*"access_token":"\\([^"]*\\)".*/\\1/p')"
+  fi
+  if [ -n "$bearer" ]; then
+    refresh_url="\${ASDLC_PLATFORM_URL:-$ASDLC_GIT_SERVICE_URL}/api/v1/tasks/$expected_task_id/credentials/refresh"
+  fi
+fi
+if [ -z "$bearer" ]; then
+  bearer="$(cat "$ASDLC_BEARER_FILE" 2>/dev/null || true)"
+  refresh_url="$ASDLC_GIT_SERVICE_URL/api/v1/credentials/refresh"
+fi
+if [ -z "$bearer" ]; then
+  exit 1
+fi
+
 resp="$(curl -fsS -X POST \\
   -H "Authorization: Bearer $bearer" \\
   -H "Content-Type: application/json" \\
   "\${corr_header[@]}" \\
   -d '{}' \\
-  "$ASDLC_GIT_SERVICE_URL/api/v1/credentials/refresh" 2>/dev/null || true)"
+  "$refresh_url" 2>/dev/null || true)"
 if [ -z "$resp" ]; then
   exit 1
 fi

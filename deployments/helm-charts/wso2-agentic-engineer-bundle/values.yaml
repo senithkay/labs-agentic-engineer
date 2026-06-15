@@ -1,0 +1,141 @@
+# ── TLS (HTTPS) ───────────────────────────────────────────────────────────────
+# Adds a self-signed wildcard certificate and patches the OC data-plane gateway
+# to add an HTTPS listener. cert-manager must be installed (it is by the OC k3d guide).
+tls:
+  enabled: true
+  # Namespace and name of the OC data-plane gateway to patch.
+  gatewayNamespace: "openchoreo-data-plane"
+  gatewayName: "gateway-default"
+  # HTTPS port — must be already mapped in k3d (19443 is mapped by the OC k3d guide).
+  gatewayPort: 19443
+  # Wildcard domain OC uses for generated component hostnames.
+  domain: "openchoreoapis.localhost"
+  # Name of the TLS secret cert-manager will create (in gatewayNamespace).
+  secretName: "openchoreoapis-tls"
+  # Image used by the gateway-patch Job. Must have kubectl.
+  patchImage: "bitnami/kubectl:latest"
+
+# ── OC control-plane gateway ──────────────────────────────────────────────────
+# ASDLC HTTPRoutes (BFF + console) are placed in this namespace so that the
+# control-plane gateway routes external traffic to the wso2-ae services.
+ocGateway:
+  namespace: "openchoreo-control-plane"
+  name: "gateway-default"
+
+# ── OC Thunder ────────────────────────────────────────────────────────────────
+# ASDLC reuses OC's existing Thunder instance (no separate AE Thunder deployed).
+# The post-install bootstrap job registers all ASDLC OAuth clients in OC Thunder.
+thunder:
+  # In-cluster admin URL of OC's Thunder instance
+  adminURL: "http://thunder-service.thunder.svc.cluster.local:8090"
+  # Admin OAuth2 client created by OC's own Helm bootstrap
+  adminClientId: "openchoreo-system-app"
+  adminClientSecret: "openchoreo-system-app-secret"
+  # Organisation unit handle (matches OC installation)
+  ouHandle: "default"
+  # Browser-facing public URL of OC Thunder
+  publicURL: "http://thunder.openchoreo.localhost:8080"
+  # ASDLC system client — registered by bootstrap job; used by BFF to provision per-org OAuth apps
+  systemClientId: "asdlc-system-client"
+  systemClientSecret: "asdlc-system-client-secret"
+  # Image for the bootstrap Job — must have sh, curl (and jq via apk or pre-baked)
+  bootstrapImage: "alpine/curl:latest"
+
+# ── BFF public URL ────────────────────────────────────────────────────────────
+# Stable, gateway-routed URL for the BFF, reachable from:
+#   - GitHub (webhook delivery)
+#   - Coding-agent pods in WorkflowPlane (ASDLC_PLATFORM_URL callback)
+# Default matches the OC control-plane gateway HTTP port in the k3d guide.
+bff:
+  publicURL: "http://asdlc-api.openchoreo.localhost:8080"
+
+# ── GitHub ────────────────────────────────────────────────────────────────────
+github:
+  appId: ""
+  # PEM-encoded GitHub App private key. Pass via: --set-file github.appPrivateKey=key.pem
+  appPrivateKeyPem: ""
+  clientId: ""
+  clientSecret: ""
+  appSlug: "asdlc-platform"
+  repoVisibility: "private"
+  committerName: "ASDLC Bot"
+  committerEmail: "bot@asdlc.dev"
+  webhookSecret: "dev-webhook-secret"
+  oauthStateKey: "dev-oauth-state-key-32-chars-long!!"
+
+# ── Anthropic ─────────────────────────────────────────────────────────────────
+anthropic:
+  # Platform fallback API key (used when no per-org key is configured)
+  apiKey: ""
+
+# ── PostgreSQL ────────────────────────────────────────────────────────────────
+# By default a PostgreSQL StatefulSet is deployed in the wso2-ae namespace.
+# Set postgres.url to use an external database instead (skips StatefulSet).
+postgres:
+  url: ""   # e.g. "postgres://user:pass@rds-host:5432/asdlc?sslmode=require"
+  image: "postgres:16-alpine"
+  auth:
+    database: asdlc
+    username: asdlc
+    # WARNING: change this for production
+    password: "asdlc-dev-password"
+  storage: "5Gi"
+
+# ── OpenBao ───────────────────────────────────────────────────────────────────
+openbao:
+  addr: "http://openbao.openbao.svc.cluster.local:8200"
+  token: "root"
+
+# ── Console ───────────────────────────────────────────────────────────────────
+console:
+  publicURL: "http://asdlc.openchoreo.localhost:8080"
+  thunder:
+    clientId: "asdlc-console-client"
+    scopes: "openid profile email"
+
+# ── OC extensions (wso2-ae-oc-extensions sub-chart) ──────────────────────────
+wso2-ae-oc-extensions:
+  authz:
+    apiClientId: "asdlc-api-client"
+    administratorsGroup: "Administrators"
+
+# ── Platform services (wso2-ae-platform sub-chart) ────────────────────────────
+wso2-ae-platform:
+  openchoreo:
+    apiBaseURL: "http://openchoreo-api.openchoreo-control-plane:8080"
+    apiGatewayHost: "api.openchoreo.localhost"
+  ocGateway:
+    namespace: "openchoreo-control-plane"
+    name: "gateway"
+  idp:
+    issuer: "http://thunder.openchoreo.localhost:8080"
+    jwksURL: "http://thunder.openchoreo.localhost:8080/oauth2/jwks"
+    jwksInternalURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
+    tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
+    adminURL: "http://thunder-service.thunder.svc.cluster.local:8090"
+  bff:
+    publicURL: "http://asdlc-api.openchoreo.localhost:8080"
+  console:
+    publicURL: "http://asdlc.openchoreo.localhost:8080"
+    thunderPublicURL: "http://thunder.openchoreo.localhost:8080"
+    thunder:
+      clientId: "asdlc-console-client"
+      scopes: "openid profile email"
+  thunderSystemClient:
+    clientId: "asdlc-system-client"
+    clientSecret: "asdlc-system-client-secret"
+  asdlcApi:
+    serviceAuth:
+      tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
+  observer:
+    url: "http://observer.openchoreo-observability-plane.svc.cluster.local:8080"
+    oauth:
+      tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
+      clientId: "openchoreo-observer-resource-reader-client"
+      clientSecret: "openchoreo-observer-resource-reader-client-secret"
+  openbao:
+    addr: "http://openbao.openbao.svc.cluster.local:8200"
+    token: "root"
+  postgres:
+    auth:
+      password: "asdlc-dev-password"

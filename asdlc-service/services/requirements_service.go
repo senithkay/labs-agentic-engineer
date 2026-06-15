@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package services
 
 import (
@@ -12,7 +28,6 @@ import (
 	"strings"
 
 	"github.com/wso2/asdlc/asdlc-service/clients/agents"
-	"github.com/wso2/asdlc/asdlc-service/clients/gitservice"
 	"github.com/wso2/asdlc/asdlc-service/models"
 )
 
@@ -42,19 +57,19 @@ type RequirementsService interface {
 type requirementsService struct {
 	store        *ArtifactStore
 	agentsClient agents.Client
-	gitClient    gitservice.Client
+	artifactSvc  ArtifactService
 	locker       *RequirementsDirLocker
 }
 
 func NewRequirementsService(
 	store *ArtifactStore,
 	agentsClient agents.Client,
-	gitClient gitservice.Client,
+	artifactSvc ArtifactService,
 ) RequirementsService {
 	return &requirementsService{
 		store:        store,
 		agentsClient: agentsClient,
-		gitClient:    gitClient,
+		artifactSvc:  artifactSvc,
 	}
 }
 
@@ -99,11 +114,11 @@ func (s *requirementsService) GetRequirements(ctx context.Context, orgID, projec
 		return out, nil
 	}
 
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return out, nil
 	}
 
-	versions, err := s.gitClient.ListRequirementsVersions(ctx, orgID, projectID)
+	versions, err := s.artifactSvc.ListRequirementsVersions(ctx, projectID)
 	if err != nil {
 		slog.WarnContext(ctx, "list requirements versions failed", "error", err)
 		return out, nil
@@ -114,7 +129,7 @@ func (s *requirementsService) GetRequirements(ctx context.Context, orgID, projec
 		out.Version = versions[0].Version
 
 		// Has-unsaved-changes: compare working tree to snapshot at latest tag.
-		tagged, err := s.gitClient.GetRequirementsAtTag(ctx, orgID, projectID, versions[0].Tag)
+		tagged, err := s.artifactSvc.GetRequirementsAtTag(ctx, projectID,versions[0].Tag)
 		if err == nil && !fileMapsEqual(tagged, files) {
 			out.HasUnsavedChanges = true
 		}
@@ -123,12 +138,12 @@ func (s *requirementsService) GetRequirements(ctx context.Context, orgID, projec
 }
 
 func (s *requirementsService) GetRequirementsAtTag(ctx context.Context, orgID, projectID, tag string) (*models.RequirementsBundle, error) {
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
-	files, err := s.gitClient.GetRequirementsAtTag(ctx, orgID, projectID, tag)
+	files, err := s.artifactSvc.GetRequirementsAtTag(ctx, projectID,tag)
 	if err != nil {
-		if errors.Is(err, gitservice.ErrArtifactNotFound) {
+		if errors.Is(err, ErrArtifactNotFound) {
 			return nil, ErrSpecNotFound
 		}
 		return nil, fmt.Errorf("get requirements at %s: %w", tag, err)
@@ -181,12 +196,12 @@ func (s *requirementsService) DeleteRequirementFile(ctx context.Context, orgID, 
 // SaveAndProceed persists the working-tree directory as a new `v<N>` tag.
 // Requires `requirements.md` to exist (enforced by git-service).
 func (s *requirementsService) SaveAndProceed(ctx context.Context, orgID, projectID string) (*models.RequirementsBundle, error) {
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
 	var bundle *models.RequirementsBundle
 	err := s.withLock(ctx, orgID, projectID, func(ctx context.Context) error {
-		res, err := s.gitClient.SaveRequirements(ctx, orgID, projectID, gitservice.SaveArtifactRequest{
+		res, err := s.artifactSvc.SaveRequirements(ctx, projectID, SaveRequest{
 			Message: "Update requirements",
 		})
 		if err != nil {
@@ -208,13 +223,13 @@ func (s *requirementsService) SaveAndProceed(ctx context.Context, orgID, project
 }
 
 func (s *requirementsService) DiscardChanges(ctx context.Context, orgID, projectID string) (*models.RequirementsBundle, error) {
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
 	var bundle *models.RequirementsBundle
 	err := s.withLock(ctx, orgID, projectID, func(ctx context.Context) error {
-		if _, err := s.gitClient.DiscardRequirements(ctx, orgID, projectID); err != nil {
-			if errors.Is(err, gitservice.ErrArtifactNotFound) {
+		if _, err := s.artifactSvc.DiscardRequirements(ctx, projectID); err != nil {
+			if errors.Is(err, ErrArtifactNotFound) {
 				return fmt.Errorf("no saved version to revert to")
 			}
 			return fmt.Errorf("discard requirements: %w", err)
@@ -233,10 +248,10 @@ func (s *requirementsService) DiscardChanges(ctx context.Context, orgID, project
 }
 
 func (s *requirementsService) ListVersions(ctx context.Context, orgID, projectID string) ([]models.ArtifactVersion, error) {
-	if s.gitClient == nil {
+	if s.artifactSvc == nil {
 		return nil, nil
 	}
-	versions, err := s.gitClient.ListRequirementsVersions(ctx, orgID, projectID)
+	versions, err := s.artifactSvc.ListRequirementsVersions(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list requirements versions: %w", err)
 	}
@@ -270,7 +285,7 @@ func (s *requirementsService) StreamGenerate(
 	for _, src := range sourceNames {
 		content, err := s.store.ReadRequirementFile(ctx, orgID, projectID, src)
 		if err != nil {
-			if errors.Is(err, gitservice.ErrArtifactNotFound) {
+			if errors.Is(err, ErrArtifactNotFound) {
 				continue
 			}
 			return fmt.Errorf("read source %q: %w", src, err)

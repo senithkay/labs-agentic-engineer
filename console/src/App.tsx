@@ -1,3 +1,21 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { Navigate, Outlet, Route, Routes, useOutletContext } from 'react-router-dom';
 import { useAuth, useUserClaims } from './auth';
@@ -22,10 +40,12 @@ import OrgGitHubSettings from './pages/OrgGitHubSettings';
 import OrgGitHubAppPicker from './pages/OrgGitHubAppPicker';
 import OrgAnthropicSettings from './pages/OrgAnthropicSettings';
 import OrgIDPSettings from './pages/OrgIDPSettings';
+import OrgSkillsSettings from './pages/OrgSkillsSettings';
 import NoOrganizationPage from './pages/NoOrganizationPage';
 import { setOrgGithubTokenAccessor } from './services/api/orgGithub';
 import { setOrgAnthropicTokenAccessor } from './services/api/orgAnthropic';
 import { setOrgIDPTokenAccessor } from './services/api/orgIDP';
+import { setOrgSkillsTokenAccessor } from './services/api/orgSkills';
 import { useBillingOrg } from './hooks/useBillingOrg';
 import { organizationOverviewPath } from './lib/paths';
 import { resolveOuHandle } from './utils/orgClaims';
@@ -60,6 +80,7 @@ export function App() {
     setOrgGithubTokenAccessor(getAccessToken);
     setOrgAnthropicTokenAccessor(getAccessToken);
     setOrgIDPTokenAccessor(getAccessToken);
+    setOrgSkillsTokenAccessor(getAccessToken);
   }, [getAccessToken]);
 
   // Triggers server-side org/subscription provisioning so downstream entitlement checks pass.
@@ -100,6 +121,7 @@ export function App() {
           <Route path="github/pick" element={<OrgGitHubAppPicker />} />
           <Route path="anthropic" element={<OrgAnthropicSettings />} />
           <Route path="idp" element={<OrgIDPSettings />} />
+          <Route path="skills" element={<OrgSkillsSettings />} />
         </Route>
 
         <Route path="/organizations/:orgId/projects/:projectId" element={<ContextForwardingOutlet />}>

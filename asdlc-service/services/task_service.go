@@ -1,3 +1,19 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package services
 
 import (
@@ -12,7 +28,6 @@ import (
 
 	"github.com/wso2/asdlc/asdlc-service/clients/agents"
 	dbclient "github.com/wso2/asdlc/asdlc-service/clients/database"
-	"github.com/wso2/asdlc/asdlc-service/clients/gitservice"
 	"github.com/wso2/asdlc/asdlc-service/clients/oauth"
 	"github.com/wso2/asdlc/asdlc-service/models"
 	"github.com/wso2/asdlc/asdlc-service/repositories"
@@ -58,9 +73,22 @@ type taskService struct {
 	componentSvc  ComponentService     // for creating OC components and checking build/deploy status
 	tokenProvider *oauth.TokenProvider // for service-to-service auth (OC API)
 	configSvc     ConfigService        // for fetching env vars at deploy time
-	gitClient     gitservice.Client    // for committing and pushing code after implementation
+	issueSvc      IssueService         // GitHub issue CRUD for task lifecycle
+	artifactSvc   ArtifactService      // artifact version + at-tag reads for in-flight tasks
+	repoSvc       RepoService          // repo metadata lookups (clone path, slug, …)
 	agentsClient  agents.Client        // for calling tech-lead agent (plan + detail)
 	dbClient      dbclient.Client      // for provisioning and testing databases
+	// skillSvc resolves the per-org skill catalogue for tech-lead plan
+	// (attached-skills context) + detail (full bodies). Snapshot writes
+	// to design_version_skill_snapshots also go through here. Optional
+	// in tests; nil → tech-lead runs with no skills attached.
+	skillSvc *SkillService
+}
+
+// SetSkillService wires the skills catalogue + snapshot writer.
+// Mirrors the SetTraitSync setter pattern.
+func (s *taskService) SetSkillService(svc *SkillService) {
+	s.skillSvc = svc
 }
 
 func NewTaskService(
@@ -70,7 +98,9 @@ func NewTaskService(
 	componentSvc ComponentService,
 	tokenProvider *oauth.TokenProvider,
 	configSvc ConfigService,
-	gitClient gitservice.Client,
+	issueSvc IssueService,
+	artifactSvc ArtifactService,
+	repoSvc RepoService,
 	agentsClient agents.Client,
 	dbClient dbclient.Client,
 ) TaskService {
@@ -81,7 +111,9 @@ func NewTaskService(
 		componentSvc:  componentSvc,
 		tokenProvider: tokenProvider,
 		configSvc:     configSvc,
-		gitClient:     gitClient,
+		issueSvc:      issueSvc,
+		artifactSvc:   artifactSvc,
+		repoSvc:       repoSvc,
 		agentsClient:  agentsClient,
 		dbClient:      dbClient,
 	}
@@ -116,7 +148,7 @@ func (s *taskService) GetTask(ctx context.Context, taskID string) (*models.Compo
 }
 
 func (s *taskService) GetTasks(ctx context.Context, orgID, projectID string) (*models.Tasks, error) {
-	if s.gitClient == nil {
+	if s.issueSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
 
@@ -134,8 +166,8 @@ func (s *taskService) GetTasks(ctx context.Context, orgID, projectID string) (*m
 
 	// Best-effort: fetch all open GitHub issues to pick up kanban labels.
 	// If this fails we still render tasks from DB.
-	issueByNum := make(map[int]gitservice.IssueInfo)
-	issues, err := s.gitClient.ListIssues(ctx, orgID, projectID, nil)
+	issueByNum := make(map[int]IssueInfo)
+	issues, err := s.issueSvc.ListIssues(ctx, projectID, nil)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to list github issues; rendering from DB only", "error", err)
 	} else {
@@ -331,15 +363,29 @@ func (s *taskService) ensureIssueForTask(
 	if task.IssueURL != "" {
 		return nil
 	}
-	if s.gitClient == nil {
+	if s.issueSvc == nil {
 		return fmt.Errorf("git client not configured")
+	}
+
+	// SNAPSHOT — freeze the project's currently-attached skills' bodies
+	// at (project_id, design_version) so the dispatched agent's
+	// workspace materialises the same content the tech-lead used. Idempotent:
+	// no-op when a snapshot already exists for the key. Best-effort —
+	// failures log but don't block issue creation, so a missing snapshot
+	// just produces an empty preload set on dispatch (same effective
+	// behaviour as today).
+	if s.skillSvc != nil && task.SourceDesignVersion != "" {
+		if err := snapshotProjectSkills(ctx, s.db, s.store, s.skillSvc, task.OrgID, task.ProjectID, task.SourceDesignVersion); err != nil {
+			slog.WarnContext(ctx, "ensureIssueForTask: skill snapshot failed — continuing",
+				"task", task.ID, "designVersion", task.SourceDesignVersion, "error", err)
+		}
 	}
 
 	// The agent owns branch + PR creation, so the issue body intentionally
 	// doesn't pre-name a branch. BranchName is filled in later by the
 	// pull_request.opened webhook handler when the agent opens its PR.
 
-	issue, err := s.gitClient.CreateIssue(ctx, task.OrgID, task.ProjectID, &gitservice.CreateIssueRequest{
+	issue, err := s.issueSvc.CreateIssue(ctx, task.ProjectID, CreateIssueRequest{
 		Title:  issueTitle(task),
 		Body:   buildIssueBody(task, comp, repoURL, repoSlug),
 		Labels: []string{"asdlc", "implementation"},
