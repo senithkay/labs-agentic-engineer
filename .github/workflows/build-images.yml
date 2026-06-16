@@ -48,7 +48,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=asdlc-api
-          cache-to: type=gha,mode=max,scope=asdlc-api
+          cache-to: type=gha,mode=max,scope=asdlc-api,ignore-error=true
 
   agents-service:
     name: agents-service
@@ -83,7 +83,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=agents-service
-          cache-to: type=gha,mode=max,scope=agents-service
+          cache-to: type=gha,mode=max,scope=agents-service,ignore-error=true
 
   asdlc-console:
     name: asdlc-console
@@ -120,4 +120,4 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=asdlc-console
-          cache-to: type=gha,mode=max,scope=asdlc-console
+          cache-to: type=gha,mode=max,scope=asdlc-console,ignore-error=true
