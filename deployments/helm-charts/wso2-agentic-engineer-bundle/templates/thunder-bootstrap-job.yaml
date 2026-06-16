@@ -16,6 +16,24 @@ data:
   thunder-bootstrap.sh: |
 {{ .Files.Get "files/thunder-bootstrap.sh" | indent 4 }}
 ---
+# Secret holding sensitive bootstrap credentials — consumed by the Job below.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wso2-ae-thunder-bootstrap-creds
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-3"
+    "helm.sh/hook-delete-policy": before-hook-creation
+type: Opaque
+stringData:
+  adminClientSecret: {{ .Values.thunder.adminClientSecret | quote }}
+  systemClientSecret: {{ .Values.thunder.systemClientSecret | quote }}
+---
 # Post-install Job: registers all ASDLC OAuth clients in OC Thunder.
 # Idempotent — safe to re-run on helm upgrade.
 apiVersion: batch/v1
@@ -59,13 +77,19 @@ spec:
             - name: THUNDER_ADMIN_CLIENT_ID
               value: {{ .Values.thunder.adminClientId | quote }}
             - name: THUNDER_ADMIN_CLIENT_SECRET
-              value: {{ .Values.thunder.adminClientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: wso2-ae-thunder-bootstrap-creds
+                  key: adminClientSecret
             - name: THUNDER_OU_HANDLE
               value: {{ .Values.thunder.ouHandle | quote }}
             - name: THUNDER_SYSTEM_CLIENT_ID
               value: {{ .Values.thunder.systemClientId | quote }}
             - name: THUNDER_SYSTEM_CLIENT_SECRET
-              value: {{ .Values.thunder.systemClientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: wso2-ae-thunder-bootstrap-creds
+                  key: systemClientSecret
             - name: CONSOLE_PUBLIC_URL
               value: {{ index .Values "wso2-ae-platform" "console" "publicURL" | default .Values.console.publicURL | quote }}
           volumeMounts:

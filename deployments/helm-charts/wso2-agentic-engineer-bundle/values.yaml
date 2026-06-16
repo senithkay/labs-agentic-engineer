@@ -106,7 +106,7 @@ wso2-ae-platform:
     apiGatewayHost: "api.openchoreo.localhost"
   ocGateway:
     namespace: "openchoreo-control-plane"
-    name: "gateway"
+    name: "gateway-default"
   idp:
     issuer: "http://thunder.openchoreo.localhost:8080"
     jwksURL: "http://thunder.openchoreo.localhost:8080/oauth2/jwks"

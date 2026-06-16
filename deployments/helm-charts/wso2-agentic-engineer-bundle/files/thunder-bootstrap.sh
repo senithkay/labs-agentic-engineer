@@ -125,8 +125,15 @@ upsert_app() {
 
 ensure_confidential() {
     local name="$1" desc="$2" cid="$3" csecret="$4"
-    upsert_app "$cid" \
-        "{\"name\":\"${name}\",\"description\":\"${desc}\",\"ou_id\":\"${OU_ID}\",\"inbound_auth_config\":[{\"type\":\"oauth2\",\"config\":{\"client_id\":\"${cid}\",\"client_secret\":\"${csecret}\",\"grant_types\":[\"client_credentials\"],\"token_endpoint_auth_method\":\"client_secret_post\",\"pkce_required\":false,\"public_client\":false,\"token\":{\"access_token\":{\"validity_period\":3600}}}}]}"
+    local payload
+    payload=$(jq -n \
+        --arg name "$name" \
+        --arg desc "$desc" \
+        --arg ou_id "$OU_ID" \
+        --arg cid "$cid" \
+        --arg csecret "$csecret" \
+        '{name:$name,description:$desc,ou_id:$ou_id,inbound_auth_config:[{type:"oauth2",config:{client_id:$cid,client_secret:$csecret,grant_types:["client_credentials"],token_endpoint_auth_method:"client_secret_post",pkce_required:false,public_client:false,token:{access_token:{validity_period:3600}}}}]}')
+    upsert_app "$cid" "$payload"
 }
 
 # ── Confidential clients (client_credentials) ────────────────────────────────
@@ -165,8 +172,13 @@ ensure_confidential \
 # ── Public PKCE client (console) ─────────────────────────────────────────────
 log "Registering console PKCE client..."
 USER_ATTRS='["given_name","family_name","username","groups","ouId","ouName","ouHandle"]'
-upsert_app "asdlc-console-client" \
-    "{\"name\":\"ASDLC Console\",\"description\":\"ASDLC Platform Console\",\"ou_id\":\"${OU_ID}\",\"auth_flow_id\":\"${AUTH_FLOW_ID}\",\"inbound_auth_config\":[{\"type\":\"oauth2\",\"config\":{\"client_id\":\"asdlc-console-client\",\"redirect_uris\":[\"${CONSOLE_URL}\"],\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"token_endpoint_auth_method\":\"none\",\"pkce_required\":true,\"public_client\":true,\"token\":{\"access_token\":{\"validity_period\":86400,\"user_attributes\":${USER_ATTRS}},\"id_token\":{\"validity_period\":86400,\"user_attributes\":${USER_ATTRS}}}}}]}"
+console_payload=$(jq -n \
+    --arg ou_id "$OU_ID" \
+    --arg auth_flow_id "$AUTH_FLOW_ID" \
+    --arg console_url "$CONSOLE_URL" \
+    --argjson user_attrs "$USER_ATTRS" \
+    '{name:"ASDLC Console",description:"ASDLC Platform Console",ou_id:$ou_id,auth_flow_id:$auth_flow_id,inbound_auth_config:[{type:"oauth2",config:{client_id:"asdlc-console-client",redirect_uris:[$console_url],grant_types:["authorization_code","refresh_token"],response_types:["code"],token_endpoint_auth_method:"none",pkce_required:true,public_client:true,token:{access_token:{validity_period:86400,user_attributes:$user_attrs},id_token:{validity_period:86400,user_attributes:$user_attrs}}}}]}')
+upsert_app "asdlc-console-client" "$console_payload"
 
 # ── Assign ASDLC system client to Administrator role ─────────────────────────
 log "Assigning ${THUNDER_SYSTEM_CLIENT_ID} to Administrator role..."
@@ -177,6 +189,9 @@ ADMIN_ROLE_ID=$(printf '%s' "$ROLE_RESP" \
     | head -1)
 
 if [ -n "$ADMIN_ROLE_ID" ] && [ "$ADMIN_ROLE_ID" != "null" ]; then
+    # Re-fetch applications so newly created apps (from this run) are visible
+    APPS=$(curl -sf --noproxy '*' -H "Authorization: Bearer $TOKEN" "${THUNDER_URL}/applications?limit=200") \
+        || { log_err "Failed to re-fetch applications list for role assignment"; exit 1; }
     # Get the application ID for the system client
     SYS_APP_ID=$(printf '%s' "$APPS" \
         | jq -r --arg cid "$THUNDER_SYSTEM_CLIENT_ID" \
@@ -191,7 +206,7 @@ if [ -n "$ADMIN_ROLE_ID" ] && [ "$ADMIN_ROLE_ID" != "null" ]; then
             "${THUNDER_URL}/role-assignments" -o /dev/null 2>/dev/null || true
         log_ok "${THUNDER_SYSTEM_CLIENT_ID} → Administrator role"
     else
-        log "  system client app ID not found in APPS (may have been created in this run); role assignment skipped — re-run helm upgrade to retry"
+        log_err "  system client app ID not found after re-fetch; role assignment skipped"
     fi
 else
     log "  Administrator role not found in Thunder; role assignment skipped"
