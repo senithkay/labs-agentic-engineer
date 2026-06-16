@@ -40,6 +40,12 @@ thunder:
   systemClientSecret: "asdlc-system-client-secret"
   # Image for the bootstrap Job — must have sh, curl (and jq via apk or pre-baked)
   bootstrapImage: "alpine/curl:latest"
+  # Kubernetes namespace where OC's Thunder is deployed
+  namespace: "thunder"
+  # Name of Thunder's main config ConfigMap (contains deployment.yaml key)
+  configMapName: "thunder-config-map"
+  # Name of Thunder's Deployment (used to trigger rolling restart after CORS patch)
+  deploymentName: "thunder-deployment"
 
 # ── BFF public URL ────────────────────────────────────────────────────────────
 # Stable, gateway-routed URL for the BFF, reachable from:
