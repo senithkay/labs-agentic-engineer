@@ -543,7 +543,13 @@ func (s *progressService) getAgentProgressNewPath(ctx context.Context, task *mod
 		LimitBytes: newPathLogPageBytes,
 	})
 	if err != nil {
-		if errors.Is(err, clustergatewayproxy.ErrNotFound) {
+		// ErrNotFound: pod GC'd / not scheduled. ErrPodNotReady: pod
+		// scheduled but container still starting (ContainerCreating /
+		// PodInitializing). Both mean "no logs yet" — return empty +
+		// non-final so the console keeps polling instead of flashing
+		// "Live progress unavailable" at task start.
+		if errors.Is(err, clustergatewayproxy.ErrNotFound) ||
+			errors.Is(err, clustergatewayproxy.ErrPodNotReady) {
 			return resp, nil
 		}
 		return nil, fmt.Errorf("tail pod log: %w", err)
@@ -656,20 +662,25 @@ func textToProgressEvents(text string, limit int, truncated *bool) []observer.Pr
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 	for scanner.Scan() {
 		ts, msg := splitTimestampPrefix(scanner.Text())
-		out = append(out, observer.ProgressEvent{
-			SchemaVersion: observer.ProgressSchemaVersion,
-			Ts:            ts,
-			// `kind: log` + `summary` matches the typed envelope the
-			// console's `summaryFor`/`iconFor` switch on (see
-			// console/src/components/tasks/TaskActivityFeed.tsx:38, 52
-			// and console/src/services/api/types.ts:260). The legacy
-			// Observer path uses the same shape (see
-			// clients/observer/schema.go:64). Using `summary` (not
-			// `message`) lets the console render without any client
-			// change.
-			Kind:    "log",
-			Summary: msg,
-		})
+		// The runner emits typed NDJSON envelopes (kind:phase/tool_use/
+		// gh_action/git_commit/…; schema at
+		// remote-worker/src/lib/progress/schema.ts). Decode each line
+		// with the SAME parser the legacy Observer path uses
+		// (parseAndSort → ParseProgressLine) so the console renders
+		// formatted rows instead of raw JSON. Genuinely non-JSON lines
+		// (e.g. "[oneshot] …" bootstrap output) fall back to kind:log
+		// with the line as `summary` inside ParseProgressLine.
+		ev := observer.ParseProgressLine(msg)
+		// Prefer the envelope's own `ts`; fall back to the K8s
+		// `timestamps=true` prefix so cursor math + ordering still work
+		// for lines that carry no embedded ts (the log fallback).
+		if ev.Ts == "" {
+			ev.Ts = ts
+		}
+		if ev.SchemaVersion == 0 {
+			ev.SchemaVersion = observer.ProgressSchemaVersion
+		}
+		out = append(out, ev)
 	}
 	if len(out) > limit {
 		// Keep the newest `limit` events so the live tail surfaces
