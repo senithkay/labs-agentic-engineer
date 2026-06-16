@@ -1,0 +1,17 @@
+apiVersion: v2
+appVersion: 0.2.0
+description: >
+  Registers WSO2 Agentic Engineer platform capabilities into OpenChoreo:
+  ClusterTrait (api-configuration), ClusterWorkflow (app-factory-coding-agent),
+  and RBAC (ClusterAuthzRoleBindings for asdlc-api-client + Administrators).
+keywords:
+  - wso2
+  - agentic-engineer
+  - openchoreo
+  - ai
+maintainers:
+  - name: WSO2
+    url: https://wso2.com
+name: wso2-ae-oc-extensions
+type: application
+version: 0.3.0

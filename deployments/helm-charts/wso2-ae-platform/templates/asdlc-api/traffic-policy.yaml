@@ -1,0 +1,20 @@
+---
+# TrafficPolicy disables the default request timeout and sets a generous stream-idle
+# timeout so SSE (Server-Sent Events) streaming responses from the BFF are not
+# dropped mid-stream by the kgateway (Envoy) proxy.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: asdlc-api-sse-timeout
+  namespace: {{ .Values.ocGateway.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: asdlc-api
+  timeouts:
+    request: "0s"
+    streamIdle: "24h"

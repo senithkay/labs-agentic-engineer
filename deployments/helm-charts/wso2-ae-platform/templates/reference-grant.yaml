@@ -1,0 +1,19 @@
+---
+# Allows HTTPRoutes in the OC control-plane gateway namespace to cross-namespace-reference
+# Services in the wso2-ae namespace (where the ASDLC platform services run).
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: asdlc-platform-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: {{ .Values.ocGateway.namespace }}
+  to:
+    - group: ""
+      kind: Service

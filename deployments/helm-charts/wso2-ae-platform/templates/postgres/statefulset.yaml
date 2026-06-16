@@ -1,0 +1,80 @@
+{{- if not .Values.postgres.url }}
+---
+# PostgreSQL deployed as a direct StatefulSet in the wso2-ae namespace.
+# Not an OC Resource — OC doesn't provision stateful infra.
+# To use an external database instead, set postgres.url in values.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: asdlc-db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: asdlc-db
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  serviceName: asdlc-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: asdlc-db
+  template:
+    metadata:
+      labels:
+        app: asdlc-db
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image | quote }}
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.auth.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.auth.username | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgres.auth.password | quote }}
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.postgres.auth.username | quote }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: asdlc-db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: asdlc-db
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  selector:
+    app: asdlc-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+  clusterIP: None
+{{- end }}

@@ -1,0 +1,104 @@
+---
+# Provisions namespace-scoped ComponentType objects in the OC org namespace
+# from the cluster-scoped ClusterComponentTypes. OC's platform-api does this
+# automatically in cloud (ProvisionOrgUnit); in a local k3d cluster nothing
+# does it, so the BFF's kind=ComponentType references resolve to
+# ComponentTypeNotFound and builds fail with ComponentValidationFailed.
+# Runs as a Helm post-install/post-upgrade hook.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: asdlc-component-type-provisioner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: asdlc-component-type-provisioner
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+rules:
+  - apiGroups: ["openchoreo.dev"]
+    resources: ["clustercomponenttypes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["openchoreo.dev"]
+    resources: ["componenttypes"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: asdlc-component-type-provisioner
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: asdlc-component-type-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: asdlc-component-type-provisioner
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: asdlc-component-type-provisioner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: asdlc-component-type-provisioner
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: asdlc-component-type-provisioner
+      containers:
+        - name: provisioner
+          image: "alpine/k8s:1.31.3"
+          env:
+            - name: ORG_NS
+              value: {{ .Values.openchoreo.orgHandle | default "default" | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              echo "Provisioning namespace-scoped ComponentTypes in namespace: ${ORG_NS}"
+              # OC resolves "deployment/service" in the API to a namespace-scoped
+              # ComponentType named "service" (without the workloadType prefix) —
+              # Kubernetes resource names cannot contain '/'.
+              for CT in service web-application worker scheduled-task; do
+                echo "Processing ClusterComponentType: ${CT}"
+                kubectl get clustercomponenttype "${CT}" -o json \
+                  | jq --arg ns "${ORG_NS}" \
+                      '{apiVersion: .apiVersion, kind: "ComponentType", metadata: {name: .metadata.name, namespace: $ns}, spec: .spec}' \
+                  | kubectl apply -f -
+              done
+              echo "Done — namespace-scoped ComponentTypes provisioned in ${ORG_NS}"

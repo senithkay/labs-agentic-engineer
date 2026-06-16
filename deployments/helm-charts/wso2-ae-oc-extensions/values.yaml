@@ -1,0 +1,7 @@
+authz:
+  # OAuth2 client ID registered in Thunder for the asdlc-api service account.
+  # This client ID is granted the admin role in OpenChoreo.
+  apiClientId: "asdlc-api-client"
+
+  # Thunder group that gets admin access to OpenChoreo (human operators).
+  administratorsGroup: "Administrators"

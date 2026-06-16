@@ -52,6 +52,7 @@ configuration:
       - "http://localhost:8090"
       - "${PUBLIC_THUNDER_URL}"
       - "${PUBLIC_CONSOLE_URL}"
+      - "http://asdlc.openchoreo.localhost:8080"
 
   passkey:
     allowedOrigins:

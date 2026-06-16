@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agents-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: agents-service
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agents-service
+  template:
+    metadata:
+      labels:
+        app: agents-service
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      containers:
+        - name: agents-service
+          image: "{{ .Values.agentsService.image.repository }}:{{ .Values.agentsService.image.tag }}"
+          imagePullPolicy: {{ .Values.agentsService.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.agentsService.port }}
+              name: http
+          resources: {{ toYaml .Values.agentsService.resources | nindent 12 }}
+          env:
+            - name: PORT
+              value: {{ .Values.agentsService.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.agentsService.logLevel | quote }}
+            - name: AGENT_MODEL
+              value: {{ .Values.agentsService.model | quote }}
+            - name: JWKS_URL
+              value: {{ .Values.idp.jwksInternalURL | default .Values.idp.jwksURL | quote }}
+            - name: JWT_ISSUER
+              value: {{ .Values.idp.issuer | quote }}
+            - name: JWT_AUDIENCE
+              value: {{ .Values.agentsService.jwt.audience | quote }}
+            # Resolves per-org Anthropic key via the BFF
+            - name: ASDLC_API_URL
+              value: "http://asdlc-api.{{ .Release.Namespace }}:{{ .Values.asdlcApi.port }}"

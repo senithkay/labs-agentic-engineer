@@ -1,0 +1,26 @@
+---
+# HTTPRoute in the OC control-plane gateway namespace to expose the console externally.
+# The ReferenceGrant in templates/reference-grant.yaml allows this cross-namespace reference.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: asdlc-console
+  namespace: {{ .Values.ocGateway.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  parentRefs:
+    - name: {{ .Values.ocGateway.name }}
+      namespace: {{ .Values.ocGateway.namespace }}
+  hostnames:
+    - {{ .Values.console.hostname | quote }}
+  rules:
+    - backendRefs:
+        - name: asdlc-console
+          namespace: {{ .Release.Namespace }}
+          port: {{ .Values.console.port }}
+      matches:
+        - path:
+            type: PathPrefix
+            value: /

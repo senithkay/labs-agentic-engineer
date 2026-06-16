@@ -1,0 +1,3 @@
+# Helm dependency build artifacts — generated, not source
+**/charts/*.tgz
+**/Chart.lock

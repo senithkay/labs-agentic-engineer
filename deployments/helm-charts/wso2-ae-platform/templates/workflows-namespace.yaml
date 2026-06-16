@@ -1,0 +1,12 @@
+---
+# The BFF dispatch service pre-stages per-task secrets (Anthropic API key,
+# task JWT) in this namespace before creating the coding-agent WorkflowRun.
+# OC's WorkflowPlane owns this namespace in cloud deployments; in a local
+# k3d cluster it must be created explicitly.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workflows-{{ .Values.openchoreo.orgHandle }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer

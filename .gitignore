@@ -59,3 +59,6 @@ deployments-v2/.env
 deployments-v2/keys/
 deployments-v2/.webhook-relay.log
 deployments-v2/.webhook-relay.pid
+
+# Helm packaged chart archives
+deployments/helm-charts/*.tgz
