@@ -58,6 +58,7 @@ spec:
         app.kubernetes.io/component: thunder-bootstrap
     spec:
       restartPolicy: Never
+      serviceAccountName: wso2-ae-thunder-bootstrap
       # Runs as root so apk can install jq. Short-lived post-install Job — acceptable for bootstrap.
       securityContext:
         runAsNonRoot: false
@@ -92,6 +93,12 @@ spec:
                   key: systemClientSecret
             - name: CONSOLE_PUBLIC_URL
               value: {{ index .Values "wso2-ae-platform" "console" "publicURL" | default .Values.console.publicURL | quote }}
+            - name: THUNDER_NAMESPACE
+              value: {{ .Values.thunder.namespace | quote }}
+            - name: THUNDER_CONFIG_MAP_NAME
+              value: {{ .Values.thunder.configMapName | quote }}
+            - name: THUNDER_DEPLOYMENT_NAME
+              value: {{ .Values.thunder.deploymentName | quote }}
           volumeMounts:
             - name: scripts
               mountPath: /scripts

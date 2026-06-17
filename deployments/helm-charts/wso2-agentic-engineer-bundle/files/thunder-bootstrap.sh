@@ -24,10 +24,97 @@ fi
 
 THUNDER_URL="${THUNDER_ADMIN_URL}"
 CONSOLE_URL="${CONSOLE_PUBLIC_URL}"
+THUNDER_NS="${THUNDER_NAMESPACE:-thunder}"
+THUNDER_CM="${THUNDER_CONFIG_MAP_NAME:-thunder-config-map}"
+THUNDER_DEPLOY="${THUNDER_DEPLOYMENT_NAME:-thunder-deployment}"
 
 log()     { echo "[$(date -u +%H:%M:%S)] $*"; }
 log_ok()  { echo "[$(date -u +%H:%M:%S)] ✓ $*"; }
 log_err() { echo "[$(date -u +%H:%M:%S)] ✗ $*" >&2; }
+
+# ── Patch Thunder CORS to include the console URL ───────────────────────────
+# Thunder's cors.allowed_origins is baked into its ConfigMap at OC install time
+# and does not include the ASDLC console URL. We patch it here via the K8s API
+# (using this job's ServiceAccount token) then trigger a rolling restart so the
+# new config is loaded before we register OAuth clients below.
+log "Checking Thunder CORS config for ${CONSOLE_URL}..."
+
+K8S_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>/dev/null || true)
+K8S_CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+K8S_APISERVER="https://${KUBERNETES_SERVICE_HOST:-kubernetes.default.svc}:${KUBERNETES_SERVICE_PORT:-443}"
+
+if [ -z "$K8S_TOKEN" ]; then
+    log "No K8s service account token — skipping CORS patch"
+else
+    CM_JSON=$(curl -sf --noproxy '*' --cacert "$K8S_CA" \
+        -H "Authorization: Bearer $K8S_TOKEN" \
+        "${K8S_APISERVER}/api/v1/namespaces/${THUNDER_NS}/configmaps/${THUNDER_CM}" 2>/dev/null) \
+        || { log_err "Could not fetch Thunder ConfigMap — skipping CORS patch"; CM_JSON=""; }
+
+    if [ -n "$CM_JSON" ]; then
+        DEPLOY_YAML=$(printf '%s' "$CM_JSON" | jq -r '.data["deployment.yaml"]')
+
+        if printf '%s' "$DEPLOY_YAML" | grep -qF "${CONSOLE_URL}"; then
+            log_ok "Thunder CORS already includes ${CONSOLE_URL}"
+        else
+            log "Adding ${CONSOLE_URL} to Thunder cors.allowed_origins..."
+
+            # Use awk to append the URL after the last entry in allowed_origins under cors:
+            # Works without Python/PyYAML — busybox awk is available in alpine/curl.
+            UPDATED_YAML=$(printf '%s' "$DEPLOY_YAML" | awk -v url="${CONSOLE_URL}" '
+BEGIN { in_cors=0; in_ao=0; last_ao=0 }
+{
+    lines[NR] = $0
+    if (/^cors:$/) {
+        in_cors = 1; in_ao = 0
+    } else if (in_cors && /^[a-z]/) {
+        in_cors = 0; in_ao = 0
+    } else if (in_cors && /^  allowed_origins:/) {
+        in_ao = 1
+    } else if (in_ao && /^    - /) {
+        last_ao = NR
+    } else if (in_ao && /^  [a-z]/) {
+        in_ao = 0
+    }
+}
+END {
+    for (i = 1; i <= NR; i++) {
+        print lines[i]
+        if (i == last_ao) {
+            print "    - \"" url "\""
+        }
+    }
+}
+') || { log_err "awk CORS insertion failed — skipping CORS patch"; UPDATED_YAML=""; }
+
+            if [ -n "$UPDATED_YAML" ]; then
+                PATCH=$(jq -n --arg yaml "$UPDATED_YAML" '{"data":{"deployment.yaml":$yaml}}')
+                curl -sf --noproxy '*' --cacert "$K8S_CA" \
+                    -H "Authorization: Bearer $K8S_TOKEN" \
+                    -H "Content-Type: application/merge-patch+json" \
+                    -X PATCH \
+                    -d "$PATCH" \
+                    "${K8S_APISERVER}/api/v1/namespaces/${THUNDER_NS}/configmaps/${THUNDER_CM}" -o /dev/null \
+                    || { log_err "ConfigMap PATCH failed — CORS not updated"; }
+
+                # Trigger rolling restart so the new ConfigMap is loaded
+                RESTART_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                RESTART_PATCH="{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/restartedAt\":\"${RESTART_AT}\"}}}}}"
+                curl -sf --noproxy '*' --cacert "$K8S_CA" \
+                    -H "Authorization: Bearer $K8S_TOKEN" \
+                    -H "Content-Type: application/merge-patch+json" \
+                    -X PATCH \
+                    -d "$RESTART_PATCH" \
+                    "${K8S_APISERVER}/apis/apps/v1/namespaces/${THUNDER_NS}/deployments/${THUNDER_DEPLOY}" -o /dev/null \
+                    || { log_err "Deployment PATCH (restart) failed"; }
+
+                log_ok "Thunder CORS updated — Thunder is restarting"
+                # Brief pause so the old pod starts terminating before the wait loop below
+                sleep 10
+            fi
+        fi
+    fi
+fi
 
 # Bypass any cluster-injected HTTP proxy — Thunder is in-cluster (no proxy needed)
 export NO_PROXY="*"

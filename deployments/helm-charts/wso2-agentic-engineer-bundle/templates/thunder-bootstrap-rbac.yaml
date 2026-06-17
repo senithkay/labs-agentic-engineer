@@ -1,0 +1,60 @@
+---
+# ServiceAccount used by the thunder-bootstrap Job to call the K8s API.
+# Needs cross-namespace access to the thunder namespace to patch its ConfigMap
+# and trigger a rolling restart when CORS config is updated.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wso2-ae-thunder-bootstrap
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-8"
+    "helm.sh/hook-delete-policy": before-hook-creation
+---
+# Role in the thunder namespace — minimal: read+patch one ConfigMap, patch one Deployment.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: wso2-ae-thunder-bootstrap
+  namespace: {{ .Values.thunder.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-8"
+    "helm.sh/hook-delete-policy": before-hook-creation
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: [{{ .Values.thunder.configMapName | quote }}]
+    verbs: ["get", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: [{{ .Values.thunder.deploymentName | quote }}]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: wso2-ae-thunder-bootstrap
+  namespace: {{ .Values.thunder.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-8"
+    "helm.sh/hook-delete-policy": before-hook-creation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: wso2-ae-thunder-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: wso2-ae-thunder-bootstrap
+    namespace: {{ .Release.Namespace }}
