@@ -128,7 +128,7 @@ asdlcApi:
   # Hostname for the OC control-plane gateway HTTPRoute
   hostname: "asdlc-api.openchoreo.localhost"
   image:
-    repository: ghcr.io/senithkay/asdlc-api
+    repository: ghcr.io/wso2/asdlc-api
     tag: latest
     pullPolicy: Always
   port: 9090
@@ -157,7 +157,7 @@ asdlcApi:
 # ── agents-service ────────────────────────────────────────────────────────────
 agentsService:
   image:
-    repository: ghcr.io/senithkay/agents-service
+    repository: ghcr.io/wso2/agents-service
     tag: latest
     pullPolicy: Always
   port: 3400
@@ -178,7 +178,7 @@ console:
   # Hostname for the OC control-plane gateway HTTPRoute
   hostname: "asdlc.openchoreo.localhost"
   image:
-    repository: ghcr.io/senithkay/asdlc-console
+    repository: ghcr.io/wso2/asdlc-console
     tag: latest
     pullPolicy: Always
   # nginx port inside the container
