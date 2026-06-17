@@ -79,7 +79,9 @@ jobs:
           file: ${{ matrix.file }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.name }}:${{ needs.prepare-release.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.name }}:${{ needs.prepare-release.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.name }}:latest
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }},ignore-error=true
 
@@ -116,6 +118,8 @@ jobs:
         run: |
           helm package ${{ env.CHART_DIR }} -d /tmp/chart-output
           helm push /tmp/chart-output/*.tgz oci://${{ env.REGISTRY }}/${{ env.OWNER }}
+          helm package ${{ env.CHART_DIR }} --version latest -d /tmp/chart-output-latest
+          helm push /tmp/chart-output-latest/*.tgz oci://${{ env.REGISTRY }}/${{ env.OWNER }}
 
   create-release:
     name: Create GitHub release
