@@ -88,6 +88,12 @@ spec:
             - |
               set -e
 
+              # Install kubectl if not available (alpine doesn't include it)
+              if ! command -v kubectl &>/dev/null; then
+                echo "Installing kubectl..."
+                apk add --no-cache kubectl
+              fi
+
               CONFIGMAP_NAME="asdlc-api-task-signing-key"
               KEY_FILE="/tmp/task-signing.pem"
 
