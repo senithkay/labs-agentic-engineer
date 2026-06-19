@@ -208,8 +208,10 @@ spec:
         {{- end }}
         - name: repos
           emptyDir: {}
+{{- if .Values.taskSigning.privateKeyPem }}
 ---
-# ConfigMap holding the task-signing RSA private key
+# ConfigMap holding the task-signing RSA private key (only if custom key provided).
+# If not provided, the auto-generation hook job creates this ConfigMap instead.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -220,6 +222,7 @@ metadata:
     app.kubernetes.io/part-of: wso2-agentic-engineer
 data:
   task-signing.pem: {{ .Values.taskSigning.privateKeyPem | quote }}
+{{- end }}
 {{- if .Values.github.appPrivateKeyPem }}
 ---
 # ConfigMap holding the GitHub App private key
