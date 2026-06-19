@@ -20,10 +20,15 @@
 // Domain types for the ASDLC platform
 // ---------------------------------------------------------------------------
 
-export type ProjectPhase = 'spec' | 'design' | 'components' | 'implementing' | 'done';
-export type SpecStatus = 'draft' | 'approved';
-export type DesignStatus = 'none' | 'generating' | 'draft' | 'approved';
-export type ComponentStatus = 'created' | 'implementing' | 'done';
+export type ProjectPhase =
+  | "spec"
+  | "design"
+  | "components"
+  | "implementing"
+  | "done";
+export type SpecStatus = "draft" | "approved";
+export type DesignStatus = "none" | "generating" | "draft" | "approved";
+export type ComponentStatus = "created" | "implementing" | "done";
 
 export interface ArtifactVersion {
   version: number;
@@ -62,11 +67,11 @@ export interface CollabSession {
 
 export interface DesignComponent {
   name: string;
-  componentType: 'service' | 'web-app';
+  componentType: "service" | "web-app";
   language: string;
   dependsOn: string[];
-  entrypoint: 'deployment/service';
-  buildpack: 'docker';
+  entrypoint: "deployment/service";
+  buildpack: "docker";
   appPath: string;
   // Optional: during streaming, the component card appears (with shape
   // metadata) before its OpenAPI YAML is set. Final design.json from the
@@ -85,14 +90,14 @@ export interface DesignComponent {
 }
 
 export interface APISecurity {
-  security: 'required' | 'none';
+  security: "required" | "none";
 }
 
 export interface DependentApi {
   name: string;
   url: string;
   description?: string;
-  authentication?: 'none' | 'bearer' | 'api-key';
+  authentication?: "none" | "bearer" | "api-key";
 }
 
 export interface Design {
@@ -110,7 +115,7 @@ export interface Design {
 
 export interface ComponentOpenAPI {
   componentName: string;
-  componentType: 'service' | 'web-app';
+  componentType: "service" | "web-app";
   // Raw OpenAPI 3.0 YAML, canonicalised by the BFF. Always present on a 200
   // response. On a 409 (non-service component) the BFF returns the same
   // envelope without a spec — the UI can render a typed empty state.
@@ -165,8 +170,15 @@ export interface Organization {
 
 // -- Build (WorkflowRun) ----------------------------------------------------
 
-export type BuildStatus = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Completed'
-  | 'WorkflowPending' | 'WorkflowSucceeded' | 'WorkflowFailed';
+export type BuildStatus =
+  | "Pending"
+  | "Running"
+  | "Succeeded"
+  | "Failed"
+  | "Completed"
+  | "WorkflowPending"
+  | "WorkflowSucceeded"
+  | "WorkflowFailed";
 
 export interface Build {
   name: string;
@@ -197,17 +209,17 @@ export interface BuildLogs {
 // OC) drive transitions; see asdlc-service/services/task_state.go for the
 // transition table.
 export type TaskStatus =
-  | 'pending'
-  | 'on_hold'
-  | 'in_progress'
-  | 'verification_failed'
-  | 'ready_for_review'
-  | 'merged'
-  | 'building'
-  | 'deployed'
-  | 'rejected'
-  | 'failed'
-  | 'abandoned';
+  | "pending"
+  | "on_hold"
+  | "in_progress"
+  | "verification_failed"
+  | "ready_for_review"
+  | "merged"
+  | "building"
+  | "deployed"
+  | "rejected"
+  | "failed"
+  | "abandoned";
 
 export interface ComponentTask {
   id: string;
@@ -266,14 +278,14 @@ export interface ComponentTask {
 export const TASK_PROGRESS_SCHEMA_VERSION = 1;
 
 export type TaskProgressKind =
-  | 'phase'
-  | 'tool_use'
-  | 'git_commit'
-  | 'git_push'
-  | 'gh_action'
-  | 'log'
-  | 'result'
-  | 'build_step';
+  | "phase"
+  | "tool_use"
+  | "git_commit"
+  | "git_push"
+  | "gh_action"
+  | "log"
+  | "result"
+  | "build_step";
 
 export interface TaskProgressEvent {
   schemaVersion: number;
@@ -287,8 +299,8 @@ export interface TaskProgressEvent {
   branch?: string;
   files?: number;
   command?: string;
-  level?: 'info' | 'warn' | 'error';
-  status?: 'success' | 'failure';
+  level?: "info" | "warn" | "error";
+  status?: "success" | "failure";
   summary?: string;
   error?: string;
   step?: string;
@@ -325,7 +337,7 @@ export interface TaskStatusResponse {
 export interface Tasks {
   projectId: string;
   tasks: ComponentTask[];
-  status: 'approved';
+  status: "approved";
 }
 
 // -- Project Board (sourced from GitHub Project Board) -----------------------
@@ -335,7 +347,11 @@ export interface LabelInfo {
   color: string; // hex without #, e.g. "0075ca"
 }
 
-export type TaskLifecycleStatus = 'gh_issue_waiting' | 'gh_issue_syncing' | 'gh_issue_created' | 'gh_issue_failed';
+export type TaskLifecycleStatus =
+  | "gh_issue_waiting"
+  | "gh_issue_syncing"
+  | "gh_issue_created"
+  | "gh_issue_failed";
 
 export interface Task {
   id: string;
@@ -358,7 +374,7 @@ export interface Task {
   // can dispatch — "WORKER" (coding-agent) tasks must go through the batch
   // dispatch path ("Execute all → Remote Agents"). Used by TaskDetailPanel
   // to gate the "Execute Now" button.
-  execType?: 'SYSTEM' | 'WORKER';
+  execType?: "SYSTEM" | "WORKER";
   // Component name this task targets — used by the Pending Deps column to
   // map this task back to the dep graph.
   componentName?: string;
@@ -398,12 +414,21 @@ export interface ComponentConfig {
 
 // -- Project Status (computed SDLC phase) -------------------------------------
 
-export type ProjectSdlcPhase = 'no-repo' | 'repo-cloning' | 'prompt' | 'spec' | 'architecture' | 'tasks' | 'components';
+export type ProjectSdlcPhase =
+  | "no-repo"
+  | "repo-cloning"
+  | "repo-error"
+  | "prompt"
+  | "spec"
+  | "architecture"
+  | "tasks"
+  | "components";
 
 export interface ProjectStatus {
   phase: ProjectSdlcPhase;
   repoStatus: string;
   repoUrl: string;
+  repoErrorMessage?: string;
   hasSpec: boolean;
   hasDesign: boolean;
   hasTasks: boolean;

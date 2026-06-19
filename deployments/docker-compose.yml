@@ -173,8 +173,9 @@ services:
       OBSERVER_OAUTH_HOST_HEADER: "${OBSERVER_OAUTH_HOST_HEADER:-thunder.openchoreo.localhost}"
     volumes:
       - ./keys/task-signing.pem:/app/keys/task-signing.pem:ro
-      # Folded-in git-service volumes (after WS0.1).
-      - ${HOME}/specs/repos:/data/repos
+      # Folded-in git-service volumes (after WS0.1). Host path is prepared by
+      # start.sh (ensure_repo_storage) so appuser (uid 1000) can mkdir clones.
+      - ./data/repos:/data/repos
       - ./github-app-private-key.pem:/etc/github-app/private-key.pem:ro
       - ./.kube/config:/app/.kube/config:ro
     networks:
@@ -294,7 +295,13 @@ services:
     container_name: asdlc-smee-client
     depends_on:
       - asdlc-api
-    command: ["--url", "${GITHUB_WEBHOOK_PROXY_URL}", "--target", "http://asdlc-api:9090/webhooks/github"]
+    command:
+      [
+        "--url",
+        "${GITHUB_WEBHOOK_PROXY_URL}",
+        "--target",
+        "http://asdlc-api:9090/webhooks/github",
+      ]
     networks:
       - asdlc
     restart: unless-stopped

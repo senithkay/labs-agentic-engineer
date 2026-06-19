@@ -72,17 +72,13 @@ echo "4️⃣  Clean generated artifacts"
 rm -f "$DEPLOY_DIR/.kube/config" 2>/dev/null && echo "   removed deployments/.kube/config" || true
 rm -rf "$DEPLOY_DIR/.kube" 2>/dev/null || true
 
-# git-service stores cloned workspaces at the host bind mount declared on
-# the git-service compose service (see docker-compose.yml `volumes:`).
-# docker compose down -v wipes named volumes but NOT bind mounts, so
-# without this the next `setup.sh` runs into "destination path already
-# exists" when git-service tries to clone a freshly-created repo into a
-# stale workspace.
-# NOTE: previously hardcoded to ${HOME}/.asdlc/repos. The mount was renamed
-# to ${HOME}/specs/repos (commit 6232ff4) — read it back from the compose
-# file instead so this can't drift again.
+# asdlc-api stores cloned workspaces at the host bind mount declared in
+# docker-compose.yml `volumes:` (REPO_BASE_PATH=/data/repos). compose down
+# -v wipes named volumes but NOT bind mounts, so without this the next
+# project create can hit stale workspace dirs.
+# Read the host path from compose (currently ./data/repos) so this can't drift.
 REPOS_HOST_PATH=$(awk '
-  /^  git-service:/      { in_svc=1; next }
+  /^  asdlc-api:/        { in_svc=1; next }
   in_svc && /^  [a-z]/   { in_svc=0 }
   in_svc && /:\/data\/repos$/ {
     sub(/^[[:space:]]*-[[:space:]]*/, "")
@@ -92,9 +88,14 @@ REPOS_HOST_PATH=$(awk '
 # Expand ${HOME} (and similar) without sourcing the file.
 REPOS_HOST_PATH="${REPOS_HOST_PATH//\$\{HOME\}/$HOME}"
 REPOS_HOST_PATH="${REPOS_HOST_PATH//\$HOME/$HOME}"
+if [[ "$REPOS_HOST_PATH" == ./* ]]; then
+    REPOS_HOST_PATH="$DEPLOY_DIR/${REPOS_HOST_PATH#./}"
+elif [[ -n "$REPOS_HOST_PATH" && "$REPOS_HOST_PATH" != /* ]]; then
+    REPOS_HOST_PATH="$DEPLOY_DIR/$REPOS_HOST_PATH"
+fi
 if [ -n "$REPOS_HOST_PATH" ] && [ -d "$REPOS_HOST_PATH" ]; then
     rm -rf "$REPOS_HOST_PATH" 2>/dev/null \
-        && echo "   removed git-service workspaces at $REPOS_HOST_PATH" \
+        && echo "   removed repo workspaces at $REPOS_HOST_PATH" \
         || echo "   ⚠️  failed to remove $REPOS_HOST_PATH — clean it manually before next setup"
 fi
 

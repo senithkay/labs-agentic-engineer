@@ -147,6 +147,10 @@ export default function ProjectOverviewPage() {
     return <AuthExpiredState />;
   }
 
+  if (phase === 'repo-error') {
+    return <RepoErrorState repoUrl={status?.repoUrl} errorMessage={status?.repoErrorMessage} />;
+  }
+
   if (phase === 'no-repo') {
     return (
       <PageContent>
@@ -177,6 +181,82 @@ export default function ProjectOverviewPage() {
 // access token expired while the SPA was open. Re-signing in is the only
 // path back; the in-memory React state otherwise still looks "signed in"
 // because asgardeo hasn't observed the failure.
+function RepoErrorState({ repoUrl, errorMessage }: { repoUrl?: string; errorMessage?: string }) {
+  const { orgId } = useParams();
+  const navigate = useNavigate();
+  const routeOrgId = orgId ?? 'default';
+  const { summary, action, showGitHubSettings } = describeRepoError(errorMessage);
+
+  return (
+    <PageContent>
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 12, gap: 1.5, maxWidth: 520 }}>
+        <Typography variant="h6" color="text.secondary">
+          We couldn&apos;t set up your repository
+        </Typography>
+        {repoUrl ? (
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+            {repoUrl}
+          </Typography>
+        ) : null}
+        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+          {summary}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+          {action}
+        </Typography>
+        {showGitHubSettings ? (
+          <Button
+            variant="outlined"
+            size="small"
+            sx={{ mt: 1 }}
+            onClick={() => navigate(`/organizations/${routeOrgId}/settings/github`)}
+          >
+            Open GitHub settings
+          </Button>
+        ) : null}
+      </Box>
+    </PageContent>
+  );
+}
+
+function describeRepoError(errorMessage?: string): {
+  summary: string;
+  action: string;
+  showGitHubSettings: boolean;
+} {
+  const raw = errorMessage?.trim() ?? '';
+
+  if (/authentication failed|could not read Username|resolve credential|^token:/i.test(raw)) {
+    return {
+      summary: 'GitHub access for your organization could not be verified.',
+      action: 'Check your GitHub connection, then delete this project and create it again.',
+      showGitHubSettings: true,
+    };
+  }
+
+  if (/clone failed/i.test(raw)) {
+    return {
+      summary: 'The repository could not be cloned from GitHub.',
+      action: 'Confirm the repository exists and your GitHub connection has the required access, then try again.',
+      showGitHubSettings: true,
+    };
+  }
+
+  if (/permission denied/i.test(raw)) {
+    return {
+      summary: 'The platform could not prepare storage for this project.',
+      action: 'Please try again shortly. If this keeps happening, contact your administrator.',
+      showGitHubSettings: false,
+    };
+  }
+
+  return {
+    summary: 'An unexpected error occurred while provisioning the repository.',
+    action: 'Delete this project and try creating it again. Contact your administrator if the problem continues.',
+    showGitHubSettings: false,
+  };
+}
+
 function AuthExpiredState() {
   const { signIn } = useAuth();
   return (
