@@ -96,10 +96,6 @@ github:
   # Pass via: --set-file github.appPrivateKeyPem=key.pem
   appPrivateKeyPem: ""
 
-# ── Anthropic ─────────────────────────────────────────────────────────────────
-anthropic:
-  apiKey: ""
-
 # ── asdlc-api (BFF) ──────────────────────────────────────────────────────────
 asdlcApi:
   # Hostname for the OC control-plane gateway HTTPRoute

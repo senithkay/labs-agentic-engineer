@@ -69,11 +69,6 @@ github:
   webhookSecret: "dev-webhook-secret"
   oauthStateKey: "dev-oauth-state-key-32-chars-long!!"
 
-# ── Anthropic ─────────────────────────────────────────────────────────────────
-anthropic:
-  # Platform fallback API key (used when no per-org key is configured)
-  apiKey: ""
-
 # ── PostgreSQL ────────────────────────────────────────────────────────────────
 # By default a PostgreSQL StatefulSet is deployed in the wso2-ae namespace.
 # Set postgres.url to use an external database instead (skips StatefulSet).

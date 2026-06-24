@@ -160,10 +160,6 @@ spec:
             - name: OPENBAO_TOKEN
               value: {{ .Values.openbao.token | quote }}
 
-            # ── Anthropic ─────────────────────────────────────────────────────
-            - name: ANTHROPIC_PLATFORM_KEY
-              value: {{ .Values.anthropic.apiKey | quote }}
-
             # ── Cloud service stubs ───────────────────────────────────────────
             - name: SECRET_MANAGER_API_URL
               value: {{ .Values.asdlcApi.smApiURL | default "" | quote }}
