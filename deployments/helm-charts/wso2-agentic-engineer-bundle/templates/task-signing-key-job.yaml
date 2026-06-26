@@ -27,7 +27,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation
 rules:
   - apiGroups: [""]
-    resources: ["configmaps"]
+    resources: ["secrets"]
     verbs: ["get", "create", "patch"]
 ---
 # ClusterRoleBinding for the key generator
@@ -52,8 +52,8 @@ subjects:
     namespace: {{ .Release.Namespace }}
 ---
 # Post-install/upgrade Job: generate BFF task signing key if it doesn't exist
-# Runs before main Deployments so ConfigMap is ready for them to mount.
-# Idempotent — subsequent runs reuse the existing ConfigMap, avoiding JWT invalidation.
+# Runs before main Deployments so Secret is ready for them to mount.
+# Idempotent — subsequent runs reuse the existing Secret, avoiding JWT invalidation.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -94,32 +94,32 @@ spec:
                 apk add --no-cache kubectl
               fi
 
-              CONFIGMAP_NAME="asdlc-api-task-signing-key"
+              SECRET_NAME="asdlc-api-task-signing-key"
               KEY_FILE="/tmp/task-signing.pem"
 
-              echo "Checking if task signing key ConfigMap already exists..."
-              if kubectl get configmap "$CONFIGMAP_NAME" -n {{ .Release.Namespace }} >/dev/null 2>&1; then
-                echo "✅ Task signing key ConfigMap already exists (reusing existing key)"
-                echo "   This preserves JWT verification across helm upgrades and pod restarts"
+              echo "Checking if task signing key Secret already exists..."
+              if kubectl get secret "$SECRET_NAME" -n {{ .Release.Namespace }} >/dev/null 2>&1; then
+                echo "Task signing key Secret already exists (reusing existing key)"
+                echo "This preserves JWT verification across helm upgrades and pod restarts"
                 exit 0
               fi
 
-              echo "🔐 Generating new RSA 2048 task signing key..."
+              echo "Generating new RSA 2048 task signing key..."
               if ! command -v openssl &>/dev/null; then
                 apk add --no-cache openssl
               fi
               openssl genpkey -algorithm RSA -out "$KEY_FILE" -pkeyopt rsa_keygen_bits:2048
 
               if [ ! -f "$KEY_FILE" ]; then
-                echo "❌ Failed to generate signing key"
+                echo "Failed to generate signing key"
                 exit 1
               fi
 
-              echo "📦 Storing in ConfigMap..."
-              kubectl create configmap "$CONFIGMAP_NAME" \
+              echo "Storing in Secret..."
+              kubectl create secret generic "$SECRET_NAME" \
                 --from-file=task-signing.pem="$KEY_FILE" \
                 -n {{ .Release.Namespace }} \
                 --dry-run=client -o yaml | kubectl apply -f -
 
-              echo "✅ Task signing key generated and stored in ConfigMap"
-              echo "   Key will be reused on future helm upgrades (idempotent)"
+              echo "Task signing key generated and stored in Secret"
+              echo "Key will be reused on future helm upgrades (idempotent)"

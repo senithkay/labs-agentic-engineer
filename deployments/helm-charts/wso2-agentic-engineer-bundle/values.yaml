@@ -61,13 +61,11 @@ github:
   # PEM-encoded GitHub App private key. Pass via: --set-file github.appPrivateKey=key.pem
   appPrivateKeyPem: ""
   clientId: ""
-  clientSecret: ""
   appSlug: "asdlc-platform"
   repoVisibility: "private"
   committerName: "ASDLC Bot"
   committerEmail: "bot@asdlc.dev"
-  webhookSecret: "dev-webhook-secret"
-  oauthStateKey: "dev-oauth-state-key-32-chars-long!!"
+  # Secrets (clientSecret, webhookSecret, oauthStateKey) stored in the secret store.
 
 # ── PostgreSQL ────────────────────────────────────────────────────────────────
 # By default a PostgreSQL StatefulSet is deployed in the wso2-ae namespace.
@@ -124,7 +122,6 @@ wso2-ae-platform:
       scopes: "openid profile email"
   thunderSystemClient:
     clientId: "asdlc-system-client"
-    clientSecret: "asdlc-system-client-secret"
   asdlcApi:
     serviceAuth:
       tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
@@ -133,10 +130,34 @@ wso2-ae-platform:
     oauth:
       tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
       clientId: "openchoreo-observer-resource-reader-client"
-      clientSecret: "openchoreo-observer-resource-reader-client-secret"
   openbao:
     addr: "http://openbao.openbao.svc.cluster.local:8200"
     token: "root"
-  postgres:
-    auth:
-      password: "asdlc-dev-password"
+  # Dev defaults — seeded into OpenBao on first helm install (IfNotExists).
+  # Values already in OpenBao are never overwritten (forceDefaultOverride: "").
+  # For production: set forceDefaultOverride: "false" for each secret and pre-seed OpenBao manually.
+  secrets:
+    thunderSystemClientSecret:
+      value: "asdlc-system-client-secret"
+      forceDefaultOverride: ""
+    serviceAuthClientSecret:
+      value: "asdlc-api-client-secret"
+      forceDefaultOverride: ""
+    serviceAuthGitClientSecret:
+      value: "asdlc-bff-to-git-service-secret"
+      forceDefaultOverride: ""
+    serviceAuthAgentsClientSecret:
+      value: "asdlc-bff-to-agents-service-secret"
+      forceDefaultOverride: ""
+    githubWebhookSecret:
+      value: "dev-webhook-secret"
+      forceDefaultOverride: ""
+    oauthStateKey:
+      value: "dev-oauth-state-key-32-chars-long!!"
+      forceDefaultOverride: ""
+    githubClientSecret:
+      value: ""
+      forceDefaultOverride: ""
+    observerOauthClientSecret:
+      value: "openchoreo-observer-resource-reader-client-secret"
+      forceDefaultOverride: ""

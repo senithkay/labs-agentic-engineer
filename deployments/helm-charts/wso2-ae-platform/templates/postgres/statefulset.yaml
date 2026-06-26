@@ -36,7 +36,10 @@ spec:
             - name: POSTGRES_USER
               value: {{ .Values.postgres.auth.username | quote }}
             - name: POSTGRES_PASSWORD
-              value: {{ .Values.postgres.auth.password | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-db-credentials
+                  key: password
           readinessProbe:
             exec:
               command:

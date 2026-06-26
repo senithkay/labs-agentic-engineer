@@ -32,10 +32,15 @@ bff:
   publicURL: "http://asdlc-api.openchoreo.localhost:8080"
 
 # ── OpenBao ───────────────────────────────────────────────────────────────────
+# OpenBao is the only supported secret backend. Other backends will be added later.
 openbao:
   addr: "http://openbao.openbao.svc.cluster.local:8200"
-  # Dev default — override for production
-  token: "root"
+  # Kubernetes auth config for the ClusterSecretStore ESO uses to access OpenBao.
+  # Defaults match OC's built-in OpenBao setup (role created by OC's values-openbao.yaml).
+  # Override only if your OpenBao uses a different role or service account.
+  authRole: "openchoreo-secret-writer-role"
+  serviceAccountName: "external-secrets-openbao"
+  serviceAccountNamespace: "openbao"
 
 # ── Observer ──────────────────────────────────────────────────────────────────
 observer:
@@ -43,7 +48,6 @@ observer:
   oauth:
     tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
     clientId: "openchoreo-observer-resource-reader-client"
-    clientSecret: "openchoreo-observer-resource-reader-client-secret"
 
 # ── PostgreSQL (direct StatefulSet — not an OC Resource) ─────────────────────
 # Set postgres.url to use an external database and skip the bundled StatefulSet.
@@ -87,14 +91,13 @@ github:
   repoVisibility: "private"
   committerName: "ASDLC Bot"
   committerEmail: "bot@asdlc.dev"
-  webhookSecret: "dev-webhook-secret"
-  oauthStateKey: "dev-oauth-state-key-32-chars-long!!"
   appId: ""
   clientId: ""
-  clientSecret: ""
   # GitHub App private key PEM (optional — leave empty for PAT-based auth)
   # Pass via: --set-file github.appPrivateKeyPem=key.pem
   appPrivateKeyPem: ""
+  # Secrets (webhookSecret, oauthStateKey, clientSecret) are stored in the
+  # secret store and synced by ESO — not set here.
 
 # ── asdlc-api (BFF) ──────────────────────────────────────────────────────────
 asdlcApi:
@@ -111,12 +114,12 @@ asdlcApi:
   # Service identity for OC API calls (registered in OC Thunder by bootstrap job)
   serviceAuth:
     clientId: "asdlc-api-client"
-    clientSecret: "asdlc-api-client-secret"
     tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
+    # clientSecret stored in secret store at externalSecret.keys.serviceAuthClientSecret
   # JWT for BFF → agents-service calls
   agentsJwt:
     clientId: "asdlc-bff-to-agents-service"
-    clientSecret: "asdlc-bff-to-agents-service-secret"
+    # clientSecret stored in secret store at externalSecret.keys.serviceAuthAgentsClientSecret
   smApiURL: ""
   clusterGatewayProxyURL: ""
   resources:
@@ -174,4 +177,43 @@ console:
 # Must match the client registered in OC Thunder by the bootstrap job.
 thunderSystemClient:
   clientId: "asdlc-system-client"
-  clientSecret: "asdlc-system-client-secret"
+  # clientSecret stored in secret store at externalSecret.keys.thunderSystemClientSecret
+
+# ── External Secrets (ESO) ────────────────────────────────────────────────────
+# The chart creates ClusterSecretStore "default" pointing at OpenBao (configured via
+# openbao.* above). OpenBao KV v2 stores secrets as {"value":"..."} — property is
+# hardcoded to "value" in all templates.
+externalSecret:
+  refreshInterval: "15s"
+  secretStoreRef:
+    name: default
+    kind: ClusterSecretStore
+  # Paths in OpenBao where each secret is stored.
+  # Change these if you use different key paths in your OpenBao instance.
+  keys:
+    databaseURL: "asdlc/platform/db/url"
+    thunderSystemClientSecret: "asdlc/platform/thunder/system-client-secret"
+    serviceAuthClientSecret: "asdlc/platform/service-auth/client-secret"
+    serviceAuthGitClientSecret: "asdlc/platform/service-auth/git-secret"
+    serviceAuthAgentsClientSecret: "asdlc/platform/service-auth/agents-secret"
+    githubWebhookSecret: "asdlc/platform/github/webhook-secret"
+    oauthStateKey: "asdlc/platform/github/oauth-state-key"
+    githubClientSecret: "asdlc/platform/github/client-secret"
+    observerOauthClientSecret: "asdlc/platform/observer/client-secret"
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+# Each entry controls one secret pushed into OpenBao by the chart.
+#
+#   value:               the secret value to push
+#   forceDefaultOverride: controls the push behaviour:
+#     "" (or not set)  → push only if the key is absent in OpenBao (IfNotExists)
+#                         Safe default: seeds on fresh install, never overwrites on upgrade.
+#     "true"           → always overwrite OpenBao with this value on every helm install/upgrade
+#                         Use when you need to force a specific value regardless of what's in OpenBao.
+#     "false"          → do not push at all — Helm never touches this path in OpenBao.
+#                         Use for secrets you pre-configured in OpenBao manually (prod pattern).
+#
+# Dev users:  set values here or via --set. Values are seeded once on first install.
+# Prod users: set forceDefaultOverride: "false" for all secrets and pre-seed OpenBao manually.
+# WARNING: non-empty values here appear in Helm release history.
+secrets: {}

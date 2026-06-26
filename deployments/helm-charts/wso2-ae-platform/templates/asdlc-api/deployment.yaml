@@ -42,13 +42,11 @@ spec:
               value: "false"
 
             # ── Database ──────────────────────────────────────────────────────
-            {{- if .Values.postgres.url }}
             - name: DATABASE_URL
-              value: {{ .Values.postgres.url | quote }}
-            {{- else }}
-            - name: DATABASE_URL
-              value: "postgres://{{ .Values.postgres.auth.username }}:{{ .Values.postgres.auth.password }}@asdlc-db:5432/{{ .Values.postgres.auth.database }}?sslmode=disable"
-            {{- end }}
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-api-secrets
+                  key: databaseURL
 
             # ── OpenChoreo ────────────────────────────────────────────────────
             - name: PLATFORM_API_SERVICE_BASE_URL
@@ -76,7 +74,10 @@ spec:
             - name: THUNDER_SYSTEM_CLIENT_ID
               value: {{ .Values.thunderSystemClient.clientId | quote }}
             - name: THUNDER_SYSTEM_CLIENT_SECRET
-              value: {{ .Values.thunderSystemClient.clientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-api-secrets
+                  key: thunderSystemClientSecret
             - name: PLATFORM_IDP_ISSUER
               value: {{ .Values.idp.issuer | quote }}
             - name: PLATFORM_IDP_JWKS_URL
@@ -94,7 +95,10 @@ spec:
             - name: SERVICE_AUTH_CLIENT_ID
               value: {{ .Values.asdlcApi.serviceAuth.clientId | quote }}
             - name: SERVICE_AUTH_CLIENT_SECRET
-              value: {{ .Values.asdlcApi.serviceAuth.clientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-api-secrets
+                  key: serviceAuthClientSecret
             - name: SERVICE_AUTH_HOST_HEADER
               value: ""
             - name: SERVICE_AUTH_GIT_TOKEN_URL
@@ -102,7 +106,10 @@ spec:
             - name: SERVICE_AUTH_GIT_CLIENT_ID
               value: "asdlc-bff-to-git-service"
             - name: SERVICE_AUTH_GIT_CLIENT_SECRET
-              value: "asdlc-bff-to-git-service-secret"
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-api-secrets
+                  key: serviceAuthGitClientSecret
             - name: SERVICE_AUTH_GIT_HOST_HEADER
               value: ""
             - name: SERVICE_AUTH_AGENTS_TOKEN_URL
@@ -110,7 +117,10 @@ spec:
             - name: SERVICE_AUTH_AGENTS_CLIENT_ID
               value: {{ .Values.asdlcApi.agentsJwt.clientId | quote }}
             - name: SERVICE_AUTH_AGENTS_CLIENT_SECRET
-              value: {{ .Values.asdlcApi.agentsJwt.clientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-api-secrets
+                  key: serviceAuthAgentsClientSecret
             - name: SERVICE_AUTH_AGENTS_HOST_HEADER
               value: ""
 
@@ -144,21 +154,24 @@ spec:
             - name: GITHUB_WEBHOOK_DELIVERY_URL
               value: {{ .Values.smee.url | default .Values.bff.publicURL | quote }}
             - name: GITHUB_WEBHOOK_SECRET
-              value: {{ .Values.github.webhookSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-api-secrets
+                  key: githubWebhookSecret
             - name: OAUTH_STATE_SIGNING_KEY
-              value: {{ .Values.github.oauthStateKey | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-api-secrets
+                  key: oauthStateKey
             - name: GITHUB_APP_ID
               value: {{ .Values.github.appId | quote }}
             - name: GITHUB_CLIENT_ID
               value: {{ .Values.github.clientId | quote }}
             - name: GITHUB_CLIENT_SECRET
-              value: {{ .Values.github.clientSecret | quote }}
-
-            # ── OpenBao ───────────────────────────────────────────────────────
-            - name: OPENBAO_ADDR
-              value: {{ .Values.openbao.addr | quote }}
-            - name: OPENBAO_TOKEN
-              value: {{ .Values.openbao.token | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-api-secrets
+                  key: githubClientSecret
 
             # ── Cloud service stubs ───────────────────────────────────────────
             - name: SECRET_MANAGER_API_URL
@@ -174,7 +187,10 @@ spec:
             - name: OBSERVER_OAUTH_CLIENT_ID
               value: {{ .Values.observer.oauth.clientId | quote }}
             - name: OBSERVER_OAUTH_CLIENT_SECRET
-              value: {{ .Values.observer.oauth.clientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: asdlc-api-secrets
+                  key: observerOauthClientSecret
             - name: OBSERVER_OAUTH_HOST_HEADER
               value: ""
 
@@ -195,41 +211,43 @@ spec:
 
       volumes:
         - name: task-signing-key
-          configMap:
-            name: asdlc-api-task-signing-key
+          secret:
+            secretName: asdlc-api-task-signing-key
         {{- if .Values.github.appPrivateKeyPem }}
         - name: github-app-key
-          configMap:
-            name: asdlc-api-github-app-key
+          secret:
+            secretName: asdlc-api-github-app-key
         {{- end }}
         - name: repos
           emptyDir: {}
 {{- if .Values.taskSigning.privateKeyPem }}
 ---
-# ConfigMap holding the task-signing RSA private key (only if custom key provided).
-# If not provided, the auto-generation hook job creates this ConfigMap instead.
+# Secret holding the task-signing RSA private key (only if custom key provided).
+# If not provided, the auto-generation hook job creates this Secret instead.
 apiVersion: v1
-kind: ConfigMap
+kind: Secret
 metadata:
   name: asdlc-api-task-signing-key
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
-data:
+type: Opaque
+stringData:
   task-signing.pem: {{ .Values.taskSigning.privateKeyPem | quote }}
 {{- end }}
 {{- if .Values.github.appPrivateKeyPem }}
 ---
-# ConfigMap holding the GitHub App private key
+# Secret holding the GitHub App private key
 apiVersion: v1
-kind: ConfigMap
+kind: Secret
 metadata:
   name: asdlc-api-github-app-key
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
-data:
+type: Opaque
+stringData:
   private-key.pem: {{ .Values.github.appPrivateKeyPem | quote }}
 {{- end }}
