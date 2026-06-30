@@ -205,8 +205,6 @@ if helm status openchoreo-workflow-plane -n openchoreo-workflow-plane --kube-con
     echo "⏭️  Already installed"
 else
     echo "📦 Installing Workflow Plane..."
-    create_plane_cert_resources openchoreo-workflow-plane
-
     helm upgrade --install registry docker-registry \
         --repo https://twuni.github.io/docker-registry.helm \
         --namespace openchoreo-workflow-plane --create-namespace \
@@ -220,6 +218,16 @@ fi
 echo "⏳ Waiting for Workflow Plane..."
 kubectl wait -n openchoreo-workflow-plane --for=condition=available --timeout=300s deployment --all
 echo "✅ Workflow Plane ready"
+
+# The workflow-plane Helm chart ships a placeholder cluster-gateway-ca ConfigMap.
+# Patch it with the real CA so the cluster-agent can verify the control-plane TLS
+# cert and connect. Must run after helm install (not before) to avoid the chart
+# overwriting the ConfigMap with the placeholder again.
+echo "🔧 Patching cluster-gateway CA into openchoreo-workflow-plane..."
+create_plane_cert_resources openchoreo-workflow-plane
+kubectl rollout restart deployment/cluster-agent-workflowplane -n openchoreo-workflow-plane
+kubectl rollout status deployment/cluster-agent-workflowplane -n openchoreo-workflow-plane --timeout=60s
+echo "✅ Workflow Plane cluster-agent CA patched and restarted"
 
 if ! kubectl get clusterworkflowplane default -n default &>/dev/null; then
     echo "🔗 Registering Workflow Plane..."
