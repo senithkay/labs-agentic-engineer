@@ -178,9 +178,6 @@ console:
 # Must match the client registered in OC Thunder by the bootstrap job.
 thunderSystemClient:
   clientId: "asdlc-system-client"
-<<<<<<< Updated upstream
-  clientSecret: "asdlc-system-client-secret"
-=======
   # clientSecret stored in secret store at externalSecret.keys.thunderSystemClientSecret
 
 # ── External Secrets (ESO) ────────────────────────────────────────────────────
@@ -204,4 +201,3 @@ externalSecret:
     oauthStateKey: "asdlc/platform/github/oauth-state-key"
     githubClientSecret: "asdlc/platform/github/client-secret"
     observerOauthClientSecret: "asdlc/platform/observer/client-secret"
->>>>>>> Stashed changes
