@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ae-installer
+  namespace: ae-system
+  labels:
+    app: ae-installer
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  serviceAccountName: ae-installer
+  restartPolicy: Always
+  containers:
+    - name: ae-installer
+      image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      stdin: true
+      tty: true
+      command: ["sleep", "infinity"]
+      resources:
+        {{- toYaml .Values.resources | nindent 8 }}

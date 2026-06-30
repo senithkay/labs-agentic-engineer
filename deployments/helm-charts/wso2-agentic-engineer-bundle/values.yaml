@@ -142,6 +142,3 @@ wso2-ae-platform:
   openbao:
     addr: "http://openbao.openbao.svc.cluster.local:8200"
     token: "root"
-  postgres:
-    auth:
-      password: "asdlc-dev-password"

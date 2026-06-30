@@ -1,0 +1,8 @@
+apiVersion: v2
+name: wso2-ae-installer
+version: 0.0.0-dev
+appVersion: 0.0.0-dev
+description: >
+  Deploys a long-running installer Pod to ae-system. Users interact via:
+  kubectl exec -it -n ae-system pod/ae-installer -- /scripts/ae install
+type: application

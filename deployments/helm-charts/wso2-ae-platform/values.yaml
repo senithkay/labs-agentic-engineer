@@ -178,4 +178,26 @@ console:
 # Must match the client registered in OC Thunder by the bootstrap job.
 thunderSystemClient:
   clientId: "asdlc-system-client"
-  clientSecret: "asdlc-system-client-secret"
+  # clientSecret stored in secret store at externalSecret.keys.thunderSystemClientSecret
+
+# ── External Secrets (ESO) ────────────────────────────────────────────────────
+# The chart creates ClusterSecretStore "default" pointing at OpenBao (configured via
+# openbao.* above). OpenBao KV v2 stores secrets as {"value":"..."} — property is
+# hardcoded to "value" in all templates.
+externalSecret:
+  refreshInterval: "15s"
+  secretStoreRef:
+    name: default
+    kind: ClusterSecretStore
+  # Paths in OpenBao where each secret is stored.
+  # Change these if you use different key paths in your OpenBao instance.
+  keys:
+    databaseURL: "asdlc/platform/db/url"
+    thunderSystemClientSecret: "asdlc/platform/thunder/system-client-secret"
+    serviceAuthClientSecret: "asdlc/platform/service-auth/client-secret"
+    serviceAuthGitClientSecret: "asdlc/platform/service-auth/git-secret"
+    serviceAuthAgentsClientSecret: "asdlc/platform/service-auth/agents-secret"
+    githubWebhookSecret: "asdlc/platform/github/webhook-secret"
+    oauthStateKey: "asdlc/platform/github/oauth-state-key"
+    githubClientSecret: "asdlc/platform/github/client-secret"
+    observerOauthClientSecret: "asdlc/platform/observer/client-secret"

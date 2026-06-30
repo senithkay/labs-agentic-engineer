@@ -1,11 +1,10 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: wso2-ae
+  name: ae-system
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-30"
-    "helm.sh/hook-delete-policy": keep
+    "helm.sh/hook-weight": "-10"

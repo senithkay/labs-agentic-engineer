@@ -96,6 +96,10 @@ spec:
               # Kubernetes resource names cannot contain '/'.
               for CT in service web-application worker scheduled-task; do
                 echo "Processing ClusterComponentType: ${CT}"
+                if ! kubectl get clustercomponenttype "${CT}" > /dev/null 2>&1; then
+                  echo "  ClusterComponentType '${CT}' not found — skipping"
+                  continue
+                fi
                 kubectl get clustercomponenttype "${CT}" -o json \
                   | jq --arg ns "${ORG_NS}" \
                       '{apiVersion: .apiVersion, kind: "ComponentType", metadata: {name: .metadata.name, namespace: $ns}, spec: .spec}' \
