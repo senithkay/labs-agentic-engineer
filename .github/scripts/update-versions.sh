@@ -12,6 +12,7 @@ CHART_DIR="deployments/helm-charts"
 for f in \
   "${CHART_DIR}/wso2-agentic-engineer-bundle/Chart.yaml" \
   "${CHART_DIR}/wso2-ae-platform/Chart.yaml" \
+  "${CHART_DIR}/wso2-ae-installer/Chart.yaml" \
   "${CHART_DIR}/wso2-ae-oc-extensions/Chart.yaml"
 do
   sed -i "s/version: 0\.0\.0-dev/version: ${VERSIONED}/g" "$f"
@@ -26,5 +27,7 @@ sed -i "s/  version: 0\.0\.0-dev/  version: ${VERSIONED}/g" \
 # ── Image tags in values.yaml ─────────────────────────────────────────────────
 sed -i "s/tag: 0\.0\.0-dev/tag: ${VERSIONED}/g" \
   "${CHART_DIR}/wso2-ae-platform/values.yaml"
+sed -i "s/tag: 0\.0\.0-dev/tag: ${VERSIONED}/g" \
+  "${CHART_DIR}/wso2-ae-installer/values.yaml"
 
 echo "Updated all versions to ${VERSIONED}"

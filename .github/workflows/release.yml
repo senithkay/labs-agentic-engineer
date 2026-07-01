@@ -60,6 +60,9 @@ jobs:
           - name: asdlc-console
             context: .
             file: ./console/Dockerfile
+          - name: ae-installer
+            context: .
+            file: ./deployments/installer/Dockerfile
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -118,8 +121,11 @@ jobs:
         run: |
           helm package ${{ env.CHART_DIR }} -d /tmp/chart-output
           helm push /tmp/chart-output/*.tgz oci://${{ env.REGISTRY }}/${{ env.OWNER }}
-          helm package ${{ env.CHART_DIR }} --version latest -d /tmp/chart-output-latest
-          helm push /tmp/chart-output-latest/*.tgz oci://${{ env.REGISTRY }}/${{ env.OWNER }}
+
+      - name: Package and push installer chart
+        run: |
+          helm package deployments/helm-charts/wso2-ae-installer -d /tmp/chart-output
+          helm push /tmp/chart-output/wso2-ae-installer-*.tgz oci://${{ env.REGISTRY }}/${{ env.OWNER }}
 
   create-release:
     name: Create GitHub release
