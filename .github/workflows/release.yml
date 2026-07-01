@@ -68,6 +68,12 @@ jobs:
         with:
           ref: ${{ needs.prepare-release.outputs.version }}
 
+      - name: Update versions
+        run: |
+          chmod +x .github/scripts/update-versions.sh
+          .github/scripts/update-versions.sh "${{ github.event.inputs.target_version }}"
+
+
       - uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
 
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
