@@ -93,6 +93,23 @@ func Init() {
 	viper.SetDefault("webhook.delivery_url", "")
 	viper.SetDefault("webhook.local_smee.enabled", true)
 
+	// Dev mode — local source-driven inner loop (`aep dev ...`). All overridable
+	// via ~/.aep/config.yaml. Off by default: dev commands that mutate the cluster
+	// (reload/restart/logs) refuse unless dev.enabled is true.
+	//
+	// dev.project_path: absolute path to a local checkout of the AEP source repo;
+	//   `aep dev reload <svc>` builds images from it.
+	// dev.k3d_cluster: the k3d cluster name images are imported into
+	//   (matches deployments/k3d-local-config.yaml).
+	// dev.namespace: the platform release namespace holding the service Deployments.
+	// dev.image_prefix: repository prefix for locally-built dev images
+	//   (final tag: <prefix>/<service>:dev).
+	viper.SetDefault("dev.enabled", false)
+	viper.SetDefault("dev.project_path", "")
+	viper.SetDefault("dev.k3d_cluster", "openchoreo")
+	viper.SetDefault("dev.namespace", "wso2-aep")
+	viper.SetDefault("dev.image_prefix", "aep-dev")
+
 	// Thunder defaults — all overridable via ~/.aep/config.yaml or AEP_THUNDER_* env vars.
 	viper.SetDefault("thunder.namespace", "thunder")
 	viper.SetDefault("thunder.url", "http://thunder-service.thunder.svc.cluster.local:8090")
