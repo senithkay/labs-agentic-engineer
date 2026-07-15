@@ -1,9 +1,9 @@
 aepApi:
   replicas: 1
   image:
-    repository: ghcr.io/wso2/aep/aep-api
-    tag: latest
-    pullPolicy: IfNotPresent
+    repository: senithkay/ae
+    tag: aep-api
+    pullPolicy: Always
   port: 9090
   logLevel: "info"
   deploymentTier: "dev"
@@ -21,9 +21,9 @@ aepApi:
 aepAgents:
   replicas: 1
   image:
-    repository: ghcr.io/wso2/aep/agents
-    tag: latest
-    pullPolicy: IfNotPresent
+    repository: senithkay/ae
+    tag: agents
+    pullPolicy: Always
   port: 9090
   logLevel: "info"
   model: "claude-sonnet-5"
@@ -47,9 +47,9 @@ aepAgents:
 aepMcpServer:
   replicas: 1
   image:
-    repository: ghcr.io/wso2/aep/aep-mcp-server
-    tag: latest
-    pullPolicy: IfNotPresent
+    repository: senithkay/ae
+    tag: aep-mcp-server
+    pullPolicy: Always
   port: 3400
   resources:
     requests:
@@ -66,9 +66,9 @@ aepMcpServer:
 collab:
   replicas: 1
   image:
-    repository: ghcr.io/wso2/aep/collab
-    tag: latest
-    pullPolicy: IfNotPresent
+    repository: senithkay/ae
+    tag: collab
+    pullPolicy: Always
   port: 3400
   resources:
     requests:
@@ -81,9 +81,9 @@ collab:
 console:
   replicas: 1
   image:
-    repository: ghcr.io/wso2/aep/console
-    tag: latest
-    pullPolicy: IfNotPresent
+    repository: senithkay/ae
+    tag: console
+    pullPolicy: Always
   port: 3000
   resources:
     requests:
@@ -124,7 +124,7 @@ codingAgentDispatch:
     # Service DNS automatically. In prod, set this to the real proxy endpoint.
     url: ""
     # Stub image + port — only used when localStubs.enabled.
-    image: "ghcr.io/wso2/aep/cluster-gateway-proxy:latest"
+    image: "senithkay/ae:cluster-gateway-proxy"
     port: 8085
   secretManagerApi:
     # Base URL of the secret-manager-api. Empty (local) → coding dispatch uses

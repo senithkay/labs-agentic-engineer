@@ -9,9 +9,9 @@ aep-openbao:
 
 aepServer:
   image:
-    repository: ghcr.io/wso2/aep/aep-server
-    tag: latest
-    pullPolicy: IfNotPresent
+    repository: senithkay/ae
+    tag: aep-server
+    pullPolicy: Always
   port: 9091
   esoNamespace: external-secrets
   esoServiceAccount: external-secrets
