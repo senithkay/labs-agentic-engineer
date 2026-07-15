@@ -148,6 +148,10 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 		"bff-remote-worker",
 		"local-dev-seeder",
 		"system-client",
+		// SRE/RCA agent service-account identity. Consumed by the
+		// openchoreo-observability-plane RCA agent (rca.oauth.clientId +
+		// rca-agent-secret OAUTH_CLIENT_SECRET) once `aep sre install` runs.
+		"openchoreo-rca-agent",
 	}
 	thunderClientSecrets := make(map[string]string, len(thunderClientNames))
 	for _, name := range thunderClientNames {
@@ -171,6 +175,16 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 		return fatal(fmt.Sprintf("generate webhook secret: %v", err))
 	}
 
+	// OpenSearch admin credentials for the observability plane (Observer +
+	// OpenSearch + logs-adapter). Seeded here — while the root token is still
+	// held — because `aep sre install` runs after init (root token revoked) and
+	// only reads these via ESO. The aep-secret-reader policy (secret/data/aep/*)
+	// already covers these paths, so no OpenBao role change is needed.
+	openSearchPassword, err := bootstrap.GeneratePassword(24)
+	if err != nil {
+		return fatal(fmt.Sprintf("generate opensearch password: %v", err))
+	}
+
 	secrets := []struct{ path, value string }{
 		{"aep/anthropic-api-key", req.AnthropicApiKey},
 		{"aep/postgres-password", postgresPassword},
@@ -178,6 +192,8 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 		{"aep/oauth-state-key", oauthStateKey},
 		{"aep/agents-jwt-secret", agentsJWTSecret},
 		{"aep/webhook-secret", webhookSecret},
+		{"aep/opensearch-username", "admin"},
+		{"aep/opensearch-password", openSearchPassword},
 	}
 	for _, name := range thunderClientNames {
 		secrets = append(secrets, struct{ path, value string }{
@@ -249,4 +265,3 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 		},
 	})
 }
-
