@@ -173,9 +173,13 @@ func (*InitEvent_Complete) isInitEvent_Payload() {}
 func (*InitEvent_Error) isInitEvent_Payload() {}
 
 type InitComplete struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UnsealKeys    []string               `protobuf:"bytes,1,rep,name=unseal_keys,json=unsealKeys,proto3" json:"unseal_keys,omitempty"`
-	RootToken     string                 `protobuf:"bytes,2,opt,name=root_token,json=rootToken,proto3" json:"root_token,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// unseal_keys is populated in Shamir mode (no KMS seal configured).
+	// Operators must store these — needed to manually unseal after pod restarts.
+	UnsealKeys []string `protobuf:"bytes,1,rep,name=unseal_keys,json=unsealKeys,proto3" json:"unseal_keys,omitempty"`
+	// recovery_keys is populated in KMS auto-unseal mode.
+	// Break-glass emergency use only — not needed for normal restarts.
+	RecoveryKeys  []string `protobuf:"bytes,3,rep,name=recovery_keys,json=recoveryKeys,proto3" json:"recovery_keys,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -217,11 +221,11 @@ func (x *InitComplete) GetUnsealKeys() []string {
 	return nil
 }
 
-func (x *InitComplete) GetRootToken() string {
+func (x *InitComplete) GetRecoveryKeys() []string {
 	if x != nil {
-		return x.RootToken
+		return x.RecoveryKeys
 	}
-	return ""
+	return nil
 }
 
 type ThunderSetupRequest struct {
@@ -312,103 +316,6 @@ func (x *ProgressEvent) GetMessage() string {
 	return ""
 }
 
-type UnsealRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Provide exactly 3 of the 5 unseal keys printed during Init.
-	Keys          []string `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UnsealRequest) Reset() {
-	*x = UnsealRequest{}
-	mi := &file_admin_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UnsealRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UnsealRequest) ProtoMessage() {}
-
-func (x *UnsealRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_admin_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UnsealRequest.ProtoReflect.Descriptor instead.
-func (*UnsealRequest) Descriptor() ([]byte, []int) {
-	return file_admin_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *UnsealRequest) GetKeys() []string {
-	if x != nil {
-		return x.Keys
-	}
-	return nil
-}
-
-type UnsealResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UnsealResponse) Reset() {
-	*x = UnsealResponse{}
-	mi := &file_admin_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UnsealResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UnsealResponse) ProtoMessage() {}
-
-func (x *UnsealResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_admin_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UnsealResponse.ProtoReflect.Descriptor instead.
-func (*UnsealResponse) Descriptor() ([]byte, []int) {
-	return file_admin_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *UnsealResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *UnsealResponse) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
 var File_admin_proto protoreflect.FileDescriptor
 
 const file_admin_proto_rawDesc = "" +
@@ -421,26 +328,19 @@ const file_admin_proto_rawDesc = "" +
 	"\bprogress\x18\x01 \x01(\tH\x00R\bprogress\x128\n" +
 	"\bcomplete\x18\x02 \x01(\v2\x1a.aep.admin.v1.InitCompleteH\x00R\bcomplete\x12\x16\n" +
 	"\x05error\x18\x03 \x01(\tH\x00R\x05errorB\t\n" +
-	"\apayload\"N\n" +
+	"\apayload\"Z\n" +
 	"\fInitComplete\x12\x1f\n" +
 	"\vunseal_keys\x18\x01 \x03(\tR\n" +
-	"unsealKeys\x12\x1d\n" +
-	"\n" +
-	"root_token\x18\x02 \x01(\tR\trootToken\"6\n" +
+	"unsealKeys\x12#\n" +
+	"\rrecovery_keys\x18\x03 \x03(\tR\frecoveryKeysJ\x04\b\x02\x10\x03\"6\n" +
 	"\x13ThunderSetupRequest\x12\x1f\n" +
 	"\vconsole_url\x18\x01 \x01(\tR\n" +
 	"consoleUrl\")\n" +
 	"\rProgressEvent\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"#\n" +
-	"\rUnsealRequest\x12\x12\n" +
-	"\x04keys\x18\x01 \x03(\tR\x04keys\"D\n" +
-	"\x0eUnsealResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage2\xe6\x01\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage2\x9a\x01\n" +
 	"\bAEPAdmin\x12<\n" +
 	"\x04Init\x12\x19.aep.admin.v1.InitRequest\x1a\x17.aep.admin.v1.InitEvent0\x01\x12P\n" +
-	"\fThunderSetup\x12!.aep.admin.v1.ThunderSetupRequest\x1a\x1b.aep.admin.v1.ProgressEvent0\x01\x12J\n" +
-	"\rOpenbaoUnseal\x12\x1b.aep.admin.v1.UnsealRequest\x1a\x1c.aep.admin.v1.UnsealResponseB)Z'github.com/wso2/aepclt/internal/adminpbb\x06proto3"
+	"\fThunderSetup\x12!.aep.admin.v1.ThunderSetupRequest\x1a\x1b.aep.admin.v1.ProgressEvent0\x01B)Z'github.com/wso2/aepclt/internal/adminpbb\x06proto3"
 
 var (
 	file_admin_proto_rawDescOnce sync.Once
@@ -454,26 +354,22 @@ func file_admin_proto_rawDescGZIP() []byte {
 	return file_admin_proto_rawDescData
 }
 
-var file_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_admin_proto_goTypes = []any{
 	(*InitRequest)(nil),         // 0: aep.admin.v1.InitRequest
 	(*InitEvent)(nil),           // 1: aep.admin.v1.InitEvent
 	(*InitComplete)(nil),        // 2: aep.admin.v1.InitComplete
 	(*ThunderSetupRequest)(nil), // 3: aep.admin.v1.ThunderSetupRequest
 	(*ProgressEvent)(nil),       // 4: aep.admin.v1.ProgressEvent
-	(*UnsealRequest)(nil),       // 5: aep.admin.v1.UnsealRequest
-	(*UnsealResponse)(nil),      // 6: aep.admin.v1.UnsealResponse
 }
 var file_admin_proto_depIdxs = []int32{
 	2, // 0: aep.admin.v1.InitEvent.complete:type_name -> aep.admin.v1.InitComplete
 	0, // 1: aep.admin.v1.AEPAdmin.Init:input_type -> aep.admin.v1.InitRequest
 	3, // 2: aep.admin.v1.AEPAdmin.ThunderSetup:input_type -> aep.admin.v1.ThunderSetupRequest
-	5, // 3: aep.admin.v1.AEPAdmin.OpenbaoUnseal:input_type -> aep.admin.v1.UnsealRequest
-	1, // 4: aep.admin.v1.AEPAdmin.Init:output_type -> aep.admin.v1.InitEvent
-	4, // 5: aep.admin.v1.AEPAdmin.ThunderSetup:output_type -> aep.admin.v1.ProgressEvent
-	6, // 6: aep.admin.v1.AEPAdmin.OpenbaoUnseal:output_type -> aep.admin.v1.UnsealResponse
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
+	1, // 3: aep.admin.v1.AEPAdmin.Init:output_type -> aep.admin.v1.InitEvent
+	4, // 4: aep.admin.v1.AEPAdmin.ThunderSetup:output_type -> aep.admin.v1.ProgressEvent
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -495,7 +391,7 @@ func file_admin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_admin_proto_rawDesc), len(file_admin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

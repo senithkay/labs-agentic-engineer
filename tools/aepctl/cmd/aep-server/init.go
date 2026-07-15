@@ -75,7 +75,7 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 	sealed, _ := health["sealed"].(bool)
 
 	if initialized && sealed {
-		return fatal("OpenBao is initialised but sealed — run `aep openbao unseal` first")
+		return fatal("OpenBao is initialised but sealed — check KMS auto-unseal configuration and pod IAM permissions")
 	}
 
 	if initialized && !sealed {
@@ -103,20 +103,27 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 	}
 
 	rootToken, _ := initResp["root_token"].(string)
-	rawKeys, _ := initResp["keys"].([]interface{})
-	unsealKeys := make([]string, len(rawKeys))
-	for i, k := range rawKeys {
-		unsealKeys[i], _ = k.(string)
-	}
 
-	if err := progress("Unsealing OpenBao..."); err != nil {
-		return err
-	}
-	for i := 0; i < 3; i++ {
-		if _, err := openbao.Must(ctx, "PUT", s.openbaoAddr, "", "/v1/sys/unseal", map[string]interface{}{
-			"key": unsealKeys[i],
-		}); err != nil {
-			return fatal(fmt.Sprintf("unseal (key %d): %v", i+1, err))
+	// Shamir mode: "keys" holds unseal keys, manual unsealing is required after restarts.
+	// KMS auto-unseal mode: "recovery_keys" holds break-glass emergency keys, OpenBao unseals itself.
+	unsealKeys := toStringSlice(initResp["keys"])
+	recoveryKeys := toStringSlice(initResp["recovery_keys"])
+	kmsMode := len(unsealKeys) == 0 && len(recoveryKeys) > 0
+
+	if kmsMode {
+		if err := progress("OpenBao auto-unsealed via KMS"); err != nil {
+			return err
+		}
+	} else {
+		if err := progress("Unsealing OpenBao..."); err != nil {
+			return err
+		}
+		for i := 0; i < 3; i++ {
+			if _, err := openbao.Must(ctx, "PUT", s.openbaoAddr, "", "/v1/sys/unseal", map[string]interface{}{
+				"key": unsealKeys[i],
+			}); err != nil {
+				return fatal(fmt.Sprintf("unseal (key %d): %v", i+1, err))
+			}
 		}
 	}
 
@@ -244,9 +251,21 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 	return stream.Send(&adminpb.InitEvent{
 		Payload: &adminpb.InitEvent_Complete{
 			Complete: &adminpb.InitComplete{
-				UnsealKeys: unsealKeys,
+				UnsealKeys:   unsealKeys,
+				RecoveryKeys: recoveryKeys,
 			},
 		},
 	})
+}
+
+func toStringSlice(v interface{}) []string {
+	raw, _ := v.([]interface{})
+	out := make([]string, 0, len(raw))
+	for _, r := range raw {
+		if s, ok := r.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
