@@ -153,8 +153,21 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 		// rca-agent-secret OAUTH_CLIENT_SECRET) once `aep sre install` runs.
 		"openchoreo-rca-agent",
 	}
+	// fixedClientSecrets: clients whose secret an OpenChoreo component bakes in
+	// as a fixed default and cannot be told a random value. The OC
+	// dockerfile-builder's generate-workload-cr step authenticates as
+	// openchoreo-workload-publisher-client using this literal (baked into the
+	// ClusterWorkflowTemplate); a random secret here 401s the workload publish
+	// (build fails at generate-workload-cr). Mirrors setup.sh's Thunder bootstrap.
+	fixedClientSecrets := map[string]string{
+		"oc-workload-publisher": "openchoreo-workload-publisher-secret",
+	}
 	thunderClientSecrets := make(map[string]string, len(thunderClientNames))
 	for _, name := range thunderClientNames {
+		if fixed, ok := fixedClientSecrets[name]; ok {
+			thunderClientSecrets[name] = fixed
+			continue
+		}
 		s, err := bootstrap.GeneratePassword(32)
 		if err != nil {
 			return fatal(fmt.Sprintf("generate thunder client secret %s: %v", name, err))
