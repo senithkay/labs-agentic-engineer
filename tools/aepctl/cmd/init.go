@@ -35,6 +35,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/wso2/aep/aepctl/internal/adminpb"
+	"github.com/wso2/aep/aepctl/internal/dev"
 	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
 )
 
@@ -227,6 +228,17 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		fmt.Sprintf("localOrgProvisioning.enabled=%t", viper.GetBool("oc.local_org_provisioning.enabled")))
 	if ns := viper.GetString("oc.org_namespace"); ns != "" {
 		helmArgs = append(helmArgs, "--set", "localOrgProvisioning.orgNamespace="+ns)
+	}
+	// Dev mode: if enabled and a dev-values override exists (written by
+	// `aep dev reload`), pass it last so locally-built images survive this
+	// install/upgrade instead of reverting to the registry images.
+	if viper.GetBool("dev.enabled") {
+		if devValues, err := dev.ValuesPath(); err == nil {
+			if _, statErr := os.Stat(devValues); statErr == nil {
+				helmArgs = append(helmArgs, "-f", devValues)
+				_, _ = fmt.Fprintf(os.Stdout, "Dev mode: applying image overrides from %s\n", devValues)
+			}
+		}
 	}
 	var helmOut bytes.Buffer
 	helmCmd := exec.CommandContext(ctx, "helm", helmArgs...)

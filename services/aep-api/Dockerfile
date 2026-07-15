@@ -18,9 +18,12 @@ FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o bin/aep-api ./cmd/aep-api
+# Cache the Go module + build caches (BuildKit) so incremental rebuilds — the
+# `aep dev reload aep-api` inner loop — reuse compiled packages.
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -o bin/aep-api ./cmd/aep-api
 
 FROM alpine:3.21
 
