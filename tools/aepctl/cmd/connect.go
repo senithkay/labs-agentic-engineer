@@ -32,8 +32,8 @@ var connectCmd = &cobra.Command{
 	Short: "Set the AEP server URL",
 	Long: `Saves the AEP management server URL to ~/.aep/config.yaml.
 
-Thunder configuration is also stored in that file. Edit it directly to
-customise Thunder endpoints, credentials, or resource names:
+All AEP configuration is stored in that file. Edit it directly to customise
+Thunder endpoints or configure OpenBao KMS auto-unseal for production:
 
   thunder:
     namespace: thunder
@@ -43,7 +43,24 @@ customise Thunder endpoints, credentials, or resource names:
     deployment: thunder-deployment
     admin_client_id: openchoreo-system-app
     admin_client_secret: openchoreo-system-app-secret
-    public_url: http://thunder.openchoreo.localhost:8080`,
+    public_url: http://thunder.openchoreo.localhost:8080
+
+  # Production: configure one KMS provider for automatic OpenBao unsealing.
+  # Without this, OpenBao uses Shamir and requires manual unsealing after restarts.
+  openbao:
+    seal:
+      type: awskms           # or gcpckms / azurekeyvault
+      awskms:
+        region: us-east-1
+        kms_key_id: arn:aws:kms:us-east-1:123456789012:key/mrk-...
+      # gcpckms:
+      #   project: my-project
+      #   region: global
+      #   key_ring: my-key-ring
+      #   crypto_key: my-crypto-key
+      # azurekeyvault:
+      #   vault_name: my-key-vault
+      #   key_name: my-key`,
 	RunE: runConnect,
 }
 

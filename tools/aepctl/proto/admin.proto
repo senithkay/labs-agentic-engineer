@@ -11,9 +11,6 @@ service AEPAdmin {
 
   // ThunderSetup registers AEP OAuth clients in Thunder and patches CORS.
   rpc ThunderSetup(ThunderSetupRequest) returns (stream ProgressEvent);
-
-  // OpenbaoUnseal unseals the AEP OpenBao instance after a pod restart.
-  rpc OpenbaoUnseal(UnsealRequest) returns (UnsealResponse);
 }
 
 message InitRequest {
@@ -31,8 +28,13 @@ message InitEvent {
 }
 
 message InitComplete {
+  // unseal_keys is populated in Shamir mode (no KMS seal configured).
+  // Operators must store these — needed to manually unseal after pod restarts.
   repeated string unseal_keys = 1;
-  string          root_token  = 2;
+  reserved 2; // root_token was revoked before being returned; never populate
+  // recovery_keys is populated in KMS auto-unseal mode.
+  // Break-glass emergency use only — not needed for normal restarts.
+  repeated string recovery_keys = 3;
 }
 
 message ThunderSetupRequest {
@@ -43,12 +45,3 @@ message ProgressEvent {
   string message = 1;
 }
 
-message UnsealRequest {
-  // Provide exactly 3 of the 5 unseal keys printed during Init.
-  repeated string keys = 1;
-}
-
-message UnsealResponse {
-  bool   success = 1;
-  string message = 2;
-}

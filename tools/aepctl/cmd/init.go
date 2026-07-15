@@ -41,6 +41,59 @@ import (
 
 const minOCVersion = "1.1.1"
 
+// buildOpenBaoSealValues constructs a Helm values YAML snippet that injects
+// the configured KMS seal stanza into the OpenBao standalone config.
+// Returns ("", nil) when no seal type is configured (Shamir mode, local dev).
+func buildOpenBaoSealValues() (string, error) {
+	sealType := viper.GetString("openbao.seal.type")
+	if sealType == "" {
+		return "", nil
+	}
+
+	var sealBlock string
+	switch sealType {
+	case "awskms":
+		region := viper.GetString("openbao.seal.awskms.region")
+		keyID := viper.GetString("openbao.seal.awskms.kms_key_id")
+		if region == "" || keyID == "" {
+			return "", fmt.Errorf("openbao.seal.awskms.region and openbao.seal.awskms.kms_key_id are required")
+		}
+		sealBlock = fmt.Sprintf("seal \"awskms\" {\n  region     = %q\n  kms_key_id = %q\n}", region, keyID)
+	case "gcpckms":
+		project := viper.GetString("openbao.seal.gcpckms.project")
+		region := viper.GetString("openbao.seal.gcpckms.region")
+		keyRing := viper.GetString("openbao.seal.gcpckms.key_ring")
+		cryptoKey := viper.GetString("openbao.seal.gcpckms.crypto_key")
+		if project == "" || keyRing == "" || cryptoKey == "" {
+			return "", fmt.Errorf("openbao.seal.gcpckms.project, key_ring, and crypto_key are required")
+		}
+		sealBlock = fmt.Sprintf("seal \"gcpckms\" {\n  project    = %q\n  region     = %q\n  key_ring   = %q\n  crypto_key = %q\n}", project, region, keyRing, cryptoKey)
+	case "azurekeyvault":
+		vaultName := viper.GetString("openbao.seal.azurekeyvault.vault_name")
+		keyName := viper.GetString("openbao.seal.azurekeyvault.key_name")
+		if vaultName == "" || keyName == "" {
+			return "", fmt.Errorf("openbao.seal.azurekeyvault.vault_name and openbao.seal.azurekeyvault.key_name are required")
+		}
+		sealBlock = fmt.Sprintf("seal \"azurekeyvault\" {\n  vault_name = %q\n  key_name   = %q\n}", vaultName, keyName)
+	default:
+		return "", fmt.Errorf("unknown openbao.seal.type %q — must be awskms, gcpckms, or azurekeyvault", sealType)
+	}
+
+	// Full standalone config: mirrors the subchart default plus the seal stanza.
+	hcl := "ui = true\n\nlistener \"tcp\" {\n  tls_disable     = 1\n  address         = \"[::]:8200\"\n  cluster_address = \"[::]:8201\"\n}\nstorage \"file\" {\n  path = \"/openbao/data\"\n}\n\n" + sealBlock + "\n"
+
+	var b strings.Builder
+	b.WriteString("aep-openbao:\n  server:\n    standalone:\n      config: |\n")
+	for _, line := range strings.Split(hcl, "\n") {
+		if line != "" {
+			b.WriteString("        " + line + "\n")
+		} else {
+			b.WriteString("\n")
+		}
+	}
+	return b.String(), nil
+}
+
 var (
 	initPlatformChart        string
 	initPlatformVersion      string
@@ -171,11 +224,19 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if complete != nil && len(complete.UnsealKeys) > 0 {
-		printOpenBaoCredentials(complete.UnsealKeys)
+	if complete != nil {
+		if len(complete.RecoveryKeys) > 0 {
+			printOpenBaoRecoveryKeys(complete.RecoveryKeys)
+		} else if len(complete.UnsealKeys) > 0 {
+			printOpenBaoUnsealKeys(complete.UnsealKeys)
+		}
 	}
 
 	// 4. Install the platform chart.
+	sealValues, err := buildOpenBaoSealValues()
+	if err != nil {
+		return fmt.Errorf("build OpenBao seal config: %w", err)
+	}
 	_, _ = fmt.Fprintln(os.Stdout, "Installing platform chart...")
 	thunderURL := viper.GetString("thunder.url")
 	helmArgs := []string{
@@ -229,6 +290,24 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	if ns := viper.GetString("oc.org_namespace"); ns != "" {
 		helmArgs = append(helmArgs, "--set", "localOrgProvisioning.orgNamespace="+ns)
 	}
+	// KMS auto-unseal: if a seal type is configured, inject the seal stanza into
+	// the OpenBao standalone config via a temporary values override file.
+	if sealValues != "" {
+		sealFile, err := os.CreateTemp("", "aep-openbao-seal-*.yaml")
+		if err != nil {
+			return fmt.Errorf("create OpenBao seal values file: %w", err)
+		}
+		defer os.Remove(sealFile.Name())
+		if _, err := sealFile.WriteString(sealValues); err != nil {
+			return fmt.Errorf("write OpenBao seal values: %w", err)
+		}
+		if err := sealFile.Close(); err != nil {
+			return fmt.Errorf("close OpenBao seal values file: %w", err)
+		}
+		helmArgs = append(helmArgs, "-f", sealFile.Name())
+		_, _ = fmt.Fprintf(os.Stdout, "OpenBao: KMS auto-unseal enabled (%s)\n", viper.GetString("openbao.seal.type"))
+	}
+
 	// Dev mode: if enabled and a dev-values override exists (written by
 	// `aep dev reload`), pass it last so locally-built images survive this
 	// install/upgrade instead of reverting to the registry images.
@@ -465,12 +544,25 @@ func waitForAllPodsReady(ctx context.Context, client *kubernetes.Clientset, name
 	}
 }
 
-func printOpenBaoCredentials(unsealKeys []string) {
+func printOpenBaoUnsealKeys(keys []string) {
 	_, _ = fmt.Fprintln(os.Stdout, "\n+------------------------------------------------------------------+")
 	_, _ = fmt.Fprintln(os.Stdout, "|  STORE THESE SECURELY - they cannot be retrieved later           |")
-	_, _ = fmt.Fprintln(os.Stdout, "|  Unseal keys: need 3 of 5 to unseal after pod restart            |")
+	_, _ = fmt.Fprintln(os.Stdout, "|  Unseal keys: need 3 of 5 to unseal after every pod restart      |")
 	_, _ = fmt.Fprintln(os.Stdout, "+------------------------------------------------------------------+")
-	for i, k := range unsealKeys {
+	for i, k := range keys {
+		_, _ = fmt.Fprintf(os.Stdout, "  Key %d: %s\n", i+1, k)
+	}
+	_, _ = fmt.Fprintln(os.Stdout, "+------------------------------------------------------------------+")
+	_, _ = fmt.Fprintln(os.Stdout)
+}
+
+func printOpenBaoRecoveryKeys(keys []string) {
+	_, _ = fmt.Fprintln(os.Stdout, "\n+------------------------------------------------------------------+")
+	_, _ = fmt.Fprintln(os.Stdout, "|  STORE THESE SECURELY - they cannot be retrieved later           |")
+	_, _ = fmt.Fprintln(os.Stdout, "|  Recovery keys: break-glass emergency use only                   |")
+	_, _ = fmt.Fprintln(os.Stdout, "|  KMS auto-unseal is active — NOT needed for normal restarts      |")
+	_, _ = fmt.Fprintln(os.Stdout, "+------------------------------------------------------------------+")
+	for i, k := range keys {
 		_, _ = fmt.Fprintf(os.Stdout, "  Key %d: %s\n", i+1, k)
 	}
 	_, _ = fmt.Fprintln(os.Stdout, "+------------------------------------------------------------------+")

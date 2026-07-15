@@ -19,9 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AEPAdmin_Init_FullMethodName          = "/aep.admin.v1.AEPAdmin/Init"
-	AEPAdmin_ThunderSetup_FullMethodName  = "/aep.admin.v1.AEPAdmin/ThunderSetup"
-	AEPAdmin_OpenbaoUnseal_FullMethodName = "/aep.admin.v1.AEPAdmin/OpenbaoUnseal"
+	AEPAdmin_Init_FullMethodName         = "/aep.admin.v1.AEPAdmin/Init"
+	AEPAdmin_ThunderSetup_FullMethodName = "/aep.admin.v1.AEPAdmin/ThunderSetup"
 )
 
 // AEPAdminClient is the client API for AEPAdmin service.
@@ -33,8 +32,6 @@ type AEPAdminClient interface {
 	Init(ctx context.Context, in *InitRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InitEvent], error)
 	// ThunderSetup registers AEP OAuth clients in Thunder and patches CORS.
 	ThunderSetup(ctx context.Context, in *ThunderSetupRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ProgressEvent], error)
-	// OpenbaoUnseal unseals the AEP OpenBao instance after a pod restart.
-	OpenbaoUnseal(ctx context.Context, in *UnsealRequest, opts ...grpc.CallOption) (*UnsealResponse, error)
 }
 
 type aEPAdminClient struct {
@@ -83,16 +80,6 @@ func (c *aEPAdminClient) ThunderSetup(ctx context.Context, in *ThunderSetupReque
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AEPAdmin_ThunderSetupClient = grpc.ServerStreamingClient[ProgressEvent]
 
-func (c *aEPAdminClient) OpenbaoUnseal(ctx context.Context, in *UnsealRequest, opts ...grpc.CallOption) (*UnsealResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UnsealResponse)
-	err := c.cc.Invoke(ctx, AEPAdmin_OpenbaoUnseal_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // AEPAdminServer is the server API for AEPAdmin service.
 // All implementations must embed UnimplementedAEPAdminServer
 // for forward compatibility.
@@ -102,8 +89,6 @@ type AEPAdminServer interface {
 	Init(*InitRequest, grpc.ServerStreamingServer[InitEvent]) error
 	// ThunderSetup registers AEP OAuth clients in Thunder and patches CORS.
 	ThunderSetup(*ThunderSetupRequest, grpc.ServerStreamingServer[ProgressEvent]) error
-	// OpenbaoUnseal unseals the AEP OpenBao instance after a pod restart.
-	OpenbaoUnseal(context.Context, *UnsealRequest) (*UnsealResponse, error)
 	mustEmbedUnimplementedAEPAdminServer()
 }
 
@@ -119,9 +104,6 @@ func (UnimplementedAEPAdminServer) Init(*InitRequest, grpc.ServerStreamingServer
 }
 func (UnimplementedAEPAdminServer) ThunderSetup(*ThunderSetupRequest, grpc.ServerStreamingServer[ProgressEvent]) error {
 	return status.Error(codes.Unimplemented, "method ThunderSetup not implemented")
-}
-func (UnimplementedAEPAdminServer) OpenbaoUnseal(context.Context, *UnsealRequest) (*UnsealResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method OpenbaoUnseal not implemented")
 }
 func (UnimplementedAEPAdminServer) mustEmbedUnimplementedAEPAdminServer() {}
 func (UnimplementedAEPAdminServer) testEmbeddedByValue()                  {}
@@ -166,36 +148,13 @@ func _AEPAdmin_ThunderSetup_Handler(srv interface{}, stream grpc.ServerStream) e
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AEPAdmin_ThunderSetupServer = grpc.ServerStreamingServer[ProgressEvent]
 
-func _AEPAdmin_OpenbaoUnseal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UnsealRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AEPAdminServer).OpenbaoUnseal(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AEPAdmin_OpenbaoUnseal_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AEPAdminServer).OpenbaoUnseal(ctx, req.(*UnsealRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // AEPAdmin_ServiceDesc is the grpc.ServiceDesc for AEPAdmin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AEPAdmin_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "aep.admin.v1.AEPAdmin",
 	HandlerType: (*AEPAdminServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "OpenbaoUnseal",
-			Handler:    _AEPAdmin_OpenbaoUnseal_Handler,
-		},
-	},
+	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Init",

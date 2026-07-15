@@ -110,6 +110,19 @@ func Init() {
 	viper.SetDefault("dev.namespace", "wso2-aep")
 	viper.SetDefault("dev.image_prefix", "aep-dev")
 
+	// OpenBao auto-unseal — overridable via ~/.aep/config.yaml.
+	// Set openbao.seal.type to awskms, gcpckms, or azurekeyvault for production.
+	// Leave empty for Shamir mode (requires manual unsealing after pod restarts).
+	viper.SetDefault("openbao.seal.type", "")
+	viper.SetDefault("openbao.seal.awskms.region", "")
+	viper.SetDefault("openbao.seal.awskms.kms_key_id", "")
+	viper.SetDefault("openbao.seal.gcpckms.project", "")
+	viper.SetDefault("openbao.seal.gcpckms.region", "global")
+	viper.SetDefault("openbao.seal.gcpckms.key_ring", "")
+	viper.SetDefault("openbao.seal.gcpckms.crypto_key", "")
+	viper.SetDefault("openbao.seal.azurekeyvault.vault_name", "")
+	viper.SetDefault("openbao.seal.azurekeyvault.key_name", "")
+
 	// Thunder defaults — all overridable via ~/.aep/config.yaml or AEP_THUNDER_* env vars.
 	viper.SetDefault("thunder.namespace", "thunder")
 	viper.SetDefault("thunder.url", "http://thunder-service.thunder.svc.cluster.local:8090")
