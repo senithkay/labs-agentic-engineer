@@ -22,6 +22,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
@@ -69,11 +71,11 @@ func traitReadDesign(t *testing.T, files map[string]string) *artifacts.DesignFil
 // override them to inject failure.
 func ocDeployments(urlsByComponent map[string]string) *mocks.ComponentClientMock {
 	return &mocks.ComponentClientMock{
-		ListDeploymentsFunc: func(_ context.Context, _, _, componentName string) (*models.DeploymentList, error) {
+		ListDeploymentsFunc: func(_ context.Context, _, _, componentName string) (*apigen.DeploymentList, error) {
 			if u, ok := urlsByComponent[componentName]; ok && u != "" {
-				return &models.DeploymentList{Items: []models.Deployment{{EndpointURL: u}}}, nil
+				return &apigen.DeploymentList{Items: []apigen.Deployment{{EndpointURL: u}}}, nil
 			}
-			return &models.DeploymentList{}, nil
+			return &apigen.DeploymentList{}, nil
 		},
 		UpdateComponentTraitsFunc: func(context.Context, string, string, string, []models.ComponentTrait) error {
 			return nil
@@ -355,8 +357,8 @@ func Test_siblingSPAOrigins(t *testing.T) {
 		}
 		design := traitReadDesign(t, files)
 		oc := &mocks.ComponentClientMock{
-			ListDeploymentsFunc: func(context.Context, string, string, string) (*models.DeploymentList, error) {
-				return &models.DeploymentList{Items: []models.Deployment{
+			ListDeploymentsFunc: func(context.Context, string, string, string) (*apigen.DeploymentList, error) {
+				return &apigen.DeploymentList{Items: []apigen.Deployment{
 					{EndpointURL: "http://web.local/a"},
 					{EndpointURL: "http://web.local/b"}, // same origin
 				}}, nil
@@ -380,7 +382,7 @@ func Test_siblingSPAOrigins(t *testing.T) {
 		}
 		design := traitReadDesign(t, files)
 		oc := &mocks.ComponentClientMock{
-			ListDeploymentsFunc: func(context.Context, string, string, string) (*models.DeploymentList, error) {
+			ListDeploymentsFunc: func(context.Context, string, string, string) (*apigen.DeploymentList, error) {
 				return nil, errors.New("oc: transient")
 			},
 		}

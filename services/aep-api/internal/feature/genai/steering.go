@@ -29,7 +29,9 @@ var steeringByUseCase = map[string]string{
 		"Requirements files live under specs/requirements/ (main document: specs/requirements/requirements.md) — when creating a file that does not exist yet, always use that full path, never a bare filename.",
 	useCaseDesignGenerate: "\n\nGenerate the design under specs/design/ from the approved requirements in specs/requirements/. Load every relevant skill in ONE loadSkill call (including cell-architecture-dsl), then emit files in EXACTLY this order: " +
 		"(1) specs/design/design.cell — the live architecture diagram (see the cell-architecture-dsl skill for grammar + boundary rules): write it in a SINGLE addFile; the platform streams it into the live diagram line by line as you write; " +
-		"(2) a concise specs/design/design.md; (3) EVERY component's design.json — the component ids MUST match design.cell, and every design.cell edge touching a component MUST appear as a dependency in that component's design.json (and vice versa); (4) wireframes.dsl per web app; (5) openapi.yaml per service LAST. The skills define each artifact.",
+		"(2) a concise specs/design/design.md; (3) EVERY component's design.json — the component ids MUST match design.cell, and every design.cell edge touching a component MUST appear as a dependency in that component's design.json (and vice versa); (4) wireframes.dsl per web app; (5) openapi.yaml per service; " +
+		"(6) specs/validation/validation-criteria.json LAST, per the validation-criteria skill — derived from the requirements prose ONLY, never from the design you just wrote; " +
+		"when the file already exists, keep each unchanged criterion's id stable so previously-authored e2e specs still map. The skills define each artifact.",
 	// useCaseGeneral is the no-useCase turn (the "useCase" field was omitted):
 	// a generic spec turn that is NOT scoped to requirements or design. The
 	// steering names neither flow — it only tells the model where the spec

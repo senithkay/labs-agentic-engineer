@@ -22,9 +22,9 @@
 // testdata/harvest/golden/get_organizations.json.
 //
 // WHY NO GATE / NO NoAuth-401 CASE (deliberate, not a gap): list-organizations
-// is the pre-org-selection carve-out (organization_huma.go, §6.6f). Its input
-// does NOT embed humakit.OrgScopedInput, so there is NO tenant gate on the route
-// — its only auth is the JWKS verifier, which this harness fakes away. So a
+// is the pre-org-selection carve-out (api.tenantGateCarveOuts, §6.6f) — the
+// deny-by-default tenant gate skips it, so its only auth is the JWKS
+// verifier, which this harness fakes away. So a
 // tokenless request is NOT rejected with a gate 401; it reaches the handler
 // (pinned positively in TestOrganizationComponent_CarveOut_NoGate below). The
 // verifier's real tokenless/forged rejection is a DIFFERENT code path and is
@@ -54,32 +54,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 const orgListPath = "/api/v1/organizations"
-
-// problem is the RFC-9457 body shape Huma serves for every error.
-type problem struct {
-	Title  string `json:"title"`
-	Status int    `json:"status"`
-	Detail string `json:"detail"`
-}
-
-func decodeProblem(t *testing.T, body string) problem {
-	t.Helper()
-	var p problem
-	if err := json.Unmarshal([]byte(body), &p); err != nil {
-		t.Fatalf("not an RFC-9457 problem body: %v\n%s", err, body)
-	}
-	return p
-}
 
 // topKeysSansSchema returns the sorted top-level keys of a JSON object with the
 // Huma-injected "$schema" removed — the low-maintenance on-wire contract
@@ -139,14 +124,14 @@ func TestOrganizationComponent_ListMatchesGoldenFieldSet(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t) // skips under -short
 	ns := &ocmocks.NamespaceClientMock{
-		ListNamespacesFunc: func(context.Context) ([]models.OrganizationView, error) {
+		ListNamespacesFunc: func(context.Context) ([]apigen.OrganizationView, error) {
 			// DisplayName/Description left empty → omitempty drops them, matching
 			// the golden's element shape {createdAt, name, status, uuid}.
-			return []models.OrganizationView{{Name: "default", Status: "Active"}}, nil
+			return []apigen.OrganizationView{{Name: "default", Status: "Active"}}, nil
 		},
 	}
 	svc := organization.NewOrganizationService(db, ns)
-	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{OrgSvc: svc}})
+	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{OrgSvc: svc}})
 
 	resp := h.AsOrg("acme").Get(orgListPath)
 	if resp.Code != 200 {
@@ -163,7 +148,7 @@ func TestOrganizationComponent_ListMatchesGoldenFieldSet(t *testing.T) {
 
 	// Semantics (values are scrubbed in the golden): the OC namespace name and
 	// status flow through, and the item carries a non-nil backfilled UUID.
-	var out models.OrganizationList
+	var out apigen.OrganizationList
 	if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
@@ -186,7 +171,7 @@ func TestOrganizationComponent_ErrorMapping(t *testing.T) {
 		name       string
 		clientErr  error
 		wantStatus int
-		wantDetail string
+		wantDetail string // envelope message
 	}{
 		{"oc unauthorized → 401", openchoreo.ErrUnauthorized, 401, "invalid or expired token"},
 		{"oc forbidden → opaque 500", openchoreo.ErrForbidden, 500, "failed to list organizations"},
@@ -196,19 +181,19 @@ func TestOrganizationComponent_ErrorMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			ns := &ocmocks.NamespaceClientMock{
-				ListNamespacesFunc: func(context.Context) ([]models.OrganizationView, error) {
+				ListNamespacesFunc: func(context.Context) ([]apigen.OrganizationView, error) {
 					return nil, tc.clientErr
 				},
 			}
 			svc := organization.NewOrganizationService(nil, ns) // nil DB: errors before any DB access
-			h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{OrgSvc: svc}})
+			h := componenttest.New(t, componenttest.Options{Deps: api.Deps{OrgSvc: svc}})
 
 			resp := h.AsOrg("acme").Get(orgListPath)
 			if resp.Code != tc.wantStatus {
 				t.Fatalf("want %d, got %d body=%s", tc.wantStatus, resp.Code, resp.Body.String())
 			}
-			if p := decodeProblem(t, resp.Body.String()); p.Detail != tc.wantDetail {
-				t.Fatalf("detail: got %q want %q", p.Detail, tc.wantDetail)
+			if e := componenttest.DecodeEnvelope(t, resp.Body.String()); e.Message != tc.wantDetail {
+				t.Fatalf("message: got %q want %q", e.Message, tc.wantDetail)
 			}
 			if tc.wantStatus == 500 && strings.Contains(resp.Body.String(), "connection refused") {
 				t.Fatalf("500 body leaks internals: %s", resp.Body.String())
@@ -226,12 +211,12 @@ func TestOrganizationComponent_ErrorMapping(t *testing.T) {
 func TestOrganizationComponent_CarveOut_NoGate(t *testing.T) {
 	t.Parallel()
 	ns := &ocmocks.NamespaceClientMock{
-		ListNamespacesFunc: func(context.Context) ([]models.OrganizationView, error) {
+		ListNamespacesFunc: func(context.Context) ([]apigen.OrganizationView, error) {
 			return nil, nil // empty → List short-circuits before the DB (nil DB safe)
 		},
 	}
 	svc := organization.NewOrganizationService(nil, ns)
-	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{OrgSvc: svc}})
+	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{OrgSvc: svc}})
 
 	resp := h.NoAuth().Get(orgListPath)
 	if resp.Code == 401 {

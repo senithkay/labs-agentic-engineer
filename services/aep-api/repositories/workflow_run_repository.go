@@ -52,14 +52,22 @@ type WorkflowRunRepository interface {
 	// before it.
 	SetTaskCounts(ctx context.Context, workflowID, runID string, total, done, failed int) error
 
-	// RunningTaskByIssue returns the running task-kind row for a Task, or
-	// (nil, nil) when none — the webhook signaler's point lookup.
+	// RunningTaskByIssue returns the running row that owns an issue's webhook
+	// signals — a coding task's row, or the validation-phase orchestrator's
+	// (kind=validation) row for the project's validation issue — or (nil, nil)
+	// when none. The webhook signaler's point lookup.
 	RunningTaskByIssue(ctx context.Context, repo string, issueNumber int) (*models.DevflowRun, error)
 
 	// RunningDevByProject returns the running dev-kind row for a project, or
 	// (nil, nil) when none. At most one dev workflow runs per project (the
 	// start endpoint enforces it via this lookup).
 	RunningDevByProject(ctx context.Context, orgID, projectID string) (*models.DevflowRun, error)
+
+	// ValidationRunByParent returns the newest validation-kind row (the
+	// validation-phase orchestrator) spawned by a dev run (matched on
+	// parent_workflow_id), or (nil, nil) when none — the status builder's
+	// cheap read of the project's validation phase state.
+	ValidationRunByParent(ctx context.Context, orgID, projectID, parentWorkflowID string) (*models.DevflowRun, error)
 
 	// ListByProject returns a project's rows, newest first, optionally
 	// filtered to one kind ("" = all).
@@ -119,9 +127,13 @@ func (r *workflowRunRepository) SetTaskCounts(ctx context.Context, workflowID, r
 
 func (r *workflowRunRepository) RunningTaskByIssue(ctx context.Context, repo string, issueNumber int) (*models.DevflowRun, error) {
 	var row models.DevflowRun
+	// kind IN (task, validation): the validation-phase orchestrator owns its
+	// issue's signals the same way a coding task owns its own. Dev rows carry
+	// issue_number 0, so they can never match a webhook lookup.
 	err := r.db.WithContext(ctx).
-		Where("kind = ? AND repo = ? AND issue_number = ? AND status = ?",
-			models.WorkflowKindTask, repo, issueNumber, models.WorkflowStatusRunning).
+		Where("kind IN ? AND repo = ? AND issue_number = ? AND status = ?",
+			[]string{models.WorkflowKindTask, models.WorkflowKindValidation},
+			repo, issueNumber, models.WorkflowStatusRunning).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -137,6 +149,22 @@ func (r *workflowRunRepository) RunningDevByProject(ctx context.Context, orgID, 
 	err := r.db.WithContext(ctx).
 		Where("kind = ? AND org_id = ? AND project_id = ? AND status = ?",
 			models.WorkflowKindDev, orgID, projectID, models.WorkflowStatusRunning).
+		Order("created_at DESC").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *workflowRunRepository) ValidationRunByParent(ctx context.Context, orgID, projectID, parentWorkflowID string) (*models.DevflowRun, error) {
+	var row models.DevflowRun
+	err := r.db.WithContext(ctx).
+		Where("kind = ? AND org_id = ? AND project_id = ? AND parent_workflow_id = ?",
+			models.WorkflowKindValidation, orgID, projectID, parentWorkflowID).
 		Order("created_at DESC").
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

@@ -145,7 +145,13 @@ export function runClaudeQuery(
   // mentions back-link automatically) — issues arrive pre-linked, so the
   // former aep:related-issues preload is gone. See AE-HANDOFF-DESIGN.md in
   // openchoreo/agents/sre-agent.
+  // Validation tasks additionally preload the validation workflow body:
+  // it replaces the implementation workflow and the run cannot afford
+  // the agent skipping a description-triggered load of it.
   const skillPreload: string[] = ["aep:aep"];
+  if (req.taskKind === "validation") {
+    skillPreload.push("aep:aep-validation");
+  }
   if (perTaskSkills?.skillsPluginDir) {
     plugins.push({ type: "local", path: perTaskSkills.skillsPluginDir });
     for (const name of perTaskSkills.preloadSkillNames) {

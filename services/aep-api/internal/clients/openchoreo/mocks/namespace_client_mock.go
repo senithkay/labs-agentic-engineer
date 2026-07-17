@@ -7,8 +7,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // Ensure, that NamespaceClientMock does implement openchoreo.NamespaceClient.
@@ -21,10 +22,10 @@ var _ openchoreo.NamespaceClient = &NamespaceClientMock{}
 //
 //		// make and configure a mocked openchoreo.NamespaceClient
 //		mockedNamespaceClient := &NamespaceClientMock{
-//			GetNamespaceFunc: func(ctx context.Context, name string) (*models.OrganizationView, error) {
+//			GetNamespaceFunc: func(ctx context.Context, name string) (*apigen.OrganizationView, error) {
 //				panic("mock out the GetNamespace method")
 //			},
-//			ListNamespacesFunc: func(ctx context.Context) ([]models.OrganizationView, error) {
+//			ListNamespacesFunc: func(ctx context.Context) ([]apigen.OrganizationView, error) {
 //				panic("mock out the ListNamespaces method")
 //			},
 //		}
@@ -35,10 +36,10 @@ var _ openchoreo.NamespaceClient = &NamespaceClientMock{}
 //	}
 type NamespaceClientMock struct {
 	// GetNamespaceFunc mocks the GetNamespace method.
-	GetNamespaceFunc func(ctx context.Context, name string) (*models.OrganizationView, error)
+	GetNamespaceFunc func(ctx context.Context, name string) (*apigen.OrganizationView, error)
 
 	// ListNamespacesFunc mocks the ListNamespaces method.
-	ListNamespacesFunc func(ctx context.Context) ([]models.OrganizationView, error)
+	ListNamespacesFunc func(ctx context.Context) ([]apigen.OrganizationView, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -60,7 +61,7 @@ type NamespaceClientMock struct {
 }
 
 // GetNamespace calls GetNamespaceFunc.
-func (mock *NamespaceClientMock) GetNamespace(ctx context.Context, name string) (*models.OrganizationView, error) {
+func (mock *NamespaceClientMock) GetNamespace(ctx context.Context, name string) (*apigen.OrganizationView, error) {
 	if mock.GetNamespaceFunc == nil {
 		panic("NamespaceClientMock.GetNamespaceFunc: method is nil but NamespaceClient.GetNamespace was just called")
 	}
@@ -96,7 +97,7 @@ func (mock *NamespaceClientMock) GetNamespaceCalls() []struct {
 }
 
 // ListNamespaces calls ListNamespacesFunc.
-func (mock *NamespaceClientMock) ListNamespaces(ctx context.Context) ([]models.OrganizationView, error) {
+func (mock *NamespaceClientMock) ListNamespaces(ctx context.Context) ([]apigen.OrganizationView, error) {
 	if mock.ListNamespacesFunc == nil {
 		panic("NamespaceClientMock.ListNamespacesFunc: method is nil but NamespaceClient.ListNamespaces was just called")
 	}

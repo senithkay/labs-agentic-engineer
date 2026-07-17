@@ -67,7 +67,7 @@ func TestDedupeLabelFor(t *testing.T) {
 func TestRankIssuesByQuery(t *testing.T) {
 	// The exact query shape that returned empty under the old substring
 	// filter — a multi-word natural-language query. It must now surface #5.
-	got := rankIssuesByQuery(searchFixtures, "service1 timeout retry backoff for service2")
+	got := RankIssuesByQuery(searchFixtures, "service1 timeout retry backoff for service2")
 	nums := numbers(got)
 	if !contains(nums, 5) {
 		t.Fatalf("expected multi-word query to surface issue #5, got %v", nums)
@@ -79,17 +79,17 @@ func TestRankIssuesByQuery(t *testing.T) {
 	}
 
 	// Empty query is a "list all" call — unchanged contract.
-	if len(rankIssuesByQuery(searchFixtures, "")) != len(searchFixtures) {
+	if len(RankIssuesByQuery(searchFixtures, "")) != len(searchFixtures) {
 		t.Error("empty query should return all issues")
 	}
 
 	// A query with no lexical overlap returns nothing (same as before).
-	if got := rankIssuesByQuery(searchFixtures, "oomkilled memory pressure"); len(got) != 0 {
+	if got := RankIssuesByQuery(searchFixtures, "oomkilled memory pressure"); len(got) != 0 {
 		t.Errorf("expected no matches for unrelated query, got %v", numbers(got))
 	}
 
 	// Stopwords/short tokens alone must not match everything.
-	if got := rankIssuesByQuery(searchFixtures, "the a for with error"); len(got) != len(searchFixtures) {
+	if got := RankIssuesByQuery(searchFixtures, "the a for with error"); len(got) != len(searchFixtures) {
 		// all-stopword query tokenises to empty -> "list all"
 		t.Errorf("all-stopword query should behave as list-all, got %d", len(got))
 	}

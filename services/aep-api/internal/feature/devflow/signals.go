@@ -36,6 +36,10 @@ const (
 	SigDeployStatus = "deploy-status"
 	// SigGateDecision — the approve/reject API endpoint → either workflow.
 	SigGateDecision = "gate-decision"
+	// SigLaneStatus — ValidationFlowWorkflow → its ValidationTaskWorkflow lane
+	// children. The orchestrator owns the validation issue's webhook signals
+	// and forwards each lane's terminal state (correlated by ExecutionID).
+	SigLaneStatus = "lane-status"
 )
 
 // Phase values shared by the status signals.
@@ -61,6 +65,14 @@ type RunStatusSignal struct {
 	Message     string `json:"message,omitempty"`
 	ImageRef    string `json:"imageRef,omitempty"` // build
 	Endpoint    string `json:"endpoint,omitempty"` // deploy
+}
+
+// LaneStatusSignal is the orchestrator's forwarded terminal state for one
+// validation lane (see SigLaneStatus).
+type LaneStatusSignal struct {
+	Lane    string `json:"lane"`
+	Phase   string `json:"phase"` // succeeded | failed
+	Message string `json:"message,omitempty"`
 }
 
 // GateDecisionSignal carries a human approve/reject for a named gate.

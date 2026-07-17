@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"gorm.io/gorm"
 
 	"github.com/wso2/aep/aep-api/models"
@@ -46,7 +48,7 @@ func NewRcaAgentReportRepository(db *gorm.DB) *RcaAgentReportRepository {
 
 // Create inserts a new report for orgID, returning it with its
 // server-assigned ID and CreatedAt populated.
-func (r *RcaAgentReportRepository) Create(ctx context.Context, orgID string, in *models.CreateRcaAgentReportRequest) (*models.RcaAgentReport, error) {
+func (r *RcaAgentReportRepository) Create(ctx context.Context, orgID string, in *apigen.CreateRcaAgentReportRequest) (*models.RcaAgentReport, error) {
 	if orgID == "" {
 		return nil, fmt.Errorf("rca_agent_reports: orgID is required")
 	}

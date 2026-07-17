@@ -70,12 +70,18 @@ test("filterTurnSnapshot mirrors the walk's rules over an in-memory map", () => 
     "a.md": "x",
     "b/system.dsl": "y",
     "b/design.json": "z",
+    "specs/validation/validation-criteria.json": "keep",
     "b/openapi.yaml": "drop",
     "b/x.gen.json": "drop",
     ".hidden/inner.md": "drop",
     "b/.dot.md": "drop",
   });
-  assert.deepEqual(Object.keys(filtered).sort(), ["a.md", "b/design.json", "b/system.dsl"]);
+  assert.deepEqual(Object.keys(filtered).sort(), [
+    "a.md",
+    "b/design.json",
+    "b/system.dsl",
+    "specs/validation/validation-criteria.json",
+  ]);
 });
 
 const SKILL_MD = (name: string, description: string, body: string): string =>

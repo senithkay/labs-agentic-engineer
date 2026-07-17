@@ -84,11 +84,48 @@ export function deployStageView(status: ProjectStatus): StageView {
         line: `deploying · ${comps.ready}/${comps.total} components`,
         tone: "info",
       };
-    case "deployed":
-      return { version, line: "live in dev", tone: "success" };
+    case "deployed": {
+      // Validation runs after the components deploy, so its state is appended to
+      // the live-in-dev line (deployed stays the deploy tone; validation is
+      // informational text here — the deployments board carries the loud chip).
+      const v = validationView(status.deploy.validation);
+      return {
+        version,
+        line: v ? `live in dev · ${v.label}` : "live in dev",
+        tone: "success",
+      };
+    }
     case "failed":
       return { version, line: "deploy failed", tone: "error" };
-    default:
+    default: {
+      // No live deploy status — but validation only runs after the app
+      // deploys, so a non-none validation state means it IS live in dev.
+      // Surface it even when the binding read lags or returns nothing (a
+      // transient/degraded deploy-status read must not hide validation).
+      const v = validationView(status.deploy.validation);
+      if (v) return { version, line: `live in dev · ${v.label}`, tone: v.tone };
       return { version: "", line: "nothing deployed", tone: "ghost" };
+    }
+  }
+}
+
+// validationView maps the coarse deploy.validation state to a label + tone,
+// shared by the overview deploy line (suffix) and the deployments board chip.
+// null = nothing to show (no validation reached, or no acceptance criteria).
+export function validationView(
+  validation: string,
+): { label: string; tone: StageTone } | null {
+  switch (validation) {
+    case "running":
+      return { label: "validating", tone: "info" };
+    case "completed":
+      // "completed" means the run finished — the pass/fail verdict lives in
+      // the report (behind the PR), so the label makes no claim about the
+      // outcome and instead names what the chip opens.
+      return { label: "validation report", tone: "info" };
+    case "failed":
+      return { label: "validation failed", tone: "error" };
+    default: // "none" | "" | unknown
+      return null;
   }
 }

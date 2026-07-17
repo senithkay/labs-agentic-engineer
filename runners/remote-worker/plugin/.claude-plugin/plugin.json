@@ -1,5 +1,5 @@
 {
   "name": "aep",
-  "version": "0.4.0",
-  "description": "AEP task execution skill for agents working a platform-dispatched component task."
+  "version": "0.6.0",
+  "description": "AEP task execution skills for agents working a platform-dispatched task: `aep` (implementation workflow), `aep-validation` (validation workflow), `playwright-authoring` and `playwright-healing` (validation e2e discipline), `playwright-cli` (vendored from @playwright/cli, Apache-2.0)."
 }

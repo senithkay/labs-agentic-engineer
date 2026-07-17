@@ -127,8 +127,22 @@ type JobInputs struct {
 	// mirroring the Bearer contract — the runner then skips MCP-backed tools.
 	MCPToken string
 
+	// TaskKind is the runner's AEP_TASK_KIND ("implementation" | "validation").
+	// Empty defaults to "implementation" (the coding runner). A validation Job
+	// sets "validation" so the runner preloads the aep-validation skill.
+	TaskKind string
+
 	// ActiveDeadlineSeconds bounds the agent run. Zero falls back to 1h.
 	ActiveDeadlineSeconds int64
+}
+
+// taskKindOrDefault normalizes the runner's AEP_TASK_KIND: empty → the coding
+// default so existing (implementation) dispatch is unchanged.
+func taskKindOrDefault(kind string) string {
+	if kind == "" {
+		return "implementation"
+	}
+	return kind
 }
 
 // Build returns the Job manifest as a map[string]any ready to hand to
@@ -161,6 +175,7 @@ func Build(in JobInputs) (map[string]any, error) {
 		{"name": "AEP_IDENTITY_EMAIL", "value": in.IdentityEmail},
 		{"name": "AEP_IDENTITY_LOGIN", "value": in.IdentityLogin},
 		{"name": "AEP_CORRELATION_ID", "value": in.CorrelationID},
+		{"name": "AEP_TASK_KIND", "value": taskKindOrDefault(in.TaskKind)},
 		{"name": "WORKSPACE_BASE_PATH", "value": "/home/aep/aep-workspace"},
 	}
 	if in.Bearer != "" {

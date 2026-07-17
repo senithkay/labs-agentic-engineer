@@ -21,6 +21,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
@@ -83,8 +84,20 @@ func (p devflowPlanner) RunPlan(ctx context.Context, orgID, projectID string) ([
 	if err != nil {
 		return nil, err
 	}
+	return implementationTasks(views), nil
+}
+
+// implementationTasks maps the open Task views into the dev workflow's
+// planned-task graph, EXCLUDING the validation task. Validation is not an
+// implementation task: it runs in the validating phase (after every component
+// deploys), so keeping it out of the graph stops it blocking/hanging the
+// executing fan-out.
+func implementationTasks(views []task.TaskView) []devflow.PlannedTask {
 	out := make([]devflow.PlannedTask, 0, len(views))
 	for _, v := range views {
+		if v.ExecutorClass == string(taskmeta.ClassValidation) {
+			continue
+		}
 		key := v.Component
 		if key == "" {
 			key = v.Operation
@@ -95,7 +108,7 @@ func (p devflowPlanner) RunPlan(ctx context.Context, orgID, projectID string) ([
 			DependsOn: v.DependsOn,
 		})
 	}
-	return out, nil
+	return out
 }
 
 // heartbeatWriter records a Temporal activity heartbeat on each write so a
@@ -108,12 +121,4 @@ type heartbeatWriter struct {
 func (w heartbeatWriter) Write(p []byte) (int, error) {
 	activity.RecordHeartbeat(w.ctx, "plan streaming")
 	return len(p), nil
-}
-
-// devflowValidator is the post-execution validation step (a stub for now — the
-// real checks (all tasks closed, all deployments Ready) land as a follow-up).
-type devflowValidator struct{}
-
-func (devflowValidator) Validate(ctx context.Context, orgID, projectID, tag string) error {
-	return nil
 }

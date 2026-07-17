@@ -74,7 +74,10 @@ type DevFlowStatus struct {
 	Tag         string       `json:"tag,omitempty"`
 	PendingGate string       `json:"pendingGate,omitempty"`
 	Tasks       []DevTaskRef `json:"tasks,omitempty"`
-	Error       string       `json:"error,omitempty"`
+	// Validation is the validating phase's outcome (the ValidationFlowWorkflow
+	// child). Nil until the validating phase runs.
+	Validation *ValidationRef `json:"validation,omitempty"`
+	Error      string         `json:"error,omitempty"`
 }
 
 // DevTaskRef is a child task's summary in the dev workflow status.
@@ -83,6 +86,16 @@ type DevTaskRef struct {
 	WorkflowID string `json:"workflowId,omitempty"`
 	Phase      string `json:"phase,omitempty"`
 	Outcome    string `json:"outcome,omitempty"`
+}
+
+// ValidationRef is the validating phase's summary in the dev workflow status:
+// the orchestrator child plus its per-lane results. Outcome carries
+// "skipped: no acceptance criteria" when there was nothing to validate.
+type ValidationRef struct {
+	WorkflowID string       `json:"workflowId,omitempty"`
+	Phase      string       `json:"phase,omitempty"`
+	Outcome    string       `json:"outcome,omitempty"`
+	Lanes      []DevTaskRef `json:"lanes,omitempty"`
 }
 
 // DevFlow phase values.
@@ -176,14 +189,62 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 	scheduleTasks(ctx, in, reqTag, tasks, &status)
 
 	// 4. Validate.
+	// 4a. Quality bar: every planned task must have succeeded. A failed or
+	// dependency-skipped task means the system was not fully implemented +
+	// deployed, so there is nothing coherent to validate — fail fast, before
+	// asking for the validate gate (a doomed run never waits for approval).
+	if unmet := notSucceeded(status.Tasks); len(unmet) > 0 {
+		return fail(fmt.Sprintf("validating: %d task(s) did not succeed: %s", len(unmet), strings.Join(unmet, ", ")))
+	}
+	// 4b. Validate gate (human pause point, auto by default).
 	if ok, d := gates.await(ctx, GateValidate); !ok {
 		return fail("validate gate rejected: " + d.Note)
 	}
 	status.Phase = DevPhaseValidating
+	// 4c. Consistency check: every design component has a Ready deployment
+	// (a reachable endpoint). Independent verification against OpenChoreo of
+	// what the task outcomes imply.
 	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).Validate, ValidateInput{
 		OrgID: in.OrgID, ProjectID: in.ProjectID, Tag: reqTag,
 	}).Get(ctx, nil); err != nil {
 		return fail("validate: " + err.Error())
+	}
+	// 4d. Run the validating phase as its own child workflow tree: the
+	// orchestrator resolves the project's validation issue (skips when no
+	// acceptance criteria were authored), fans out the validation lanes in
+	// parallel, and merges the single validation PR. A mechanical failure
+	// (crash/timeout/PR rejected) fails the run; a failing test suite still
+	// merges a PR + report and succeeds — that verdict is the human's to read
+	// at the complete gate.
+	vwid := validationFlowWorkflowID(in.OrgID, in.ProjectID, reqTag)
+	status.Validation = &ValidationRef{WorkflowID: vwid, Phase: TaskPhaseStarting}
+	vctx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+		WorkflowID:        vwid,
+		ParentClosePolicy: enumsParentClosePolicyTerminate(),
+	})
+	var vres ValidationFlowResult
+	if err := workflow.ExecuteChildWorkflow(vctx, ValidationFlowWorkflow, ValidationFlowInput{
+		OrgID:         in.OrgID,
+		ProjectID:     in.ProjectID,
+		Repo:          in.Repo,
+		Tag:           reqTag,
+		DevWorkflowID: info.WorkflowExecution.ID,
+		Gates:         in.Gates,
+	}).Get(ctx, &vres); err != nil {
+		status.Validation.Phase, status.Validation.Outcome = TaskPhaseFailed, OutcomeFailed
+		return fail("validation run failed: " + err.Error())
+	}
+	for _, l := range vres.Lanes {
+		status.Validation.Lanes = append(status.Validation.Lanes, DevTaskRef{Issue: l.Issue, Phase: TaskPhaseDone, Outcome: l.Outcome})
+	}
+	switch vres.Outcome {
+	case OutcomeSucceeded:
+		status.Validation.Phase, status.Validation.Outcome = TaskPhaseDone, OutcomeSucceeded
+	case ValidationOutcomeSkipped:
+		status.Validation.Phase, status.Validation.Outcome = TaskPhaseDone, "skipped: "+vres.Reason
+	default:
+		status.Validation.Phase, status.Validation.Outcome = TaskPhaseFailed, vres.Outcome
+		return fail("validation run did not succeed: " + orEmpty(vres.Reason, vres.Outcome))
 	}
 
 	if ok, d := gates.await(ctx, GateComplete); !ok {
@@ -354,6 +415,27 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 		}
 		flushCounts()
 	}
+}
+
+// notSucceeded returns the issue labels of every task whose outcome is not
+// "succeeded" (failed or dependency-skipped) — the quality bar the validating
+// phase enforces before running validation.
+func notSucceeded(tasks []DevTaskRef) []string {
+	var out []string
+	for _, t := range tasks {
+		if t.Outcome != OutcomeSucceeded {
+			out = append(out, fmt.Sprintf("#%d (%s)", t.Issue, orEmpty(t.Outcome, "incomplete")))
+		}
+	}
+	return out
+}
+
+// orEmpty returns fallback when s is empty.
+func orEmpty(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }
 
 // setTaskRef updates (in place) the status entry for issue, filling only the

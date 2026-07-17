@@ -16,10 +16,11 @@
 
 package skills
 
-// Provisioning + embedded-skill reconciliation. The embedded library ships in
-// the BFF container (the shipping vehicle; platform + org kinds, kind in
-// frontmatter) and is seeded + reconciled into each org's skills repo (the
-// live store) under the FLAT layout skills/<name>/
+// Provisioning + platform-skill reconciliation. The platform skill library
+// ships in the BFF container as on-disk files (config.SkillsDir, read at
+// runtime; platform + org kinds, kind in frontmatter) and is seeded +
+// reconciled into each org's skills repo (the live store) under the FLAT layout
+// skills/<name>/
 // (docs/design/skills-unified-library-migration.md; skills-repo-storage.md §6
 // reconcile, §10 provisioning). Reconcile is content-hash based: absent →
 // seed; embedded content SHA ≠ repo content SHA → overwrite (replacing the
@@ -42,7 +43,6 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
-	embedskills "github.com/wso2/aep/aep-api/skills"
 )
 
 // SkillUpdate is one row of the "updates available" badge: an org-kind skill
@@ -132,7 +132,7 @@ func isUserKind(kind string) bool {
 // before the writes) so references removed by the new content never linger.
 // Returns the number of skills written + migrated + purged. §6.2.
 func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo *models.GitRepository) (int, error) {
-	embedded, err := loadEmbeddedLibrary()
+	embedded, err := loadLibrary(s.library)
 	if err != nil {
 		return 0, err
 	}
@@ -233,7 +233,7 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 	if err != nil {
 		return nil, err
 	}
-	embedded, err := loadEmbeddedLibrary()
+	embedded, err := loadLibrary(s.library)
 	if err != nil {
 		return nil, err
 	}
@@ -258,20 +258,23 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 	return out, nil
 }
 
-// loadEmbeddedLibrary reads the whole vendored skill library
-// (embedded/<name>/SKILL.md + optional references/*.md — see skills/embed.go)
-// into the canonical Skill shape. Each skill's kind comes from its frontmatter
-// (`metadata.aep.kind`; absent → org); the embedded source may only carry the
+// loadLibrary reads the whole platform skill library (fsys rooted at the
+// library dir, i.e. <name>/SKILL.md + optional references/*.md) into the
+// canonical Skill shape. In production fsys is os.DirFS(config.SkillsDir); in
+// tests it is an injected fs.FS. Each skill's kind comes from its frontmatter
+// (`metadata.aep.kind`; absent → org); the library may only carry the
 // platform-shipped kinds — anything else is coerced to org with a warning.
 // Entries without a parseable SKILL.md whose frontmatter name matches the
 // directory are skipped with a warning — a bad bundled file must never break
-// provisioning.
-func loadEmbeddedLibrary() ([]Skill, error) {
-	const root = "embedded"
-	fsys := fs.FS(embedskills.LibraryFS)
+// provisioning. A nil fsys yields an empty library (seed nothing).
+func loadLibrary(fsys fs.FS) ([]Skill, error) {
+	if fsys == nil {
+		return nil, nil
+	}
+	const root = "."
 	entries, err := fs.ReadDir(fsys, root)
 	if err != nil {
-		return nil, fmt.Errorf("read embedded skills dir: %w", err)
+		return nil, fmt.Errorf("read skills library dir: %w", err)
 	}
 	out := make([]Skill, 0, len(entries))
 	for _, e := range entries {

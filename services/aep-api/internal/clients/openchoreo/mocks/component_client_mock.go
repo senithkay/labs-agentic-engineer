@@ -7,6 +7,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -21,37 +23,37 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //
 //		// make and configure a mocked openchoreo.ComponentClient
 //		mockedComponentClient := &ComponentClientMock{
-//			CreateComponentFunc: func(ctx context.Context, orgName string, projectName string, req *models.CreateComponentRequest) (*models.Component, error) {
+//			CreateComponentFunc: func(ctx context.Context, orgName string, projectName string, req *models.CreateComponentRequest) (*apigen.Component, error) {
 //				panic("mock out the CreateComponent method")
 //			},
 //			DeleteComponentFunc: func(ctx context.Context, orgName string, projectName string, componentName string) error {
 //				panic("mock out the DeleteComponent method")
 //			},
-//			GetComponentFunc: func(ctx context.Context, orgName string, projectName string, componentName string) (*models.Component, error) {
+//			GetComponentFunc: func(ctx context.Context, orgName string, projectName string, componentName string) (*apigen.Component, error) {
 //				panic("mock out the GetComponent method")
 //			},
-//			GetWorkflowRunFunc: func(ctx context.Context, orgName string, runName string) (*models.WorkflowRun, error) {
+//			GetWorkflowRunFunc: func(ctx context.Context, orgName string, runName string) (*apigen.WorkflowRun, error) {
 //				panic("mock out the GetWorkflowRun method")
 //			},
-//			ListComponentsFunc: func(ctx context.Context, orgName string, projectName string, limit int, cursor string) (*models.ComponentList, error) {
+//			ListComponentsFunc: func(ctx context.Context, orgName string, projectName string, limit int, cursor string) (*apigen.ComponentList, error) {
 //				panic("mock out the ListComponents method")
 //			},
-//			ListDeploymentsFunc: func(ctx context.Context, orgName string, projectName string, componentName string) (*models.DeploymentList, error) {
+//			ListDeploymentsFunc: func(ctx context.Context, orgName string, projectName string, componentName string) (*apigen.DeploymentList, error) {
 //				panic("mock out the ListDeployments method")
 //			},
 //			ListProjectReleaseBindingsFunc: func(ctx context.Context, orgName string, projectName string) ([]models.ReleaseBindingSummary, error) {
 //				panic("mock out the ListProjectReleaseBindings method")
 //			},
-//			ListWorkflowRunsFunc: func(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*models.WorkflowRunList, error) {
+//			ListWorkflowRunsFunc: func(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*apigen.WorkflowRunList, error) {
 //				panic("mock out the ListWorkflowRuns method")
 //			},
-//			TriggerBuildFunc: func(ctx context.Context, orgName string, projectName string, componentName string, secretRef string, runName string) (*models.WorkflowRun, error) {
+//			TriggerBuildFunc: func(ctx context.Context, orgName string, projectName string, componentName string, secretRef string, runName string) (*apigen.WorkflowRun, error) {
 //				panic("mock out the TriggerBuild method")
 //			},
-//			TriggerBuildAtCommitFunc: func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*models.WorkflowRun, error) {
+//			TriggerBuildAtCommitFunc: func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*apigen.WorkflowRun, error) {
 //				panic("mock out the TriggerBuildAtCommit method")
 //			},
-//			TriggerCodingAgentFunc: func(ctx context.Context, params openchoreo.CodingAgentParams) (*models.WorkflowRun, error) {
+//			TriggerCodingAgentFunc: func(ctx context.Context, params openchoreo.CodingAgentParams) (*apigen.WorkflowRun, error) {
 //				panic("mock out the TriggerCodingAgent method")
 //			},
 //			UpdateComponentTraitEnvironmentConfigsFunc: func(ctx context.Context, orgName string, projectName string, componentName string, configs map[string]map[string]interface{}) error {
@@ -74,37 +76,37 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //	}
 type ComponentClientMock struct {
 	// CreateComponentFunc mocks the CreateComponent method.
-	CreateComponentFunc func(ctx context.Context, orgName string, projectName string, req *models.CreateComponentRequest) (*models.Component, error)
+	CreateComponentFunc func(ctx context.Context, orgName string, projectName string, req *models.CreateComponentRequest) (*apigen.Component, error)
 
 	// DeleteComponentFunc mocks the DeleteComponent method.
 	DeleteComponentFunc func(ctx context.Context, orgName string, projectName string, componentName string) error
 
 	// GetComponentFunc mocks the GetComponent method.
-	GetComponentFunc func(ctx context.Context, orgName string, projectName string, componentName string) (*models.Component, error)
+	GetComponentFunc func(ctx context.Context, orgName string, projectName string, componentName string) (*apigen.Component, error)
 
 	// GetWorkflowRunFunc mocks the GetWorkflowRun method.
-	GetWorkflowRunFunc func(ctx context.Context, orgName string, runName string) (*models.WorkflowRun, error)
+	GetWorkflowRunFunc func(ctx context.Context, orgName string, runName string) (*apigen.WorkflowRun, error)
 
 	// ListComponentsFunc mocks the ListComponents method.
-	ListComponentsFunc func(ctx context.Context, orgName string, projectName string, limit int, cursor string) (*models.ComponentList, error)
+	ListComponentsFunc func(ctx context.Context, orgName string, projectName string, limit int, cursor string) (*apigen.ComponentList, error)
 
 	// ListDeploymentsFunc mocks the ListDeployments method.
-	ListDeploymentsFunc func(ctx context.Context, orgName string, projectName string, componentName string) (*models.DeploymentList, error)
+	ListDeploymentsFunc func(ctx context.Context, orgName string, projectName string, componentName string) (*apigen.DeploymentList, error)
 
 	// ListProjectReleaseBindingsFunc mocks the ListProjectReleaseBindings method.
 	ListProjectReleaseBindingsFunc func(ctx context.Context, orgName string, projectName string) ([]models.ReleaseBindingSummary, error)
 
 	// ListWorkflowRunsFunc mocks the ListWorkflowRuns method.
-	ListWorkflowRunsFunc func(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*models.WorkflowRunList, error)
+	ListWorkflowRunsFunc func(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*apigen.WorkflowRunList, error)
 
 	// TriggerBuildFunc mocks the TriggerBuild method.
-	TriggerBuildFunc func(ctx context.Context, orgName string, projectName string, componentName string, secretRef string, runName string) (*models.WorkflowRun, error)
+	TriggerBuildFunc func(ctx context.Context, orgName string, projectName string, componentName string, secretRef string, runName string) (*apigen.WorkflowRun, error)
 
 	// TriggerBuildAtCommitFunc mocks the TriggerBuildAtCommit method.
-	TriggerBuildAtCommitFunc func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*models.WorkflowRun, error)
+	TriggerBuildAtCommitFunc func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*apigen.WorkflowRun, error)
 
 	// TriggerCodingAgentFunc mocks the TriggerCodingAgent method.
-	TriggerCodingAgentFunc func(ctx context.Context, params openchoreo.CodingAgentParams) (*models.WorkflowRun, error)
+	TriggerCodingAgentFunc func(ctx context.Context, params openchoreo.CodingAgentParams) (*apigen.WorkflowRun, error)
 
 	// UpdateComponentTraitEnvironmentConfigsFunc mocks the UpdateComponentTraitEnvironmentConfigs method.
 	UpdateComponentTraitEnvironmentConfigsFunc func(ctx context.Context, orgName string, projectName string, componentName string, configs map[string]map[string]interface{}) error
@@ -320,7 +322,7 @@ type ComponentClientMock struct {
 }
 
 // CreateComponent calls CreateComponentFunc.
-func (mock *ComponentClientMock) CreateComponent(ctx context.Context, orgName string, projectName string, req *models.CreateComponentRequest) (*models.Component, error) {
+func (mock *ComponentClientMock) CreateComponent(ctx context.Context, orgName string, projectName string, req *models.CreateComponentRequest) (*apigen.Component, error) {
 	if mock.CreateComponentFunc == nil {
 		panic("ComponentClientMock.CreateComponentFunc: method is nil but ComponentClient.CreateComponent was just called")
 	}
@@ -408,7 +410,7 @@ func (mock *ComponentClientMock) DeleteComponentCalls() []struct {
 }
 
 // GetComponent calls GetComponentFunc.
-func (mock *ComponentClientMock) GetComponent(ctx context.Context, orgName string, projectName string, componentName string) (*models.Component, error) {
+func (mock *ComponentClientMock) GetComponent(ctx context.Context, orgName string, projectName string, componentName string) (*apigen.Component, error) {
 	if mock.GetComponentFunc == nil {
 		panic("ComponentClientMock.GetComponentFunc: method is nil but ComponentClient.GetComponent was just called")
 	}
@@ -452,7 +454,7 @@ func (mock *ComponentClientMock) GetComponentCalls() []struct {
 }
 
 // GetWorkflowRun calls GetWorkflowRunFunc.
-func (mock *ComponentClientMock) GetWorkflowRun(ctx context.Context, orgName string, runName string) (*models.WorkflowRun, error) {
+func (mock *ComponentClientMock) GetWorkflowRun(ctx context.Context, orgName string, runName string) (*apigen.WorkflowRun, error) {
 	if mock.GetWorkflowRunFunc == nil {
 		panic("ComponentClientMock.GetWorkflowRunFunc: method is nil but ComponentClient.GetWorkflowRun was just called")
 	}
@@ -492,7 +494,7 @@ func (mock *ComponentClientMock) GetWorkflowRunCalls() []struct {
 }
 
 // ListComponents calls ListComponentsFunc.
-func (mock *ComponentClientMock) ListComponents(ctx context.Context, orgName string, projectName string, limit int, cursor string) (*models.ComponentList, error) {
+func (mock *ComponentClientMock) ListComponents(ctx context.Context, orgName string, projectName string, limit int, cursor string) (*apigen.ComponentList, error) {
 	if mock.ListComponentsFunc == nil {
 		panic("ComponentClientMock.ListComponentsFunc: method is nil but ComponentClient.ListComponents was just called")
 	}
@@ -540,7 +542,7 @@ func (mock *ComponentClientMock) ListComponentsCalls() []struct {
 }
 
 // ListDeployments calls ListDeploymentsFunc.
-func (mock *ComponentClientMock) ListDeployments(ctx context.Context, orgName string, projectName string, componentName string) (*models.DeploymentList, error) {
+func (mock *ComponentClientMock) ListDeployments(ctx context.Context, orgName string, projectName string, componentName string) (*apigen.DeploymentList, error) {
 	if mock.ListDeploymentsFunc == nil {
 		panic("ComponentClientMock.ListDeploymentsFunc: method is nil but ComponentClient.ListDeployments was just called")
 	}
@@ -624,7 +626,7 @@ func (mock *ComponentClientMock) ListProjectReleaseBindingsCalls() []struct {
 }
 
 // ListWorkflowRuns calls ListWorkflowRunsFunc.
-func (mock *ComponentClientMock) ListWorkflowRuns(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*models.WorkflowRunList, error) {
+func (mock *ComponentClientMock) ListWorkflowRuns(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*apigen.WorkflowRunList, error) {
 	if mock.ListWorkflowRunsFunc == nil {
 		panic("ComponentClientMock.ListWorkflowRunsFunc: method is nil but ComponentClient.ListWorkflowRuns was just called")
 	}
@@ -676,7 +678,7 @@ func (mock *ComponentClientMock) ListWorkflowRunsCalls() []struct {
 }
 
 // TriggerBuild calls TriggerBuildFunc.
-func (mock *ComponentClientMock) TriggerBuild(ctx context.Context, orgName string, projectName string, componentName string, secretRef string, runName string) (*models.WorkflowRun, error) {
+func (mock *ComponentClientMock) TriggerBuild(ctx context.Context, orgName string, projectName string, componentName string, secretRef string, runName string) (*apigen.WorkflowRun, error) {
 	if mock.TriggerBuildFunc == nil {
 		panic("ComponentClientMock.TriggerBuildFunc: method is nil but ComponentClient.TriggerBuild was just called")
 	}
@@ -728,7 +730,7 @@ func (mock *ComponentClientMock) TriggerBuildCalls() []struct {
 }
 
 // TriggerBuildAtCommit calls TriggerBuildAtCommitFunc.
-func (mock *ComponentClientMock) TriggerBuildAtCommit(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*models.WorkflowRun, error) {
+func (mock *ComponentClientMock) TriggerBuildAtCommit(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*apigen.WorkflowRun, error) {
 	if mock.TriggerBuildAtCommitFunc == nil {
 		panic("ComponentClientMock.TriggerBuildAtCommitFunc: method is nil but ComponentClient.TriggerBuildAtCommit was just called")
 	}
@@ -784,7 +786,7 @@ func (mock *ComponentClientMock) TriggerBuildAtCommitCalls() []struct {
 }
 
 // TriggerCodingAgent calls TriggerCodingAgentFunc.
-func (mock *ComponentClientMock) TriggerCodingAgent(ctx context.Context, params openchoreo.CodingAgentParams) (*models.WorkflowRun, error) {
+func (mock *ComponentClientMock) TriggerCodingAgent(ctx context.Context, params openchoreo.CodingAgentParams) (*apigen.WorkflowRun, error) {
 	if mock.TriggerCodingAgentFunc == nil {
 		panic("ComponentClientMock.TriggerCodingAgentFunc: method is nil but ComponentClient.TriggerCodingAgent was just called")
 	}

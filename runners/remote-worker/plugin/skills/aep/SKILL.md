@@ -21,6 +21,12 @@ provisioning and refreshes them on every call.
 > (`claude plugin install <repo>/remote-worker/plugin`), then use your own
 > `gh auth login`. The workflow below is identical.
 
+> **Validation tasks**: if your prompt says this is a **validation task**
+> (issue labelled `aep` + `validation`), the `aep-validation` skill's
+> workflow REPLACES the implementation workflow below — load it. The
+> authentication model, git/gh conventions, and the deny-list here still
+> apply.
+
 ## Active project skills
 
 In addition to this `aep` skill, the platform preloads **project-attached

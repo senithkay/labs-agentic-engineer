@@ -18,7 +18,12 @@
 
 import { describe, expect, it } from "vitest";
 import type { components } from "../../../generated/aep-api";
-import { buildStageView, deployStageView, specStageView } from "./pipeline";
+import {
+  buildStageView,
+  deployStageView,
+  specStageView,
+  validationView,
+} from "./pipeline";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 
@@ -47,6 +52,7 @@ function status(over: {
       version: "",
       status: "none",
       components: { total: 0, ready: 0 },
+      validation: "none",
       ...over.deploy,
     },
   };
@@ -148,7 +154,7 @@ describe("deployStageView", () => {
     );
     expect(v.line).toBe("deploying · 3/5 components");
   });
-  it("deployed → live", () => {
+  it("deployed with no validation → plain live in dev", () => {
     const v = deployStageView(
       status({
         deploy: {
@@ -160,6 +166,33 @@ describe("deployStageView", () => {
     );
     expect(v.tone).toBe("success");
     expect(v.version).toBe("v1");
+    expect(v.line).toBe("live in dev");
+  });
+  it("deployed while validating → appends the validation state", () => {
+    const v = deployStageView(
+      status({
+        deploy: {
+          version: "v1",
+          status: "deployed",
+          components: { total: 5, ready: 5 },
+          validation: "running",
+        },
+      }),
+    );
+    expect(v.line).toBe("live in dev · validating");
+  });
+  it("deployed and validation ran → appends validation complete", () => {
+    const v = deployStageView(
+      status({
+        deploy: {
+          version: "v1",
+          status: "deployed",
+          components: { total: 5, ready: 5 },
+          validation: "completed",
+        },
+      }),
+    );
+    expect(v.line).toBe("live in dev · validation report");
   });
   it("failed → error", () => {
     const v = deployStageView(
@@ -172,5 +205,52 @@ describe("deployStageView", () => {
       }),
     );
     expect(v.tone).toBe("error");
+  });
+  it("status none but validation ran → still surfaces live-in-dev + validation", () => {
+    // Validation runs only post-deploy, so a non-none validation means the app
+    // is live even if the deploy-status read lagged to "none".
+    const v = deployStageView(
+      status({
+        deploy: {
+          version: "v1",
+          status: "none",
+          components: { total: 1, ready: 0 },
+          validation: "completed",
+        },
+      }),
+    );
+    expect(v.line).toBe("live in dev · validation report");
+    expect(v.tone).toBe("info");
+  });
+  it("status none and no validation → nothing deployed", () => {
+    const v = deployStageView(status({}));
+    expect(v.line).toBe("nothing deployed");
+    expect(v.tone).toBe("ghost");
+  });
+});
+
+describe("validationView", () => {
+  it("none / empty / unknown → null (nothing to show)", () => {
+    expect(validationView("none")).toBeNull();
+    expect(validationView("")).toBeNull();
+    expect(validationView("bogus")).toBeNull();
+  });
+  it("running → validating (info)", () => {
+    expect(validationView("running")).toEqual({
+      label: "validating",
+      tone: "info",
+    });
+  });
+  it("completed → validation report (neutral — the verdict lives in the report)", () => {
+    expect(validationView("completed")).toEqual({
+      label: "validation report",
+      tone: "info",
+    });
+  });
+  it("failed → validation failed (error)", () => {
+    expect(validationView("failed")).toEqual({
+      label: "validation failed",
+      tone: "error",
+    });
   });
 });

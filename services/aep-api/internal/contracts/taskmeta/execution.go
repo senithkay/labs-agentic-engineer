@@ -16,7 +16,11 @@
 
 package taskmeta
 
-import "time"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
 
 // ExecutionKind is the kind of work one Execution attempts for a Task (§7). No
 // Execution spans a human gate: a merged PR ends nothing — it spawns a build.
@@ -103,6 +107,25 @@ type ExecutionFact struct {
 // without a live PR query (§8), so the sentinel and the reconstruction
 // (PRStateFromFacts) live here in the shared encoding.
 const ReasonPRClosedUnmerged = "pr_closed_unmerged"
+
+// ReasonPROpenPrefix + the PR number is stamped on a succeeded coding row when
+// its linked PR opens ("pr#123"), so the read path can recover the PR number
+// from the executions rows without a live PR query (§8). Shared here so both
+// feature/execution (which stamps it) and the project status builder (which
+// links to the validation PR) use one encoding.
+const ReasonPROpenPrefix = "pr#"
+
+// OpenPRNumber parses the PR number from a coding row's PR-open reason
+// ("pr#123" → 123), or 0 when the reason carries no pr# marker. Callers confirm
+// the row is a succeeded coding Execution before trusting the number.
+func OpenPRNumber(reason string) int {
+	rest, ok := strings.CutPrefix(reason, ReasonPROpenPrefix)
+	if !ok {
+		return 0
+	}
+	n, _ := strconv.Atoi(rest)
+	return n
+}
 
 // PRStateFromFacts reconstructs the latest linked PR's state from the
 // latest-per-kind execution facts (documented §13 default — no live PR query,

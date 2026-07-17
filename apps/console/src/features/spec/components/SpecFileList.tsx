@@ -50,9 +50,11 @@ function basename(path: string): string {
 
 const OPENAPI_RE = /\/openapi\.ya?ml$/;
 const COMPONENT_DESIGN_RE = /^specs\/design\/components\/[^/]+\/design\.json$/;
+const VALIDATION_CRITERIA_RE = /^specs\/validation\/validation-criteria\.json$/;
 function fileLabel(path: string): string {
   if (OPENAPI_RE.test(path)) return "API Spec";
   if (COMPONENT_DESIGN_RE.test(path)) return "Design Overview";
+  if (VALIDATION_CRITERIA_RE.test(path)) return "Validation Criteria";
   return basename(path);
 }
 
@@ -164,7 +166,7 @@ export function SpecFileList({
       {groupFiles.length > 0 ? (
         <List dense disablePadding>
           {groupFiles.map((f) =>
-            row(fileSel(f.path), basename(f.path), <FileText size={16} />),
+            row(fileSel(f.path), fileLabel(f.path), <FileText size={16} />),
           )}
         </List>
       ) : (

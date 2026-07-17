@@ -24,8 +24,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 func devBinding(name, readyStatus, readyReason string) models.ReleaseBindingSummary {
@@ -37,7 +40,7 @@ func devBinding(name, readyStatus, readyReason string) models.ReleaseBindingSumm
 	}
 }
 
-func mustStatus(t *testing.T, fx statusFixture) *models.ProjectStatus {
+func mustStatus(t *testing.T, fx statusFixture) *apigen.ProjectStatus {
 	t.Helper()
 	st, err := fx.service().GetProjectStatus(context.Background(), "acme", "web")
 	if err != nil {
@@ -70,7 +73,7 @@ func TestStageDerivation_FullPipeline(t *testing.T) {
 	}
 	st := mustStatus(t, fx)
 
-	if want := (models.SpecStage{Exists: true, Version: "v2", Dirty: true, Design: true}); st.Spec != want {
+	if want := (apigen.SpecStage{Exists: true, Version: "v2", Dirty: true, Design: true}); st.Spec != want {
 		t.Errorf("spec = %+v, want %+v", st.Spec, want)
 	}
 
@@ -263,6 +266,84 @@ func TestDeployStage_VersionlessSkipsDenominator(t *testing.T) {
 	}
 }
 
+// TestDeployStage_ValidationDerivation pins deploy.validation + validationUrl:
+// the coarse run state of the newest build's validation child, and the PR link
+// (the validation issue as a fallback before a PR exists) — all from cheap DB
+// reads (no GitHub in the poll path).
+func TestDeployStage_ValidationDerivation(t *testing.T) {
+	t.Parallel()
+
+	// A dev run must exist for the builder to look up its validation child; keep
+	// it running (no completed run) so this test stays about validation, not the
+	// deploy denominator.
+	devRuns := []models.DevflowRun{{Tag: "v1", WorkflowID: "wf-dev", Status: models.WorkflowStatusRunning}}
+	child := func(status string) *models.DevflowRun {
+		return &models.DevflowRun{
+			Kind: models.WorkflowKindValidation,
+			Repo: "o/r", IssueNumber: 9, ParentWorkflowID: "wf-dev", Status: status,
+		}
+	}
+	// A succeeded coding execution stamped with the open PR number (pr#42) is how
+	// the PR link is recovered without a live PR query.
+	prExecs := &fakeExecs{
+		LatestPerKindScopedFunc: func(context.Context, string, string, int) (map[string]*models.Execution, error) {
+			return map[string]*models.Execution{
+				string(taskmeta.KindCoding): {
+					Kind:   string(taskmeta.KindCoding),
+					Status: string(taskmeta.ExecSucceeded),
+					Reason: taskmeta.ReasonPROpenPrefix + "42",
+				},
+			}, nil
+		},
+	}
+
+	cases := []struct {
+		name       string
+		child      *models.DevflowRun
+		execs      repositories.ExecutionRepository
+		wantStatus string
+		wantURL    string
+	}{
+		{name: "no child → none, no link", wantStatus: "none", wantURL: ""},
+		{
+			name:       "running before a PR → running, issue link",
+			child:      child(models.WorkflowStatusRunning),
+			wantStatus: "running",
+			wantURL:    "https://github.com/o/r/issues/9",
+		},
+		{
+			name:       "completed with an open PR → completed, PR link",
+			child:      child(models.WorkflowStatusCompleted),
+			execs:      prExecs,
+			wantStatus: "completed",
+			wantURL:    "https://github.com/o/r/pull/42",
+		},
+		{
+			name:       "failed → failed, issue link (no succeeded coding row)",
+			child:      child(models.WorkflowStatusFailed),
+			wantStatus: "failed",
+			wantURL:    "https://github.com/o/r/issues/9",
+		},
+		{
+			name:       "canceled → failed",
+			child:      child(models.WorkflowStatusCanceled),
+			wantStatus: "failed",
+			wantURL:    "https://github.com/o/r/issues/9",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := mustStatus(t, statusFixture{runs: devRuns, validationRun: tc.child, execs: tc.execs})
+			if string(st.Deploy.Validation) != tc.wantStatus {
+				t.Errorf("validation = %q, want %q", st.Deploy.Validation, tc.wantStatus)
+			}
+			if st.Deploy.ValidationURL != tc.wantURL {
+				t.Errorf("validationUrl = %q, want %q", st.Deploy.ValidationURL, tc.wantURL)
+			}
+		})
+	}
+}
+
 // TestRepoNotReady_ZeroValueStages pins the short-circuit: the nested stages
 // are contract-required, so a pending repo returns them present but
 // zero-valued — idle build, no deploy, empty spec.
@@ -282,7 +363,7 @@ func TestRepoNotReady_ZeroValueStages(t *testing.T) {
 	if st.Phase != "repo-cloning" {
 		t.Fatalf("phase = %q, want repo-cloning", st.Phase)
 	}
-	if st.Spec != (models.SpecStage{}) {
+	if st.Spec != (apigen.SpecStage{}) {
 		t.Errorf("spec = %+v, want zero-valued", st.Spec)
 	}
 	if st.Build.Status != "idle" || st.Build.Version != "" || st.Build.Tasks.Total != 0 {

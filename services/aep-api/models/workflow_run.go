@@ -23,6 +23,12 @@ import "time"
 const (
 	WorkflowKindDev  = "dev"
 	WorkflowKindTask = "task"
+	// WorkflowKindValidation is the dev run's validation-phase orchestrator
+	// (ValidationFlowWorkflow): one row per validating phase, carrying the
+	// project's validation issue and parented to the dev run. It owns the
+	// issue's webhook signals (see RunningTaskByIssue) and its status is the
+	// phase status the deployments board surfaces.
+	WorkflowKindValidation = "validation"
 
 	WorkflowStatusRunning   = "running"
 	WorkflowStatusCompleted = "completed"
@@ -49,7 +55,7 @@ type DevflowRun struct {
 	WorkflowID string `gorm:"index;uniqueIndex:ux_workflow_runs_wf_run;not null" json:"workflowId"`
 	RunID      string `gorm:"uniqueIndex:ux_workflow_runs_wf_run;not null" json:"runId"`
 
-	Kind string `gorm:"not null;index" json:"kind"` // dev | task
+	Kind string `gorm:"not null;index" json:"kind"` // dev | task | validation
 
 	OrgID     string `gorm:"index;not null" json:"-"`
 	ProjectID string `gorm:"index;not null" json:"projectId"`

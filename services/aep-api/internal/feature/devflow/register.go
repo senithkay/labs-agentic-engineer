@@ -24,8 +24,10 @@ import (
 // Registered workflow type names. Kept as constants because clients start
 // workflows by name and tests assert on them.
 const (
-	DevFlowWorkflowName  = "DevFlowWorkflow"
-	TaskFlowWorkflowName = "TaskFlowWorkflow"
+	DevFlowWorkflowName        = "DevFlowWorkflow"
+	TaskFlowWorkflowName       = "TaskFlowWorkflow"
+	ValidationFlowWorkflowName = "ValidationFlowWorkflow"
+	ValidationTaskWorkflowName = "ValidationTaskWorkflow"
 )
 
 // registerAll registers every devflow workflow and activity on the worker.
@@ -34,5 +36,7 @@ const (
 func registerAll(wk worker.Worker, acts *Activities) {
 	wk.RegisterWorkflowWithOptions(DevFlowWorkflow, workflow.RegisterOptions{Name: DevFlowWorkflowName})
 	wk.RegisterWorkflowWithOptions(TaskFlowWorkflow, workflow.RegisterOptions{Name: TaskFlowWorkflowName})
+	wk.RegisterWorkflowWithOptions(ValidationFlowWorkflow, workflow.RegisterOptions{Name: ValidationFlowWorkflowName})
+	wk.RegisterWorkflowWithOptions(ValidationTaskWorkflow, workflow.RegisterOptions{Name: ValidationTaskWorkflowName})
 	wk.RegisterActivity(acts)
 }

@@ -13,5 +13,6 @@
 ## Practices
 
 - Test driven developement is preferred. Write tests first, then implement the feature. Define the contrract first, then write the test case for that contract, then implement the feature. You can tweak along the way.
+- API changes are contract-first: edit `packages/contracts/api/`, run `make gen-api`, and let the strict-server compile errors drive the handler updates.
 
 

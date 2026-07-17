@@ -18,7 +18,11 @@ package models
 
 import "time"
 
-// EnvVar represents a single environment variable key-value pair.
+// EnvVar is a component environment variable. It lives here (not in the
+// generated gen package) because the gorm-persisted EnvVarSlice below embeds
+// it: keeping it hand-written keeps the dependency one-way (gen aliases this
+// type via `x-go-type: models.EnvVar`), avoiding a models↔apigen import cycle.
+// The shape is byte-identical to the contract's EnvVar schema.
 type EnvVar struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`

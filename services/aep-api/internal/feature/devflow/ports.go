@@ -67,9 +67,19 @@ type Planner interface {
 	RunPlan(ctx context.Context, orgID, projectID string) ([]PlannedTask, error)
 }
 
-// Validator runs the post-execution validation step (stubbed today).
+// Validator runs the post-execution consistency check: every design component
+// has a Ready deployment (a reachable endpoint). Satisfied by an app-root
+// adapter over the artifacts + component services.
 type Validator interface {
 	Validate(ctx context.Context, orgID, projectID, tag string) error
+}
+
+// ValidationResolver ensures the project's aep:validation Task exists
+// (idempotent) and returns its open issue number, or 0 when there are no
+// acceptance criteria (nothing to validate). Satisfied by an app-root adapter
+// over the validation service; devflow does not import the validation package.
+type ValidationResolver interface {
+	ResolveValidationTask(ctx context.Context, orgID, projectID string) (issue int, err error)
 }
 
 // BuildProvisioner authors the project's dependencies from the build drawer

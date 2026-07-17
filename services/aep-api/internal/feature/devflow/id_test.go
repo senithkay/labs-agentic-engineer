@@ -29,3 +29,11 @@ func TestDevWorkflowID_Format(t *testing.T) {
 func TestTaskWorkflowID_Format(t *testing.T) {
 	require.Equal(t, "taskflow-acme-shop-v3-7", taskWorkflowID("acme", "shop", "v3", 7))
 }
+
+func TestValidationFlowWorkflowID_Format(t *testing.T) {
+	require.Equal(t, "validationflow-acme-shop-v3", validationFlowWorkflowID("acme", "shop", "v3"))
+}
+
+func TestValidationTaskWorkflowID_Format(t *testing.T) {
+	require.Equal(t, "valtask-acme-shop-v3-e2e-9", validationTaskWorkflowID("acme", "shop", "v3", LaneE2E, 9))
+}

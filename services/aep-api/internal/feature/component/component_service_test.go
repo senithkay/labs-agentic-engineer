@@ -28,11 +28,10 @@ package component
 import (
 	"context"
 	"errors"
-	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/danielgtaylor/huma/v2"
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
@@ -46,8 +45,8 @@ import (
 func TestComponentService_ListComponents_PassthroughAndError(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ComponentClientMock{
-		ListComponentsFunc: func(_ context.Context, org, proj string, limit int, cursor string) (*models.ComponentList, error) {
-			return &models.ComponentList{Items: []models.Component{{Name: "svc"}}}, nil
+		ListComponentsFunc: func(_ context.Context, org, proj string, limit int, cursor string) (*apigen.ComponentList, error) {
+			return &apigen.ComponentList{Items: []apigen.Component{{Name: "svc"}}}, nil
 		},
 	}
 	svc := NewComponentService(oc, nil, nil, nil, nil)
@@ -55,13 +54,13 @@ func TestComponentService_ListComponents_PassthroughAndError(t *testing.T) {
 	if err != nil || list == nil || len(list.Items) != 1 {
 		t.Fatalf("list happy: got list=%+v err=%v", list, err)
 	}
-	// The service forwards limit/cursor verbatim (the huma op pins 100/"").
+	// The service forwards limit/cursor verbatim (the HTTP op pins 100/"").
 	if c := oc.ListComponentsCalls(); len(c) != 1 || c[0].OrgName != "acme" || c[0].ProjectName != "web" || c[0].Limit != 100 {
 		t.Fatalf("OC ListComponents args: %+v", c)
 	}
 
 	ocErr := &ocmocks.ComponentClientMock{
-		ListComponentsFunc: func(context.Context, string, string, int, string) (*models.ComponentList, error) {
+		ListComponentsFunc: func(context.Context, string, string, int, string) (*apigen.ComponentList, error) {
 			return nil, openchoreo.ErrNotFound
 		},
 	}
@@ -73,8 +72,8 @@ func TestComponentService_ListComponents_PassthroughAndError(t *testing.T) {
 func TestComponentService_GetComponent_PassthroughAndError(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ComponentClientMock{
-		GetComponentFunc: func(_ context.Context, org, proj, comp string) (*models.Component, error) {
-			return &models.Component{Name: comp, ProjectName: proj}, nil
+		GetComponentFunc: func(_ context.Context, org, proj, comp string) (*apigen.Component, error) {
+			return &apigen.Component{Name: comp, ProjectName: proj}, nil
 		},
 	}
 	svc := NewComponentService(oc, nil, nil, nil, nil)
@@ -83,7 +82,7 @@ func TestComponentService_GetComponent_PassthroughAndError(t *testing.T) {
 		t.Fatalf("get happy: got=%+v err=%v", got, err)
 	}
 
-	ocErr := &ocmocks.ComponentClientMock{GetComponentFunc: func(context.Context, string, string, string) (*models.Component, error) {
+	ocErr := &ocmocks.ComponentClientMock{GetComponentFunc: func(context.Context, string, string, string) (*apigen.Component, error) {
 		return nil, openchoreo.ErrNotFound
 	}}
 	if _, err := NewComponentService(ocErr, nil, nil, nil, nil).GetComponent(context.Background(), "acme", "web", "x"); !errors.Is(err, openchoreo.ErrNotFound) {
@@ -93,15 +92,15 @@ func TestComponentService_GetComponent_PassthroughAndError(t *testing.T) {
 
 func TestComponentService_ListDeployments_PassthroughAndError(t *testing.T) {
 	t.Parallel()
-	oc := &ocmocks.ComponentClientMock{ListDeploymentsFunc: func(context.Context, string, string, string) (*models.DeploymentList, error) {
-		return &models.DeploymentList{Items: []models.Deployment{{Name: "d1"}}}, nil
+	oc := &ocmocks.ComponentClientMock{ListDeploymentsFunc: func(context.Context, string, string, string) (*apigen.DeploymentList, error) {
+		return &apigen.DeploymentList{Items: []apigen.Deployment{{Name: "d1"}}}, nil
 	}}
 	list, err := NewComponentService(oc, nil, nil, nil, nil).ListDeployments(context.Background(), "acme", "web", "svc")
 	if err != nil || list == nil || len(list.Items) != 1 {
 		t.Fatalf("deployments happy: %+v %v", list, err)
 	}
 
-	ocErr := &ocmocks.ComponentClientMock{ListDeploymentsFunc: func(context.Context, string, string, string) (*models.DeploymentList, error) {
+	ocErr := &ocmocks.ComponentClientMock{ListDeploymentsFunc: func(context.Context, string, string, string) (*apigen.DeploymentList, error) {
 		return nil, errors.New("oc down")
 	}}
 	if _, err := NewComponentService(ocErr, nil, nil, nil, nil).ListDeployments(context.Background(), "a", "p", "c"); err == nil {
@@ -111,20 +110,20 @@ func TestComponentService_ListDeployments_PassthroughAndError(t *testing.T) {
 
 func TestComponentService_ListBuilds_DelegatesToWorkflowRuns(t *testing.T) {
 	t.Parallel()
-	oc := &ocmocks.ComponentClientMock{ListWorkflowRunsFunc: func(_ context.Context, org, proj, comp string, limit int, cursor string) (*models.WorkflowRunList, error) {
-		return &models.WorkflowRunList{Items: []models.WorkflowRun{{Name: "run-1"}}}, nil
+	oc := &ocmocks.ComponentClientMock{ListWorkflowRunsFunc: func(_ context.Context, org, proj, comp string, limit int, cursor string) (*apigen.WorkflowRunList, error) {
+		return &apigen.WorkflowRunList{Items: []apigen.WorkflowRun{{Name: "run-1"}}}, nil
 	}}
 	svc := NewComponentService(oc, nil, nil, nil, nil)
 	list, err := svc.ListBuilds(context.Background(), "acme", "web", "svc", 20, "")
 	if err != nil || list == nil || len(list.Items) != 1 {
 		t.Fatalf("builds happy: %+v %v", list, err)
 	}
-	// ListBuilds is a thin alias over ListWorkflowRuns; the huma op pins limit 20.
+	// ListBuilds is a thin alias over ListWorkflowRuns; the HTTP op pins limit 20.
 	if c := oc.ListWorkflowRunsCalls(); len(c) != 1 || c[0].Limit != 20 {
 		t.Fatalf("OC ListWorkflowRuns args: %+v", c)
 	}
 
-	ocErr := &ocmocks.ComponentClientMock{ListWorkflowRunsFunc: func(context.Context, string, string, string, int, string) (*models.WorkflowRunList, error) {
+	ocErr := &ocmocks.ComponentClientMock{ListWorkflowRunsFunc: func(context.Context, string, string, string, int, string) (*apigen.WorkflowRunList, error) {
 		return nil, errors.New("boom")
 	}}
 	if _, err := NewComponentService(ocErr, nil, nil, nil, nil).ListBuilds(context.Background(), "a", "p", "c", 20, ""); err == nil {
@@ -150,9 +149,9 @@ func TestComponentService_UpdateWorkflowEnvVars_Passthrough(t *testing.T) {
 func TestComponentService_TriggerBuild_NoStagerWhenPortsNil(t *testing.T) {
 	t.Parallel()
 	var sawSecretRef, sawRunName string
-	oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(_ context.Context, org, proj, comp, secretRef, runName string) (*models.WorkflowRun, error) {
+	oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(_ context.Context, org, proj, comp, secretRef, runName string) (*apigen.WorkflowRun, error) {
 		sawSecretRef, sawRunName = secretRef, runName
-		return &models.WorkflowRun{Name: runName}, nil
+		return &apigen.WorkflowRun{Name: runName}, nil
 	}}
 	// repoSvc + buildCredSvc nil ⇒ no staging: the build fires with an empty
 	// secretRef and a freshly-generated runName.
@@ -172,9 +171,9 @@ func TestComponentService_TriggerBuild_NoStagerWhenPortsNil(t *testing.T) {
 func TestComponentService_TriggerBuild_StagesSecretWithSameRunName(t *testing.T) {
 	t.Parallel()
 	var stagerSlug, stagerRun, ocSecretRef, ocRun string
-	oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(_ context.Context, org, proj, comp, secretRef, runName string) (*models.WorkflowRun, error) {
+	oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(_ context.Context, org, proj, comp, secretRef, runName string) (*apigen.WorkflowRun, error) {
 		ocSecretRef, ocRun = secretRef, runName
-		return &models.WorkflowRun{Name: runName}, nil
+		return &apigen.WorkflowRun{Name: runName}, nil
 	}}
 	repo := &stubRepoSvc{GetRepoFunc: func(_ context.Context, orgID, projectID string) (*models.GitRepository, error) {
 		if orgID != "acme" || projectID != "web" {
@@ -225,10 +224,10 @@ func TestComponentService_TriggerBuild_GetRepoFailuresAreBestEffort(t *testing.T
 			t.Parallel()
 			var sawSecretRef string
 			built := false
-			oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(_ context.Context, _, _, _, secretRef, _ string) (*models.WorkflowRun, error) {
+			oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(_ context.Context, _, _, _, secretRef, _ string) (*apigen.WorkflowRun, error) {
 				sawSecretRef = secretRef
 				built = true
-				return &models.WorkflowRun{}, nil
+				return &apigen.WorkflowRun{}, nil
 			}}
 			stager := &stubBuildStager{StageBuildSecretFunc: func(context.Context, string, string, string) (string, error) {
 				t.Error("StageBuildSecret must not run when there is no usable repo")
@@ -247,7 +246,7 @@ func TestComponentService_TriggerBuild_GetRepoFailuresAreBestEffort(t *testing.T
 
 func TestComponentService_TriggerBuild_StagerFailureAborts(t *testing.T) {
 	t.Parallel()
-	oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(context.Context, string, string, string, string, string) (*models.WorkflowRun, error) {
+	oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(context.Context, string, string, string, string, string) (*apigen.WorkflowRun, error) {
 		t.Error("build must not fire when the secret staging failed")
 		return nil, nil
 	}}
@@ -266,7 +265,7 @@ func TestComponentService_TriggerBuild_StagerFailureAborts(t *testing.T) {
 
 func TestComponentService_TriggerBuild_OCErrorPropagates(t *testing.T) {
 	t.Parallel()
-	oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(context.Context, string, string, string, string, string) (*models.WorkflowRun, error) {
+	oc := &ocmocks.ComponentClientMock{TriggerBuildFunc: func(context.Context, string, string, string, string, string) (*apigen.WorkflowRun, error) {
 		return nil, openchoreo.ErrNotFound
 	}}
 	if _, err := NewComponentService(oc, nil, nil, nil, nil).TriggerBuild(context.Background(), "acme", "web", "svc"); !errors.Is(err, openchoreo.ErrNotFound) {
@@ -278,7 +277,7 @@ func TestComponentService_TriggerBuild_OCErrorPropagates(t *testing.T) {
 
 func TestComponentService_GetBuildLogs_NotConfigured(t *testing.T) {
 	t.Parallel()
-	// nil observability client ⇒ the local ErrLogsUnavailable sentinel (the huma
+	// nil observability client ⇒ the local ErrLogsUnavailable sentinel (the HTTP
 	// op maps it to 503).
 	svc := NewComponentService(&ocmocks.ComponentClientMock{}, nil, nil, nil, nil)
 	if _, err := svc.GetBuildLogs(context.Background(), "acme", "web", "svc", "run-1"); !errors.Is(err, ErrLogsUnavailable) {
@@ -288,18 +287,18 @@ func TestComponentService_GetBuildLogs_NotConfigured(t *testing.T) {
 
 func TestComponentService_GetBuildLogs_SuccessAndError(t *testing.T) {
 	t.Parallel()
-	observ := &stubObservClient{GetBuildLogsFunc: func(_ context.Context, org, proj, comp, build string) (*models.BuildLogs, error) {
+	observ := &stubObservClient{GetBuildLogsFunc: func(_ context.Context, org, proj, comp, build string) (*apigen.BuildLogs, error) {
 		if org != "acme" || build != "run-1" {
 			t.Errorf("observ args: org=%q build=%q", org, build)
 		}
-		return &models.BuildLogs{TotalCount: 2, Logs: []models.BuildLogEntry{{Log: "a"}, {Log: "b"}}}, nil
+		return &apigen.BuildLogs{TotalCount: 2, Logs: []apigen.BuildLogEntry{{Log: "a"}, {Log: "b"}}}, nil
 	}}
 	logs, err := NewComponentService(&ocmocks.ComponentClientMock{}, observ, nil, nil, nil).GetBuildLogs(context.Background(), "acme", "web", "svc", "run-1")
 	if err != nil || logs == nil || logs.TotalCount != 2 {
 		t.Fatalf("logs happy: logs=%+v err=%v", logs, err)
 	}
 
-	observErr := &stubObservClient{GetBuildLogsFunc: func(context.Context, string, string, string, string) (*models.BuildLogs, error) {
+	observErr := &stubObservClient{GetBuildLogsFunc: func(context.Context, string, string, string, string) (*apigen.BuildLogs, error) {
 		return nil, errors.New("observ 500")
 	}}
 	_, err = NewComponentService(&ocmocks.ComponentClientMock{}, observErr, nil, nil, nil).GetBuildLogs(context.Background(), "a", "p", "c", "b")
@@ -370,7 +369,7 @@ func TestComponentService_GetComponentOpenAPI_NotServiceReturnsTypedBody(t *test
 	t.Parallel()
 	// A web-application component (non-service) returns ErrComponentNotService
 	// PLUS a body carrying the type so the UI renders a typed empty state — the
-	// huma op maps this pair to a 409 that still ships componentType.
+	// HTTP op maps this pair to a 409 that still ships componentType.
 	svc := openAPISvc(t, designFiles("web-ui", "web-application", ""), nil)
 	spec, err := svc.GetComponentOpenAPI(context.Background(), "acme", "web", "web-ui")
 	if !errors.Is(err, ErrComponentNotService) {
@@ -393,46 +392,9 @@ func TestComponentService_GetComponentOpenAPI_ServiceReturnsSpec(t *testing.T) {
 	}
 }
 
-// --- mapComponentError sentinel mapping --------------------------------------
-
-// TestMapComponentError pins the mapper directly: every OpenChoreo sentinel that
-// componentService passes through is translated to its HTTP status via the
-// shared ocerr classifier, and anything that is not an OC sentinel collapses to
-// a fixed-message 500 that never leaks the internal cause.
-func TestMapComponentError(t *testing.T) {
-	t.Parallel()
-	var se huma.StatusError
-
-	ocCases := []struct {
-		err  error
-		want int
-	}{
-		{openchoreo.ErrUnauthorized, http.StatusUnauthorized},
-		{openchoreo.ErrForbidden, http.StatusForbidden},
-		{openchoreo.ErrNotFound, http.StatusNotFound},
-		{openchoreo.ErrConflict, http.StatusConflict},
-		{openchoreo.ErrBadRequest, http.StatusBadRequest},
-	}
-	for _, tc := range ocCases {
-		err := mapComponentError(tc.err, "failed to do thing")
-		if !errors.As(err, &se) || se.GetStatus() != tc.want {
-			t.Fatalf("mapComponentError(%v) → %v, want status %d", tc.err, err, tc.want)
-		}
-	}
-
-	// Anything that is not an OC sentinel → opaque 500 carrying the supplied
-	// internal message, never the raw error.
-	err := mapComponentError(errors.New("pg: connection refused"), "failed to list components")
-	if !errors.As(err, &se) || se.GetStatus() != http.StatusInternalServerError {
-		t.Fatalf("opaque error must map to 500, got %v", err)
-	}
-	if strings.Contains(err.Error(), "connection refused") {
-		t.Fatalf("500 must not leak internals: %v", err)
-	}
-	if !strings.Contains(err.Error(), "failed to list components") {
-		t.Fatalf("500 must carry the supplied internal message: %v", err)
-	}
-}
+// mapComponentError's sentinel mapping is pinned in the api package
+// (internal/api/handlers_component_test.go) — the mapper moved beside the
+// strict handler at the contract-first cutover.
 
 // TestComponentService_CreateComponent_PassthroughAndError mirrors its sibling
 // passthrough tests (review follow-up): CreateComponent has no HTTP surface —
@@ -440,8 +402,8 @@ func TestMapComponentError(t *testing.T) {
 func TestComponentService_CreateComponent_PassthroughAndError(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ComponentClientMock{
-		CreateComponentFunc: func(_ context.Context, org, proj string, req *models.CreateComponentRequest) (*models.Component, error) {
-			return &models.Component{Name: req.Name}, nil
+		CreateComponentFunc: func(_ context.Context, org, proj string, req *models.CreateComponentRequest) (*apigen.Component, error) {
+			return &apigen.Component{Name: req.Name}, nil
 		},
 	}
 	svc := NewComponentService(oc, nil, nil, nil, nil)
@@ -454,7 +416,7 @@ func TestComponentService_CreateComponent_PassthroughAndError(t *testing.T) {
 	}
 
 	ocErr := &ocmocks.ComponentClientMock{
-		CreateComponentFunc: func(context.Context, string, string, *models.CreateComponentRequest) (*models.Component, error) {
+		CreateComponentFunc: func(context.Context, string, string, *models.CreateComponentRequest) (*apigen.Component, error) {
 			return nil, openchoreo.ErrConflict
 		},
 	}

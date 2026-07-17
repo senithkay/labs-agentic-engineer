@@ -34,14 +34,18 @@ const (
 	// LabelMarker makes an issue a Task; the funnel ignores issues without it.
 	LabelMarker = "aep:task"
 
-	// LabelCoding / LabelOps / LabelProvision are the executor-class labels
-	// (exactly one). LabelProvision marks a provisioning gate issue
-	// (dependency-management §3.6): config-collection / resource-provisioning /
-	// org-publish work, driven by the drawer + readiness watcher, not the coding
-	// agent.
-	LabelCoding    = "aep:coding"
-	LabelOps       = "aep:ops"
-	LabelProvision = "aep:provision"
+	// LabelCoding / LabelOps / LabelProvision / LabelValidation are the
+	// executor-class labels (exactly one). LabelProvision marks a provisioning
+	// gate issue (dependency-management §3.6): config-collection /
+	// resource-provisioning / org-publish work, driven by the drawer + readiness
+	// watcher, not the coding agent. LabelValidation marks a project-scoped
+	// validation task: it dependsOn every component, is held by the funnel until
+	// they deploy, then dispatches a validation runner that authors + runs e2e
+	// tests and opens a PR (validation-phase).
+	LabelCoding     = "aep:coding"
+	LabelOps        = "aep:ops"
+	LabelProvision  = "aep:provision"
+	LabelValidation = "aep:validation"
 
 	// LabelOriginPrefix is prepended to an Origin to form its label.
 	LabelOriginPrefix = "aep:origin/"
@@ -89,11 +93,17 @@ const (
 	// PR; it is driven by the drawer action + the resource-readiness watcher
 	// (dependency-management §3.6), never dispatched from the aep:execute funnel.
 	ClassProvision ExecutorClass = "provision"
+	// ClassValidation validates the deployed system against its acceptance
+	// criteria. Like coding it is dispatched through the aep:execute funnel and
+	// produces a PR (the e2e tests + validation report); unlike coding its target
+	// is the project (Block.Operation "validate") and it dependsOn every
+	// component, so the funnel holds it until they all deploy (validation-phase).
+	ClassValidation ExecutorClass = "validation"
 )
 
 // Valid reports whether c is a known executor class.
 func (c ExecutorClass) Valid() bool {
-	return c == ClassCoding || c == ClassOps || c == ClassProvision
+	return c == ClassCoding || c == ClassOps || c == ClassProvision || c == ClassValidation
 }
 
 // ClassLabel returns the routing label for an executor class ("aep:coding" /
@@ -144,7 +154,7 @@ func Classify(label string) LabelKind {
 	switch {
 	case label == LabelMarker:
 		return KindMarker
-	case label == LabelCoding || label == LabelOps || label == LabelProvision:
+	case label == LabelCoding || label == LabelOps || label == LabelProvision || label == LabelValidation:
 		return KindClass
 	case label == LabelExecute:
 		return KindExecute
@@ -200,6 +210,8 @@ func ParseLabels(labels []string) ParsedLabels {
 			p.setClass(ClassOps)
 		case l == LabelProvision:
 			p.setClass(ClassProvision)
+		case l == LabelValidation:
+			p.setClass(ClassValidation)
 		case l == LabelExecute:
 			p.Execute = true
 		case l == LabelHold:

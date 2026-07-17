@@ -303,11 +303,18 @@ func (f *Funnel) gate(ctx context.Context, facts TaskFacts, row *models.Executio
 // unknown or missing dep (no Task/issue yet) counts as unmet, so a consumer
 // holds until its provision issue is minted AND deploys.
 func (f *Funnel) depsGate(ctx context.Context, facts TaskFacts, view *projectView) (unmet []string, cycle []string) {
-	if facts.Component == "" {
+	// A component task gets component-graph cycle detection and its design's
+	// provisioning deps in addition to its block dependsOn. An operation task
+	// (ops / validation) has no component node: an ops Task with no deps is
+	// inert here, while a validation Task declares dependsOn (every component)
+	// and is gated on those — held until they all derive deployed.
+	if facts.Component == "" && len(facts.DependsOn) == 0 {
 		return nil, nil // ops Tasks carry operation, not component deps in v1
 	}
-	if cyc := detectCycle(facts.Component, view.latestByComponent); len(cyc) > 0 {
-		return nil, cyc
+	if facts.Component != "" {
+		if cyc := detectCycle(facts.Component, view.latestByComponent); len(cyc) > 0 {
+			return nil, cyc
+		}
 	}
 	seen := map[string]bool{}
 	check := func(dep string) {
@@ -323,8 +330,10 @@ func (f *Funnel) depsGate(ctx context.Context, facts TaskFacts, view *projectVie
 	for _, dep := range facts.DependsOn {
 		check(dep)
 	}
-	for _, dep := range view.provisionDepsByComponent[strings.ToLower(facts.Component)] {
-		check(dep)
+	if facts.Component != "" {
+		for _, dep := range view.provisionDepsByComponent[strings.ToLower(facts.Component)] {
+			check(dep)
+		}
 	}
 	// Org-service deps gate CONDITIONALLY (issue #164, Task 4): only when a
 	// consumer-side aep:provision visibility gate was minted for the dep (indexed

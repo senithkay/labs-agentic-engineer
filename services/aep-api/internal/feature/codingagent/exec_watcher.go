@@ -21,6 +21,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
@@ -164,7 +166,7 @@ func (w *ExecWatcher) Sweep(ctx context.Context) error {
 	return nil
 }
 
-func (w *ExecWatcher) reconcile(ctx context.Context, row *models.Execution, run *models.WorkflowRun) {
+func (w *ExecWatcher) reconcile(ctx context.Context, row *models.Execution, run *apigen.WorkflowRun) {
 	succeeded := run.Status == openchoreo.ReasonWorkflowSucceeded
 	switch row.Kind {
 	case string(taskmeta.KindCoding):
@@ -227,7 +229,7 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *models.Execution, run 
 // attempt count threaded through the reason); budget exhaustion or a non-auth
 // failure Finishes the row failed. Mirrors the legacy build watcher's §9.3 loop,
 // re-keyed to the execution row's reason instead of a BuildAuthRetryCount column.
-func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *models.Execution, run *models.WorkflowRun) {
+func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *models.Execution, run *apigen.WorkflowRun) {
 	_, authFailure := classifyBuildRun(run)
 	if !authFailure || w.buildRetrier == nil {
 		if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run)); err != nil {
@@ -270,7 +272,7 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *models.Exe
 }
 
 // workflowReason returns a short reason string for a terminal WorkflowRun.
-func workflowReason(run *models.WorkflowRun) string {
+func workflowReason(run *apigen.WorkflowRun) string {
 	if run.Status == openchoreo.ReasonWorkflowSucceeded {
 		return ""
 	}

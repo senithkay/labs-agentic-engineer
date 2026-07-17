@@ -67,6 +67,7 @@ func Load() (Config, error) {
 		OAuthStateSigningKey:      r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
 		BFFPublicURL:              r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
 		BuildAuthRetryBudget:      r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
+		SkillsDir:                 r.readOptionalString("SKILLS_DIR", "/app/skills"),
 		ThunderAdmin: ThunderAdminConfig{
 			BaseURL:      r.readOptionalString("THUNDER_ADMIN_URL", ""),
 			ClientID:     r.readOptionalString("THUNDER_SYSTEM_CLIENT_ID", "aep-system-client"),
@@ -152,8 +153,9 @@ func Load() (Config, error) {
 		},
 
 		// Agent runner image + ESO CSS for per-run ExternalSecrets.
-		AgentRunnerImage:        r.readOptionalString("AGENT_RUNNER_IMAGE", defaultRunnerImage),
-		AgentClusterSecretStore: r.readOptionalString("AGENT_CLUSTER_SECRET_STORE", "default"),
+		AgentRunnerImage:           r.readOptionalString("AGENT_RUNNER_IMAGE", defaultRunnerImage),
+		AgentValidationRunnerImage: r.readOptionalString("VALIDATION_RUNNER_IMAGE", ""),
+		AgentClusterSecretStore:    r.readOptionalString("AGENT_CLUSTER_SECRET_STORE", "default"),
 	}
 
 	if len(r.errors) > 0 {

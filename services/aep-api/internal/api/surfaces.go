@@ -33,10 +33,10 @@ import (
 //
 //	Surface        Root                 Guard (who may call)                       Where it lives / spec
 //	───────────────────────────────────────────────────────────────────────────────────────────────────
-//	public         /api/v1              Thunder user JWT + org gate                *_huma.go · humakit.OrgScopedInput
-//	               (jwt → orgensure)    (org from the verified token, never input)  → api/openapi.yaml
-//	internal S2S   /internal/v1/executions/  BFF Task-JWT or publisher-cc          internal.go · auth.ExecutionScopedInput
-//	               (per-op resolver)         (dual-token verify + INT-6 fence)      → api/internal-openapi.yaml (non-public)
+//	public         /api/v1              Thunder user JWT + org gate                handlers_*.go · tenant_gate.go
+//	               (jwt → orgensure)    (org from the verified token, never input)  ← packages/contracts/api/v1 (source of truth)
+//	internal S2S   /internal/v1/executions/  BFF Task-JWT or publisher-cc          internal.go · runnerAuthGate
+//	               (deny-by-default gate)    (dual-token verify + INT-6 fence)      ← packages/contracts/api/internal/v1 (non-public)
 //	internal MCP   /internal/v1/mcp     BFF-signed JWT, aud aep-api-mcp            dependencies/mcp_server.go ·
 //	               (POST, JSON-RPC)     (org from ocOrgId claim, never input)       auth.AgentsScopedVerifier (no spec — JSON-RPC)
 //	               /mcp/playground-token  NONE — flag-gated only                   dependencies/playground_token.go
@@ -47,7 +47,7 @@ import (
 //	dev/test       /_dev/v1             none — registration-gated to dev tier      dev.go · RegisterAllDev
 //	               (gated mount)        + on no HTTPRoute (loopback only)           (no spec)
 //
-//	discovery: /healthz, /auth/external/jwks.json, /openapi.yaml, /docs — public, no auth.
+//	discovery: /healthz, /auth/external/jwks.json — public, no auth.
 //
 // The reusable identity primitive underneath both S2S directions: the BFF is the
 // single issuer of org-bearing RS256 tokens (internal/platform/auth.TaskTokenManager
@@ -56,7 +56,7 @@ import (
 // never a trusted header. See docs/design/internal-s2s-api.md.
 //
 // "Where do I change X?" → credential verify/mint: internal/platform/auth ·
-// who-may-touch-what gates: humakit (public) + internal/platform/auth (internal) ·
+// who-may-touch-what gates: tenant_gate.go (public) + internal.go runnerAuthGate (internal) ·
 // what's exposed: this file.
 func mountSurfaces(params AppParams) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -69,12 +69,12 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	})
 
 	// Task-JWT public key set (JWKS) — unauthenticated discovery, fetched by
-	// every verifier before any auth. A plain handler (not a Huma op) so it stays
-	// off the /api/v1 server base path: the public spec is now base-pathed at
-	// /api/v1, and this endpoint deliberately lives outside that subtree.
+	// every verifier before any auth. A plain handler (not a contract op) so it
+	// stays off the /api/v1 server base path: the public contract is base-pathed
+	// at /api/v1, and this endpoint deliberately lives outside that subtree.
 	mux.HandleFunc("GET /auth/external/jwks.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if tt := params.HumaDeps.TaskTokens; tt != nil {
+		if tt := params.Deps.TaskTokens; tt != nil {
 			_ = json.NewEncoder(w).Encode(tt.JWKS())
 			return
 		}
@@ -82,19 +82,19 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	})
 
 	// ── public edge (/api/v1) ────────────────────────────────────────────────
-	// User-JWT authenticated (JWKS-backed RS256). Every org-scoped operation
-	// embeds humakit.OrgScopedInput, whose Resolve derives the active org SOLELY
-	// from the verified token (there is no {orgHandle} param) and applies the
-	// tenant gate — the allowlist-by-construction IDOR fence. Carve-outs (org
-	// listing, idp discover) read no org and bypass it. The Huma API is mounted
-	// on apiMux so every op inherits the jwt + orgensure middleware applied to
-	// "/api/" below; the public spec + docs are served on the outer mux.
-	apiMux := http.NewServeMux()
+	// User-JWT authenticated (JWKS-backed RS256), served CONTRACT-FIRST: the
+	// generated strict router (internal/api/gen, from packages/contracts/api/v1)
+	// replaces the Huma mux. Every operation passes the deny-by-default tenant
+	// gate (tenant_gate.go) — org derived SOLELY from the verified token, bound
+	// into context, handed to services explicitly; carve-outs are enumerated in
+	// tenantGateCarveOuts. Requests are validated against the committed contract
+	// before any handler runs (validator.go). apiV1 mounts under the jwt +
+	// orgensure middleware applied to "/api/" below. The contract itself is
+	// not served over HTTP — it is a build-time artifact
+	// (packages/contracts/api/v1, embedded only for the validator).
 	gateMode := tenant.ParseGateMode(params.Config.TenantGateMode)
 	slog.Info("tenant gate active", "mode", string(gateMode))
-	humaAPI := newHumaAPI(apiMux)
-	registerHumaDocs(mux, humaAPI)
-	RegisterAllHuma(humaAPI, params.HumaDeps)
+	apiV1 := newAPIV1Handler(params.Deps)
 
 	// ── dev/test surface (/_dev/v1) ──────────────────────────────────────────
 	// Local-only tooling, no request auth by design; safety is structural
@@ -115,16 +115,14 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	}
 
 	// ── internal S2S surface ─────────────────────────────────────────────────
-	// Its own Huma API on its own mux, NOT wrapped by the /api/ user-JWT
-	// middleware. Each operation authenticates by construction via
-	// auth.ExecutionScopedInput (BFF Task-JWT or publisher-cc) and is never
-	// gateway-advertised. All runner callbacks (skills, credentials refresh)
-	// are keyed to the execution id — tasks-github-native §9.2. See
+	// Served contract-first from packages/contracts/api/internal/v1 (strict
+	// server in internal/api/igen), NOT wrapped by the /api/ user-JWT
+	// middleware. Every operation passes the deny-by-default runnerAuthGate
+	// (BFF Task-JWT or publisher-cc verified against the path execution id)
+	// and is never gateway-advertised. All runner callbacks are keyed to the
+	// execution id — tasks-github-native §9.2. See
 	// docs/design/internal-s2s-api.md §3.
-	internalMux := http.NewServeMux()
-	internalAPI := newInternalAPI(internalMux)
-	RegisterAllInternal(internalAPI, params.InternalDeps)
-	mux.Handle(internalV1+"/executions/", internalMux)
+	mux.Handle(internalV1+"/executions/", newInternalV1Handler(params.InternalDeps))
 
 	// ── internal MCP discovery (POST /internal/v1/mcp) ───────────────────────
 	// A raw (non-Huma) JSON-RPC mount: the MCP server the agents service's
@@ -137,8 +135,8 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	// verify a caller, so the path 404s instead of 503-ing forever. A nil
 	// MCPExternalResources/OrgEndpoints/ResourceTypes degrades the corresponding
 	// tool to an empty result (see dependencies.NewMCPHandler).
-	if params.HumaDeps.TaskTokens != nil {
-		mcpVerifier := auth.NewAgentsScopedVerifier(params.HumaDeps.TaskTokens)
+	if params.Deps.TaskTokens != nil {
+		mcpVerifier := auth.NewAgentsScopedVerifier(params.Deps.TaskTokens)
 		mcpHandler := dependencies.NewMCPHandler(
 			params.MCPExternalResources, params.MCPOrgEndpoints, params.MCPResourceTypes, params.MCPRemoteGit)
 		mux.Handle("POST "+internalV1+"/mcp", mcpVerifier.Middleware(mcpHandler))
@@ -153,7 +151,7 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 		// absence, matching the MCP mount's own conditional-mount posture).
 		if params.Config.PlaygroundTokenEnabled {
 			mux.Handle("POST "+internalV1+"/mcp/playground-token",
-				dependencies.NewPlaygroundTokenHandler(params.HumaDeps.TaskTokens))
+				dependencies.NewPlaygroundTokenHandler(params.Deps.TaskTokens))
 		}
 	}
 
@@ -187,7 +185,7 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 			next.ServeHTTP(w, r.WithContext(tenant.WithGateMode(r.Context(), gateMode)))
 		})
 	}
-	mux.Handle("/api/", jwt(ensureOrg(stampGateMode(apiMux))))
+	mux.Handle("/api/", jwt(ensureOrg(stampGateMode(apiV1))))
 
 	return mux
 }

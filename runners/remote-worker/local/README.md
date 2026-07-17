@@ -31,6 +31,29 @@ The runner streams progress NDJSON to stdout. After exit, the cloned
 workspace (including `.logs/claude.log`, the full SDK transcript) is kept
 under `workspace/<org>/<project>/<taskId>/` for inspection.
 
+## Validation tasks
+
+Validation runs need the Playwright-capable image variant
+(`../Dockerfile.validation`: Debian base + baked chromium +
+playwright-cli + Go). Point the harness at an alternate env file that
+selects it:
+
+```bash
+cp env.local.example .env.local          # secrets + repo, as usual
+# create .env.validation: sources .env.local, sets
+#   DOCKERFILE="$WORKER_DIR/Dockerfile.validation"
+#   IMAGE_TAG=aep-remote-worker:validation-local
+#   AEP_PROMPT="This is a validation task. Work on this GitHub validation issue: <url> ..."
+./run-local.sh .env.validation
+```
+
+The prompt must say "validation task" and point at an issue labelled
+`aep` + `validation` whose body follows the validation issue contract
+(criteria file path, Deployed endpoints table, test layout, report
+requirements) — see `scripts/create-validation-issue.mjs` at the repo
+root for the interim issue generator. The `aep-validation` skill drives
+the rest.
+
 ## Testing a custom task
 
 - **Real flow:** create a GitHub issue in the test repo whose body is the

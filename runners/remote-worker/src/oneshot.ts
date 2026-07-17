@@ -74,6 +74,11 @@ function readDispatchFromEnv(): DispatchRequest {
   const mcpUrl = process.env.AEP_MCP_URL || "";
   const mcpToken = process.env.AEP_MCP_TOKEN || "";
 
+  const taskKind = process.env.AEP_TASK_KIND || "implementation";
+  if (taskKind !== "implementation" && taskKind !== "validation") {
+    throw new Error(`AEP_TASK_KIND must be "implementation" or "validation": ${taskKind}`);
+  }
+
   const publisherClientId = process.env.PUBLISHER_CLIENT_ID ?? "";
   const publisherClientSecret = process.env.PUBLISHER_CLIENT_SECRET ?? "";
   const publisherTokenUrl = process.env.PUBLISHER_TOKEN_URL ?? "";
@@ -105,6 +110,7 @@ function readDispatchFromEnv(): DispatchRequest {
     correlationId,
     mcpUrl: mcpUrl || undefined,
     mcpToken: mcpToken || undefined,
+    taskKind,
   };
 }
 

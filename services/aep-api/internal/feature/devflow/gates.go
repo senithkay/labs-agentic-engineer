@@ -22,7 +22,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// Gate names — every human-in-the-loop pause point in the two workflows.
+// Gate names — every human-in-the-loop pause point in the workflows.
 // Each gate runs in auto mode by default (no pause); a run started with
 // GateConfig.Auto[name] = false pauses there until a SigGateDecision.
 // NOTE: the build endpoint always starts runs with the zero GateConfig (all

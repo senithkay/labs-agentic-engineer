@@ -61,13 +61,26 @@ export AEP_COMPONENT_NAME="${AEP_COMPONENT_NAME:-demo-component}"
 export AEP_IDENTITY_NAME="${AEP_IDENTITY_NAME:-AEP Local Agent}"
 export AEP_IDENTITY_EMAIL="${AEP_IDENTITY_EMAIL:-aep-local@users.noreply.github.com}"
 export AEP_BEARER="${AEP_BEARER:-$(node -e 'console.log(crypto.randomUUID())')}"
+export AEP_TASK_KIND="${AEP_TASK_KIND:-implementation}"
 STUB_PORT="${STUB_PORT:-8377}"
 STUB_BIND="${STUB_BIND:-127.0.0.1}"
 IMAGE_TAG="${IMAGE_TAG:-aep-remote-worker:local}"
+# Alternate image recipe, e.g. Dockerfile.validation for validation
+# tasks (Playwright browsers + Go on a Debian base). Pair it with a
+# distinct IMAGE_TAG so the two variants don't clobber each other.
+DOCKERFILE="${DOCKERFILE:-$WORKER_DIR/Dockerfile}"
 # The container reaches the host-side stub via host.docker.internal.
-# AEP_PLATFORM_URL stays unset: oneshot.ts then skips the per-task skills
-# pull and credhelper/gh fall back to AEP_GIT_SERVICE_URL for refreshes.
 export AEP_GIT_SERVICE_URL="http://host.docker.internal:${STUB_PORT}"
+# AEP_PLATFORM_URL: for an implementation run it stays unset (oneshot.ts skips
+# the per-task skills pull; credhelper/gh fall back to AEP_GIT_SERVICE_URL). A
+# validation run points it at the same stub so the aep-validation skill can
+# fetch its validation-context; the stub answers that path too. The skills-pull
+# to the stub 404s and is a harmless best-effort warning.
+if [ "${AEP_TASK_KIND}" = "validation" ]; then
+  export AEP_PLATFORM_URL="${AEP_PLATFORM_URL:-http://host.docker.internal:${STUB_PORT}}"
+else
+  export AEP_PLATFORM_URL="${AEP_PLATFORM_URL:-}"
+fi
 
 if ! docker info >/dev/null 2>&1; then
   echo "docker daemon not reachable — start it first (e.g. 'colima start')" >&2
@@ -90,8 +103,8 @@ if ! curl -sf "http://127.0.0.1:${STUB_PORT}/healthz" >/dev/null 2>&1; then
   exit 2
 fi
 
-echo ">> building runner image ${IMAGE_TAG}"
-docker build -t "$IMAGE_TAG" "$WORKER_DIR"
+echo ">> building runner image ${IMAGE_TAG} (${DOCKERFILE##*/})"
+docker build -f "$DOCKERFILE" -t "$IMAGE_TAG" "$WORKER_DIR"
 
 mkdir -p "$SCRIPT_DIR/workspace"
 
@@ -99,12 +112,13 @@ echo ">> dispatching task ${AEP_TASK_ID} on ${AEP_REPO_URL}"
 EXIT_CODE=0
 docker run --rm \
   --add-host=host.docker.internal:host-gateway \
+  --shm-size=1g \
   -v "$SCRIPT_DIR/workspace:/home/aep/aep-workspace" \
   -v "$WORKER_DIR/plugin:/app/plugin:ro" \
   -e ANTHROPIC_API_KEY \
   -e AEP_TASK_ID -e AEP_ORG_ID -e AEP_PROJECT_ID -e AEP_COMPONENT_NAME \
   -e AEP_REPO_URL -e AEP_PROMPT -e AEP_BEARER -e AEP_GIT_SERVICE_URL \
-  -e AEP_IDENTITY_NAME -e AEP_IDENTITY_EMAIL \
+  -e AEP_IDENTITY_NAME -e AEP_IDENTITY_EMAIL -e AEP_TASK_KIND -e AEP_PLATFORM_URL \
   "$IMAGE_TAG" || EXIT_CODE=$?
 
 WS="$SCRIPT_DIR/workspace/$AEP_ORG_ID/$AEP_PROJECT_ID/$AEP_TASK_ID"

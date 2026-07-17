@@ -83,6 +83,7 @@ func TestDevFlowWorkflow_PendingGate_VisibleInQuery(t *testing.T) {
 	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}})
 	env.RegisterWorkflow(TaskFlowWorkflow)
 	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Outcome: OutcomeSucceeded}, nil)
+	mockValidationFlow(env, validationSkipped(), nil)
 
 	// While paused at the manual plan gate, the status query must surface it.
 	env.RegisterDelayedCallback(func() {

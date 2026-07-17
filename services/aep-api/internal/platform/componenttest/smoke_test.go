@@ -21,9 +21,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // fakeProjectService is a minimal project.ProjectService stand-in for the
@@ -32,18 +33,18 @@ import (
 // the real chain + ENFORCE gate.)
 type fakeProjectService struct{}
 
-func (fakeProjectService) ListProjects(_ context.Context, _ string, _ int, _, _ string) (*models.ProjectList, error) {
-	return &models.ProjectList{Items: []models.Project{{Name: "demo"}}}, nil
+func (fakeProjectService) ListProjects(_ context.Context, _ string, _ int, _, _ string) (*apigen.ProjectList, error) {
+	return &apigen.ProjectList{Items: []apigen.Project{{Name: "demo"}}}, nil
 }
-func (fakeProjectService) GetProject(_ context.Context, _, name string) (*models.Project, error) {
-	return &models.Project{Name: name}, nil
+func (fakeProjectService) GetProject(_ context.Context, _, name string) (*apigen.Project, error) {
+	return &apigen.Project{Name: name}, nil
 }
-func (fakeProjectService) CreateProject(_ context.Context, _ string, req *models.CreateProjectRequest) (*models.Project, error) {
-	return &models.Project{Name: req.Name}, nil
+func (fakeProjectService) CreateProject(_ context.Context, _ string, req *apigen.CreateProjectRequest) (*apigen.Project, error) {
+	return &apigen.Project{Name: req.Name}, nil
 }
 func (fakeProjectService) DeleteProject(_ context.Context, _, _ string) error { return nil }
-func (fakeProjectService) GetProjectStatus(_ context.Context, _, _ string) (*models.ProjectStatus, error) {
-	return &models.ProjectStatus{Phase: "prompt"}, nil
+func (fakeProjectService) GetProjectStatus(_ context.Context, _, _ string) (*apigen.ProjectStatus, error) {
+	return &apigen.ProjectStatus{Phase: "prompt"}, nil
 }
 
 var _ project.ProjectService = fakeProjectService{}
@@ -58,7 +59,7 @@ var _ project.ProjectService = fakeProjectService{}
 // passes"). The real project_component_test.go (Pilot A) supersedes it.
 func TestHarness_Smoke(t *testing.T) {
 	t.Parallel()
-	h := New(t, Options{Deps: api.HumaDeps{ProjectSvc: fakeProjectService{}}})
+	h := New(t, Options{Deps: api.Deps{ProjectSvc: fakeProjectService{}}})
 
 	// Authed → real handler runs, real service data returned.
 	if resp := h.AsOrg("acme").Get("/api/v1/projects"); resp.Code != 200 {

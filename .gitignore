@@ -47,3 +47,5 @@ learning/
 # Vitest browser-mode run artifacts (failure screenshots + attachments)
 **/__screenshots__/
 **/.vitest-attachments/
+.scratch/
+.agents/worktrees/

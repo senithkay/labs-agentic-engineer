@@ -9,7 +9,7 @@ type BuildList = components["schemas"]["BuildList"];
 type DeploymentList = components["schemas"]["DeploymentList"];
 type FileMeta = components["schemas"]["FileMeta"];
 type FileContent = components["schemas"]["FileContent"];
-type ErrorModel = components["schemas"]["ErrorModel"];
+type ApiError = components["schemas"]["Error"];
 
 // Scenario switch for the project overview (#77/#183) and spec view (#80).
 // Toggle in devtools:
@@ -46,6 +46,7 @@ const noDeploy: DeployStage = {
   version: "",
   status: "none",
   components: { total: 0, ready: 0 },
+  validation: "none",
 };
 
 export const projectStatuses: Record<
@@ -133,6 +134,7 @@ export const projectStatuses: Record<
       version: "v1",
       status: "deploying",
       components: { total: 3, ready: 1 },
+      validation: "none",
     },
   },
   // v1 deployed to dev; spec has drifted since (dirty → rendered v1+).
@@ -155,6 +157,8 @@ export const projectStatuses: Record<
       version: "v1",
       status: "deployed",
       components: { total: 3, ready: 3 },
+      validation: "completed",
+      validationUrl: `${REPO_URL}/pull/42`,
     },
   },
   // v1 build done but the dev deployment failed.
@@ -177,6 +181,7 @@ export const projectStatuses: Record<
       version: "v1",
       status: "failed",
       components: { total: 3, ready: 1 },
+      validation: "none",
     },
   },
   // Repo bootstrap went sideways before any spec work.
@@ -422,11 +427,29 @@ function task(
   };
 }
 
+// The project's validation task — created alongside the coding tasks but NOT
+// shown in the builds list (its status rides deploy.validation on the
+// deployments board). Kept here so the list filter is exercised.
+const validationTask: TaskView = {
+  issueNumber: 20,
+  title: "Validate acceptance criteria",
+  derivedStatus: "in_progress",
+  executorClass: "validation",
+  operation: "validate",
+  issueUrl: `${BOARD_URL}/20`,
+  attention: null,
+  dependsOn: null,
+  executions: {},
+  hold: false,
+  lineage: { specTag: "v1" },
+};
+
 const buildingTasks: TaskView[] = [
   task(12, "Checkout flow with cart persistence", "pending", "storefront"),
   task(10, "Product catalog CRUD endpoints", "in_progress", "catalog-api"),
   task(9, "Scaffold storefront app shell", "merged", "storefront"),
   task(11, "Orders service payment integration", "failed", "orders-api"),
+  validationTask,
 ];
 
 const doneTasks: TaskView[] = buildingTasks.map((t) => ({
@@ -648,6 +671,72 @@ const validationPlan = `# Demo Shop — Validation plan
 - Each service exposes /healthz returning 200.
 `;
 
+// The acceptance oracle authored by the validation-criteria skill — rendered
+// by the read-only "Validation Criteria" view. Mixes the three methods and a
+// runner-written `covered` flag (e2e only) so the view exercises every arm.
+const validationCriteriaJson = JSON.stringify(
+  {
+    requirements: [
+      {
+        id: "REQ-001",
+        statement:
+          "Shoppers can browse and search the catalog by name and category.",
+        criteria: [
+          {
+            id: "AC-001-a",
+            must: "A shopper can search products by name and see matching results",
+            method: "e2e",
+            covered: true,
+          },
+          {
+            id: "AC-001-b",
+            must: "A shopper can filter the catalog by category",
+            method: "e2e",
+            covered: false,
+          },
+        ],
+      },
+      {
+        id: "REQ-002",
+        statement: "Cart contents persist across browser sessions.",
+        criteria: [
+          {
+            id: "AC-002-a",
+            must: "A cart's contents survive a browser restart for the same shopper",
+            method: "e2e",
+            covered: false,
+          },
+          {
+            id: "AC-002-b",
+            must: "The cart total updates promptly as items are added or removed",
+            method: "scenario",
+          },
+        ],
+      },
+      {
+        id: "REQ-003",
+        statement:
+          "Checkout produces an order visible in the shopper's order history.",
+        criteria: [
+          {
+            id: "AC-003-a",
+            must: "Completing checkout creates an order visible in order history",
+            method: "e2e",
+            covered: false,
+          },
+          {
+            id: "AC-003-b",
+            must: "Payment details are transmitted over an encrypted connection",
+            method: "manual",
+          },
+        ],
+      },
+    ],
+  },
+  null,
+  2,
+);
+
 // Spec files as the Files API serves them (#113): repo-relative paths under
 // specs/, metadata (list-files) split from content (read-file).
 interface MockSpecFile {
@@ -684,6 +773,10 @@ const fullFiles: MockSpecFile[] = [
     content: ordersApiDesignJson,
   },
   { path: "specs/validation/validation-plan.md", content: validationPlan },
+  {
+    path: "specs/validation/validation-criteria.json",
+    content: validationCriteriaJson,
+  },
 ];
 
 export const projectSpecFiles: Record<
@@ -734,16 +827,12 @@ export function specFileContent(
   };
 }
 
-export const specFileNotFound = (path: string): ErrorModel => ({
-  type: "about:blank",
-  status: 404,
-  title: "Not Found",
-  detail: `no spec file at ${path}`,
+export const specFileNotFound = (path: string): ApiError => ({
+  code: "not_found",
+  message: `no spec file at ${path}`,
 });
 
-export const projectSectionError: ErrorModel = {
-  type: "about:blank",
-  status: 500,
-  title: "Internal Server Error",
-  detail: "Mock error scenario for the project overview",
+export const projectSectionError: ApiError = {
+  code: "internal_error",
+  message: "Mock error scenario for the project overview",
 };

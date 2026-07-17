@@ -44,6 +44,11 @@ services:
   aep-api:
     build:
       context: ../services/aep-api
+      # The platform skill library (repo-root skills/) as a BuildKit named
+      # context — the Dockerfile COPYs it to /app/skills. Keeps the single
+      # authored source out of the aep-api module (no vendored copy).
+      additional_contexts:
+        skills: ../skills
     container_name: aep-api
     # Fast SYN-retransmit recovery for the local Colima env. Its docker-bridge
     # NAT intermittently drops a SYN under concurrent outbound bursts (the BFF's
@@ -204,6 +209,13 @@ services:
       # of the cloud services; same client surface in both build configs.
       SECRET_MANAGER_API_URL: "http://secret-manager-api:8082"
       CLUSTER_GATEWAY_PROXY_URL: "http://local-cluster-gateway-proxy:8085"
+      # Validation-runner image (Dockerfile.validation: Debian + Playwright
+      # browsers). Defaults to the locally-built aep-validation-runner:dev, which
+      # setup-aep.sh builds + k3d-imports (it has no published counterpart; the
+      # alpine coding image cannot run chromium, so there is no fallback — an
+      # unset/absent image makes validation dispatch fail loudly). Override to a
+      # published tag in cloud release bindings.
+      VALIDATION_RUNNER_IMAGE: "${VALIDATION_RUNNER_IMAGE:-aep-validation-runner:dev}"
       # Push target for AnthropicCredentialService.pushExternalSecret: on every
       # successful Connect (first-time connect AND rotation), aep-api applies
       # an ExternalSecret here via the proxy above, pointed at the freshly

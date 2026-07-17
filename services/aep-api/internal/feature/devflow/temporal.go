@@ -16,8 +16,11 @@
 
 // Package devflow hosts the Temporal-backed development workflows: the
 // per-version DevFlowWorkflow (tag → design → plan → task fan-out →
-// validate) and the per-task TaskFlowWorkflow (dispatch coding agent → PR →
-// merge → build → deploy). Activities are thin adapters over the existing
+// validate), the per-task TaskFlowWorkflow (dispatch coding agent → PR →
+// merge → build → deploy), and the validating phase's tree — the per-version
+// ValidationFlowWorkflow orchestrator fanning out ValidationTaskWorkflow lane
+// children (dispatch lanes → single PR → merge, no build/deploy).
+// Activities are thin adapters over the existing
 // feature services; existing webhook handlers and watchers feed the
 // workflows via signals (see signaler.go). The whole feature is additive:
 // with Temporal unconfigured, nothing here runs and the rest of aep-api is

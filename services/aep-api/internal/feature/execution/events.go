@@ -233,6 +233,12 @@ func (e *Events) spawnBuild(ctx context.Context, repoFullName string, issueNumbe
 		slog.WarnContext(ctx, "pr merged for unknown Task", "repo", repoFullName, "issue", issueNumber)
 		return nil
 	}
+	if facts.Class == taskmeta.ClassValidation {
+		// A merged validation PR spawns no build — a validation Task is project-
+		// scoped (no component to build) and rests at `merged` once its PR merges
+		// (validation-phase). Deriving stays at merged with no build Execution.
+		return nil
+	}
 	row := &models.Execution{
 		OrgID:       facts.OrgID,
 		ProjectID:   facts.ProjectID,

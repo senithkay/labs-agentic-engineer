@@ -39,6 +39,12 @@ RUN addgroup -g 1000 appgroup && adduser -S -u 1000 -G appgroup appuser
 WORKDIR /app
 COPY --from=builder /app/bin/aep-api .
 
+# The platform skill library, read at runtime and seeded into each org's
+# skills repo (config SkillsDir, default /app/skills). Supplied as a BuildKit
+# named build context (`--build-context skills=<repo>/skills`) so the single
+# authored source at repo-root skills/ is never vendored/copied into the module.
+COPY --from=skills . /app/skills
+
 USER appuser
 
 EXPOSE 8080

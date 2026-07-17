@@ -23,6 +23,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -53,9 +55,9 @@ var validClassifications = map[string]bool{
 // Alerts notification bell and Alerts list/stepper (issues #154, #155, BE
 // handshake #156).
 type RcaAgentReportService interface {
-	CreateReport(ctx context.Context, orgID string, in *models.CreateRcaAgentReportRequest) (*models.RcaAgentReport, error)
+	CreateReport(ctx context.Context, orgID string, in *apigen.CreateRcaAgentReportRequest) (*models.RcaAgentReport, error)
 	GetReport(ctx context.Context, orgID, id string) (*models.RcaAgentReport, error)
-	ListReports(ctx context.Context, orgID, cursor string, limit int) (*models.RcaAgentReportList, error)
+	ListReports(ctx context.Context, orgID, cursor string, limit int) (*apigen.RcaAgentReportList, error)
 }
 
 type rcaAgentReportService struct {
@@ -73,7 +75,7 @@ func NewRcaAgentReportService(repo Repository, execs ExecutionReader) RcaAgentRe
 // CreateReport validates and persists a new report. Fields the contract
 // marks required are enforced here (not left to a DB NOT NULL 500) so the
 // caller gets a precise 400.
-func (s *rcaAgentReportService) CreateReport(ctx context.Context, orgID string, in *models.CreateRcaAgentReportRequest) (*models.RcaAgentReport, error) {
+func (s *rcaAgentReportService) CreateReport(ctx context.Context, orgID string, in *apigen.CreateRcaAgentReportRequest) (*models.RcaAgentReport, error) {
 	if err := validateCreate(in); err != nil {
 		return nil, err
 	}
@@ -84,7 +86,7 @@ func (s *rcaAgentReportService) CreateReport(ctx context.Context, orgID string, 
 	return report, nil
 }
 
-func validateCreate(in *models.CreateRcaAgentReportRequest) error {
+func validateCreate(in *apigen.CreateRcaAgentReportRequest) error {
 	if in == nil {
 		return fmt.Errorf("%w: request body is required", ErrInvalidReport)
 	}
@@ -181,7 +183,7 @@ func repoFromIssueURL(issueURL string) string {
 }
 
 // ListReports returns a page of reports, newest first.
-func (s *rcaAgentReportService) ListReports(ctx context.Context, orgID, cursor string, limit int) (*models.RcaAgentReportList, error) {
+func (s *rcaAgentReportService) ListReports(ctx context.Context, orgID, cursor string, limit int) (*apigen.RcaAgentReportList, error) {
 	switch {
 	case limit <= 0:
 		limit = defaultListLimit
@@ -192,5 +194,5 @@ func (s *rcaAgentReportService) ListReports(ctx context.Context, orgID, cursor s
 	if err != nil {
 		return nil, fmt.Errorf("list reports: %w", err)
 	}
-	return &models.RcaAgentReportList{Items: reports, NextCursor: nextCursor}, nil
+	return &apigen.RcaAgentReportList{Items: reports, NextCursor: nextCursor}, nil
 }

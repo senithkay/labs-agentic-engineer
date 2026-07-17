@@ -27,9 +27,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -45,6 +49,14 @@ const (
 	deployDeploying = "deploying"
 	deployDeployed  = "deployed"
 	deployFailed    = "failed"
+
+	// Coarse validation-run state (the deploy.validation contract enum): none
+	// (no validation child — not reached, or no acceptance criteria), running,
+	// completed (ran to completion), failed (mechanical failure).
+	validationNone      = "none"
+	validationRunning   = "running"
+	validationCompleted = "completed"
+	validationFailed    = "failed"
 )
 
 // devRunRows is the narrow port over the workflow_runs lookup index: the
@@ -52,6 +64,7 @@ const (
 // repositories.WorkflowRunRepository satisfies it.
 type devRunRows interface {
 	ListByProject(ctx context.Context, orgID, projectID, kind string) ([]models.DevflowRun, error)
+	ValidationRunByParent(ctx context.Context, orgID, projectID, parentWorkflowID string) (*models.DevflowRun, error)
 	DeleteByProject(ctx context.Context, orgID, projectID string) error
 }
 
@@ -73,17 +86,19 @@ func (s *projectService) SetStageSources(runs devRunRows, bindings bindingsReade
 // fields from three concurrently-read sources — strict join: any source
 // failing fails the whole read (the console's poller keeps last-good data
 // and retries; the endpoint never fabricates emptiness).
-func (s *projectService) populateStages(ctx context.Context, orgName, projectName string, status *models.ProjectStatus) error {
+func (s *projectService) populateStages(ctx context.Context, orgName, projectName string, status *apigen.ProjectStatus) error {
 	if s.artifactSvc == nil || s.runReader == nil || s.bindingsReader == nil {
 		return fmt.Errorf("project status: stage sources not wired")
 	}
 
 	var (
-		snap        *artifacts.StatusSnapshot
-		runs        []models.DevflowRun
-		bindings    []models.ReleaseBindingSummary
-		deployVer   string
-		deployTotal int64
+		snap          *artifacts.StatusSnapshot
+		runs          []models.DevflowRun
+		bindings      []models.ReleaseBindingSummary
+		deployVer     string
+		deployTotal   int64
+		validationRun *models.DevflowRun
+		validationPR  int
 	)
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -97,6 +112,29 @@ func (s *projectService) populateStages(ctx context.Context, orgName, projectNam
 		var err error
 		if runs, err = s.runReader.ListByProject(gctx, orgName, projectName, models.WorkflowKindDev); err != nil {
 			return fmt.Errorf("list dev runs: %w", err)
+		}
+		// Validation-run state for the newest dev run — cheap DB reads (no
+		// GitHub), so it stays within the poll budget. Read here, before the
+		// deploy-version early return below, so a first build that has reached
+		// its validating phase (no completed run yet) still reports validation.
+		if len(runs) > 0 {
+			vr, verr := s.runReader.ValidationRunByParent(gctx, orgName, projectName, runs[0].WorkflowID)
+			if verr != nil {
+				return fmt.Errorf("validation run: %w", verr)
+			}
+			validationRun = vr
+			// The validation PR number is recovered from the executions rows (the
+			// succeeded coding row's "pr#" reason) — no live PR query.
+			if vr != nil && s.execs != nil {
+				byKind, eerr := s.execs.LatestPerKindScoped(gctx, orgName, vr.Repo, vr.IssueNumber)
+				if eerr != nil {
+					return fmt.Errorf("validation pr lookup: %w", eerr)
+				}
+				if coding := byKind[string(taskmeta.KindCoding)]; coding != nil &&
+					coding.Status == string(taskmeta.ExecSucceeded) {
+					validationPR = taskmeta.OpenPRNumber(coding.Reason)
+				}
+			}
 		}
 		// The deploy denominator depends only on the rows, so read it here —
 		// overlapped with the OC call instead of serial after the join.
@@ -139,7 +177,7 @@ func (s *projectService) populateStages(ctx context.Context, orgName, projectNam
 
 	// Spec stage + flat artifact fields: one snapshot, same semantics as the
 	// retired per-call reads — minus their per-poll origin fetches.
-	status.Spec = models.SpecStage{
+	status.Spec = apigen.SpecStage{
 		Exists:  snap.HasSpec,
 		Version: snap.SpecVersion,
 		Dirty:   snap.SpecDirty,
@@ -180,7 +218,44 @@ func (s *projectService) populateStages(ctx context.Context, orgName, projectNam
 	}
 	status.Deploy.Status = deployStageStatus(dev)
 	status.Deploy.Components.Ready = int64(countReady(dev))
+
+	// Validation: the coarse run state of the newest build's validation child,
+	// plus a link to its PR (the validation issue as a fallback before a PR
+	// exists). Both derived from cheap DB reads above — no GitHub in the poll.
+	status.Deploy.Validation = apigen.DeployStageValidation(validationStageStatus(validationRun))
+	status.Deploy.ValidationURL = validationURL(status.RepoURL, validationRun, validationPR)
 	return nil
+}
+
+// validationStageStatus maps the validation child run's row status onto the
+// deploy.validation enum. No child row → none (not reached, or no acceptance
+// criteria). An unknown non-terminal status reads as running (in flight).
+func validationStageStatus(run *models.DevflowRun) string {
+	if run == nil {
+		return validationNone
+	}
+	switch run.Status {
+	case models.WorkflowStatusCompleted:
+		return validationCompleted
+	case models.WorkflowStatusFailed, models.WorkflowStatusCanceled:
+		return validationFailed
+	default: // running
+		return validationRunning
+	}
+}
+
+// validationURL builds the validation PR link from the repo's clone URL, or the
+// validation issue as a fallback before the PR opens. Empty when there is no
+// validation run or no repo URL to build from.
+func validationURL(repoURL string, run *models.DevflowRun, prNumber int) string {
+	if run == nil || repoURL == "" {
+		return ""
+	}
+	base := strings.TrimSuffix(repoURL, ".git")
+	if prNumber > 0 {
+		return fmt.Sprintf("%s/pull/%d", base, prNumber)
+	}
+	return fmt.Sprintf("%s/issues/%d", base, run.IssueNumber)
 }
 
 // applyFlatArtifactFields recomputes the pre-#184 flat fields from the
@@ -193,7 +268,7 @@ func (s *projectService) populateStages(ctx context.Context, orgName, projectNam
 // present here, where the old ReadDesign failed the whole status read — see
 // artifacts.StatusSnapshot.HasDesign. HasTasks stays false — tasks are
 // counted live from GitHub, never here.
-func applyFlatArtifactFields(status *models.ProjectStatus, snap *artifacts.StatusSnapshot) {
+func applyFlatArtifactFields(status *apigen.ProjectStatus, snap *artifacts.StatusSnapshot) {
 	status.HasSpec = snap.HasSpec
 	switch {
 	case snap.SpecVersion != "":

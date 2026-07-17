@@ -60,8 +60,31 @@ type PlanService struct {
 	issues     IssueClient
 	snapshots  gitrepo.SnapshotProvider
 	skillsRepo SkillsRepoResolver
+	// validationMinter mints the project's single aep:validation Task right
+	// after the plan tap drains — the validation task is born in the SAME
+	// planning pass as the implementation tasks (validation-phase). Consumer-
+	// side port wired via SetValidationIssueMinter; nil is a documented no-op.
+	validationMinter validationIssueMinter
 
 	inflight sync.Map // projectKey → struct{}
+}
+
+// validationIssueMinter is the plan service's narrow consumer port for the
+// validation feature: after a plan turn creates the implementation issues, it
+// ensures the project's aep:validation Task exists (idempotent — dedups on the
+// open issue; no-op when specs/validation/validation-criteria.json is absent).
+// *validation.Service satisfies it; wired at the composition root. Minting
+// here (not at design approval) keeps the validation issue OUT of the plan
+// turn's existing-task context.
+type validationIssueMinter interface {
+	EnsureValidationIssue(ctx context.Context, orgID, projectID, designTag string) error
+}
+
+// SetValidationIssueMinter wires the validation feature so the plan session
+// mints the project's aep:validation Task after the tap drains. A nil minter
+// is a documented no-op.
+func (s *PlanService) SetValidationIssueMinter(m validationIssueMinter) {
+	s.validationMinter = m
 }
 
 // NewPlanService wires the plan service. git/snapshots/skillsRepo back the
@@ -71,19 +94,29 @@ func NewPlanService(repos RepoResolver, versions VersionReader, git GitReader, k
 }
 
 // PlanSession is a started plan turn: the raw upstream SSE body, the tap that
-// executes tool frames against GitHub, and a release for the in-flight lock.
+// executes tool frames against GitHub, a release for the in-flight lock, and
+// the (optional) validation minter that runs once the tap drains.
 type PlanSession struct {
 	body    io.ReadCloser
 	tap     *planTap
 	release func()
+	minter  validationIssueMinter
 }
 
 // Stream forwards the turn to w verbatim while the tap performs the GitHub
-// writes, then releases the per-project in-flight lock. Survives client
+// writes, then mints the project's aep:validation Task (best-effort — the
+// implementation issues now exist, so the validation task is born in the same
+// planning pass; the devflow validating phase re-ensures idempotently as the
+// safety net), then releases the per-project in-flight lock. Survives client
 // disconnect (the tap drains upstream).
 func (s *PlanSession) Stream(w io.Writer, flush func()) {
 	defer s.release()
 	s.tap.Stream(s.body, w, flush)
+	if s.minter != nil {
+		if err := s.minter.EnsureValidationIssue(s.tap.ctx, s.tap.orgID, s.tap.projectID, s.tap.designTag); err != nil {
+			slog.WarnContext(s.tap.ctx, "plan: validation issue minting after plan failed", "project", s.tap.projectID, "error", err)
+		}
+	}
 }
 
 // StartPlan assembles context and starts the plan turn. Pre-stream failures are
@@ -225,7 +258,7 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 		titleToNumber:  map[string]int{},
 		createdKeys:    map[string]bool{},
 	}
-	return &PlanSession{body: body, tap: tap, release: release}, nil
+	return &PlanSession{body: body, tap: tap, release: release, minter: s.validationMinter}, nil
 }
 
 // assembleExistingTasks renders each open Task as a tasks/<n>.md context file
@@ -245,6 +278,13 @@ func (s *PlanService) assembleExistingTasks(ctx context.Context, orgID, projectI
 	}
 	for _, issue := range issues {
 		if !strings.EqualFold(issue.State, "open") {
+			continue
+		}
+		// The validation task is not plan context: it is platform-minted after
+		// the plan turn (component-less, dependsOn everything), so showing it
+		// would only confuse the component-based planning skill — and preloading
+		// it into contextNumbers would let an updateTask clobber it.
+		if taskmeta.ParseLabels(issue.Labels).Class == taskmeta.ClassValidation {
 			continue
 		}
 		block, human, berr := taskmeta.ParseBody(issue.Body)

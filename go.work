@@ -1,6 +1,7 @@
 go 1.26.0
 
 use (
+	./deployments/single-cluster/resource-types/thunder-app/operator
 	// Go workspace spanning every in-repo Go module. A change in a shared Go
 	// package is picked up on the next build with no `replace` directives.
 	//
@@ -9,5 +10,4 @@ use (
 	// needed to adopt a new Go module.
 	./services/aep-api
 	./tools/aepctl
-	./deployments/single-cluster/resource-types/thunder-app/operator
 )

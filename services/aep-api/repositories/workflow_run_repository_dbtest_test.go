@@ -114,6 +114,62 @@ func TestWorkflowRunRepository_TaskCounts(t *testing.T) {
 	}
 }
 
+// TestWorkflowRunRepository_ValidationRunByParent pins the status builder's
+// validation read: the lookup returns only the validation-kind child (the
+// validation-phase orchestrator) of a given dev run, not its coding-task
+// siblings — and the signaler's RunningTaskByIssue resolves the orchestrator
+// by the validation issue's number just like a coding task's row.
+func TestWorkflowRunRepository_ValidationRunByParent(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	repo := repositories.NewWorkflowRunRepository(db)
+	ctx := context.Background()
+
+	dev := devRun("orga", "proj", "devflow-orga-proj-v1", "v1")
+	if err := repo.Record(ctx, dev); err != nil {
+		t.Fatalf("Record dev: %v", err)
+	}
+	// A coding-task child and the validation-phase orchestrator, both parented
+	// to the dev run.
+	coding := &models.DevflowRun{
+		WorkflowID: "taskflow-orga-proj-5", RunID: "r-coding",
+		Kind: models.WorkflowKindTask, OrgID: "orga", ProjectID: "proj",
+		Repo: "acme/proj", IssueNumber: 5, ParentWorkflowID: dev.WorkflowID,
+	}
+	validation := &models.DevflowRun{
+		WorkflowID: "validationflow-orga-proj-v1", RunID: "r-validation",
+		Kind: models.WorkflowKindValidation,
+		OrgID: "orga", ProjectID: "proj", Repo: "acme/proj", IssueNumber: 9,
+		ParentWorkflowID: dev.WorkflowID,
+	}
+	if err := repo.Record(ctx, coding); err != nil {
+		t.Fatalf("Record coding: %v", err)
+	}
+	if err := repo.Record(ctx, validation); err != nil {
+		t.Fatalf("Record validation: %v", err)
+	}
+
+	got, err := repo.ValidationRunByParent(ctx, "orga", "proj", dev.WorkflowID)
+	if err != nil {
+		t.Fatalf("ValidationRunByParent: %v", err)
+	}
+	if got == nil || got.IssueNumber != 9 || got.Kind != models.WorkflowKindValidation {
+		t.Fatalf("ValidationRunByParent = %+v, want the validation orchestrator (issue 9)", got)
+	}
+
+	// The signaler's lookup owns the validation issue's webhook signals via the
+	// orchestrator's running row (kind IN task, validation).
+	if got, err := repo.RunningTaskByIssue(ctx, "acme/proj", 9); err != nil || got == nil ||
+		got.WorkflowID != validation.WorkflowID {
+		t.Fatalf("RunningTaskByIssue(validation issue) = (%+v, %v), want the orchestrator row", got, err)
+	}
+
+	// A parent with no validation child misses cleanly (nil, nil).
+	if got, err := repo.ValidationRunByParent(ctx, "orga", "proj", "some-other-wf"); err != nil || got != nil {
+		t.Fatalf("ValidationRunByParent(no match) = (%+v, %v), want (nil, nil)", got, err)
+	}
+}
+
 // TestWorkflowRunRepository_ListByProject pins the status read path: newest
 // first, kind-filtered — the overview's build stage reads rows[0] of the dev
 // kind and the deploy version scans for the newest completed one.

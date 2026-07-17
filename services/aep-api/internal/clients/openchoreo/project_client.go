@@ -21,17 +21,18 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/gen"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 //go:generate go run github.com/matryer/moq@v0.7.1 -rm -fmt goimports -pkg mocks -out mocks/project_client_mock.go . ProjectClient
 
 // ProjectClient defines operations for managing OpenChoreo projects.
 type ProjectClient interface {
-	ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*models.ProjectList, error)
-	GetProject(ctx context.Context, orgName, projectName string) (*models.Project, error)
-	CreateProject(ctx context.Context, orgName string, req *models.CreateProjectRequest) (*models.Project, error)
+	ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*apigen.ProjectList, error)
+	GetProject(ctx context.Context, orgName, projectName string) (*apigen.Project, error)
+	CreateProject(ctx context.Context, orgName string, req *apigen.CreateProjectRequest) (*apigen.Project, error)
 	DeleteProject(ctx context.Context, orgName, projectName string) error
 }
 
@@ -47,7 +48,7 @@ func NewProjectClient(cfg Config) ProjectClient {
 	return &projectClient{oc: oc}
 }
 
-func (c *projectClient) ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*models.ProjectList, error) {
+func (c *projectClient) ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*apigen.ProjectList, error) {
 	params := &gen.ListProjectsParams{}
 	if limit > 0 {
 		l := gen.LimitParam(limit)
@@ -70,11 +71,11 @@ func (c *projectClient) ListProjects(ctx context.Context, orgName string, limit 
 			JSON500: resp.JSON500,
 		})
 	}
-	items := make([]models.Project, len(resp.JSON200.Items))
+	items := make([]apigen.Project, len(resp.JSON200.Items))
 	for i, p := range resp.JSON200.Items {
 		items[i] = projectToModel(p)
 	}
-	out := &models.ProjectList{Items: items}
+	out := &apigen.ProjectList{Items: items}
 	// Surface OC's continuation token verbatim (absent = last page); the
 	// console pages on it.
 	if nc := resp.JSON200.Pagination.NextCursor; nc != nil {
@@ -83,7 +84,7 @@ func (c *projectClient) ListProjects(ctx context.Context, orgName string, limit 
 	return out, nil
 }
 
-func (c *projectClient) GetProject(ctx context.Context, orgName, projectName string) (*models.Project, error) {
+func (c *projectClient) GetProject(ctx context.Context, orgName, projectName string) (*apigen.Project, error) {
 	resp, err := c.oc.GetProjectWithResponse(ctx, orgName, projectName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get project: %w", err)
@@ -100,7 +101,7 @@ func (c *projectClient) GetProject(ctx context.Context, orgName, projectName str
 	return &p, nil
 }
 
-func (c *projectClient) CreateProject(ctx context.Context, orgName string, body *models.CreateProjectRequest) (*models.Project, error) {
+func (c *projectClient) CreateProject(ctx context.Context, orgName string, body *apigen.CreateProjectRequest) (*apigen.Project, error) {
 	resp, err := c.oc.CreateProjectWithResponse(ctx, orgName, buildCreateProjectBody(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create project: %w", err)
@@ -135,12 +136,12 @@ func (c *projectClient) DeleteProject(ctx context.Context, orgName, projectName 
 	return nil
 }
 
-func projectToModel(p gen.Project) models.Project {
+func projectToModel(p gen.Project) apigen.Project {
 	var deploymentPipeline string
 	if p.Spec != nil && p.Spec.DeploymentPipelineRef != nil {
 		deploymentPipeline = p.Spec.DeploymentPipelineRef.Name
 	}
-	return models.Project{
+	return apigen.Project{
 		UID:                derefStr(p.Metadata.Uid),
 		Name:               p.Metadata.Name,
 		NamespaceName:      derefStr(p.Metadata.Namespace),
@@ -152,7 +153,7 @@ func projectToModel(p gen.Project) models.Project {
 	}
 }
 
-func buildCreateProjectBody(req *models.CreateProjectRequest) gen.CreateProjectJSONRequestBody {
+func buildCreateProjectBody(req *apigen.CreateProjectRequest) gen.CreateProjectJSONRequestBody {
 	body := gen.Project{
 		Metadata: gen.ObjectMeta{Name: req.Name},
 	}

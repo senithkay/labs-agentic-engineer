@@ -26,14 +26,16 @@ package skills
 //   - writes are one Mutate commit to `main`; Mutate owns the CAS retry
 //     (no per-feature retry wrapper).
 //
-// The embedded library (platform + org kinds) is seeded + content-reconciled
-// from the vendored container files (reconcile.go). The exported read surface
+// The platform library (platform + org kinds) is seeded + content-reconciled
+// from the on-disk skill library (config.SkillsDir, injected as an fs.FS;
+// reconcile.go). The exported read surface
 // (Resolve/List/ListSummaries) is IDENTICAL to the previous store, so the
 // architect and tech-lead resolvers consume it unchanged.
 
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"sort"
 	"strings"
@@ -74,6 +76,11 @@ var legacyKindDirs = map[string]string{
 type SkillService struct {
 	git   gitrepo.GitOpsService
 	repos gitrepo.RepoService
+	// library is the platform skill source read at reconcile time — os.DirFS
+	// over the on-disk library (config.SkillsDir) in production, a test fs.FS in
+	// tests. Rooted at the library directory itself ("<name>/SKILL.md"), so
+	// callers read from ".".
+	library fs.FS
 	// provLocks serialises first-time provisioning per org. The gitfs flock +
 	// origin push-CAS make concurrent WRITES safe, but they cannot make the
 	// first page load deterministic: EnsureBareRepo creates the GitHub repo
@@ -92,10 +99,12 @@ func (s *SkillService) orgLock(orgID string) *sync.Mutex {
 
 // NewSkillService wires the repo-backed store. `git` provides the Workspace
 // engine, credential resolver, and save identities; `repos` provisions/looks
-// up the per-org skills repo row. Either may be nil in degraded/test boot
-// (reads then return empty).
-func NewSkillService(git gitrepo.GitOpsService, repos gitrepo.RepoService) *SkillService {
-	return &SkillService{git: git, repos: repos}
+// up the per-org skills repo row; `library` is the platform skill source read
+// during seed/reconcile (os.DirFS(config.SkillsDir) in production, a test fs.FS
+// in tests). Any may be nil in degraded/test boot (reads then return empty; a
+// nil library seeds nothing).
+func NewSkillService(git gitrepo.GitOpsService, repos gitrepo.RepoService, library fs.FS) *SkillService {
+	return &SkillService{git: git, repos: repos, library: library}
 }
 
 // ---- read surface (unchanged contract) -------------------------------------

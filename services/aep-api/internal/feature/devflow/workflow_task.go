@@ -23,8 +23,8 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// QueryStatus is the query name both workflows expose so the API/console can
-// read live workflow state.
+// QueryStatus is the query name every devflow workflow exposes so the
+// API/console can read live workflow state.
 const QueryStatus = "status"
 
 // TaskFlowInput starts a per-Task workflow: dispatch the coding agent, wait
@@ -123,134 +123,16 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 		return fail("start-coding gate rejected: " + d.Note)
 	}
 
-	// Dispatch the coding agent through the funnel.
-	status.Phase = TaskPhaseCoding
-	var executionID string
-	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).DispatchCoding, DispatchCodingInput{
-		OrgID: in.OrgID, ProjectID: in.ProjectID, Repo: in.Repo, Issue: in.Issue,
-	}).Get(ctx, &executionID); err != nil {
-		return fail("dispatch coding: " + err.Error())
-	}
-	status.ExecutionID = executionID
-
-	// Wait for the coding attempt to end: pr-opened (success) or job-status
-	// failed. The coding agent's success IS the PR opening (§7).
-	prOpened := workflow.GetSignalChannel(ctx, SigPROpened)
-	jobStatus := workflow.GetSignalChannel(ctx, SigJobStatus)
-	var pr PRSignal
-	{
-		var jobFailed *RunStatusSignal
-		timer := workflow.NewTimer(ctx, codingWaitTimeout)
-		done := false
-		for !done {
-			sel := workflow.NewSelector(ctx)
-			sel.AddReceive(prOpened, func(c workflow.ReceiveChannel, _ bool) {
-				c.Receive(ctx, &pr)
-				done = true
-			})
-			sel.AddReceive(jobStatus, func(c workflow.ReceiveChannel, _ bool) {
-				var s RunStatusSignal
-				c.Receive(ctx, &s)
-				if s.Phase == PhaseFailed {
-					jobFailed = &s
-					done = true
-				}
-			})
-			sel.AddFuture(timer, func(workflow.Future) { done = true })
-			sel.Select(ctx)
-		}
-		if jobFailed != nil {
-			return fail("coding job failed: " + jobFailed.Message)
-		}
-		if pr.PRNumber == 0 {
-			return fail("timed out waiting for the pull request")
-		}
-	}
-	status.PRNumber = pr.PRNumber
-
-	// Merge phase (gate merge-pr). Auto → platform squash-merges. Manual →
-	// wait for an approve decision (then merge) OR an external human merge
-	// (pr-merged); a reject or pr-rejected fails the task.
-	status.Phase = TaskPhaseMerging
-	prMerged := workflow.GetSignalChannel(ctx, SigPRMerged)
-	prRejected := workflow.GetSignalChannel(ctx, SigPRRejected)
-	merged := false
-	if in.Gates.IsAuto(GateMergePR) {
-		if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).MergePR, MergePRInput{
-			OrgID: in.OrgID, ProjectID: in.ProjectID, PRNumber: pr.PRNumber,
-		}).Get(ctx, nil); err != nil {
-			return fail("merge pr: " + err.Error())
-		}
-	} else {
-		status.PendingGate = GateMergePR
-		gateCh := workflow.GetSignalChannel(ctx, SigGateDecision)
-		timer := workflow.NewTimer(ctx, mergeWaitTimeout)
-		decided := false
-		for !decided {
-			sel := workflow.NewSelector(ctx)
-			sel.AddReceive(gateCh, func(c workflow.ReceiveChannel, _ bool) {
-				var d GateDecisionSignal
-				c.Receive(ctx, &d)
-				if d.Gate != GateMergePR {
-					return
-				}
-				decided = true
-				if !d.Approve {
-					status.Error = "merge-pr gate rejected: " + d.Note
-					return
-				}
-				if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).MergePR, MergePRInput{
-					OrgID: in.OrgID, ProjectID: in.ProjectID, PRNumber: pr.PRNumber,
-				}).Get(ctx, nil); err != nil {
-					status.Error = "merge pr: " + err.Error()
-				}
-			})
-			sel.AddReceive(prMerged, func(c workflow.ReceiveChannel, _ bool) {
-				var m PRSignal
-				c.Receive(ctx, &m)
-				merged, decided = true, true // human merged on GitHub
-			})
-			sel.AddReceive(prRejected, func(c workflow.ReceiveChannel, _ bool) {
-				var r PRSignal
-				c.Receive(ctx, &r)
-				decided = true
-				status.Error = "pull request closed without merging"
-			})
-			sel.AddFuture(timer, func(workflow.Future) {
-				decided = true
-				status.Error = "timed out waiting for merge approval"
-			})
-			sel.Select(ctx)
-		}
-		status.PendingGate = ""
-		if status.Error != "" {
-			return fail(status.Error)
-		}
+	// Dispatch the coding agent through the funnel and wait for the PR — the
+	// coding agent's success IS the PR opening (§7).
+	pr, err := runCodingPhase(ctx, in.OrgID, in.ProjectID, in.Repo, in.Issue, &status)
+	if err != nil {
+		return fail(err.Error())
 	}
 
-	// Await the merge webhook confirmation (unless a human merge already
-	// arrived above). pr-rejected here means the merge did not stick.
-	if !merged {
-		timer := workflow.NewTimer(ctx, mergeWaitTimeout)
-		done := false
-		for !done {
-			sel := workflow.NewSelector(ctx)
-			sel.AddReceive(prMerged, func(c workflow.ReceiveChannel, _ bool) {
-				var m PRSignal
-				c.Receive(ctx, &m)
-				merged, done = true, true
-			})
-			sel.AddReceive(prRejected, func(c workflow.ReceiveChannel, _ bool) {
-				var r PRSignal
-				c.Receive(ctx, &r)
-				done = true
-			})
-			sel.AddFuture(timer, func(workflow.Future) { done = true })
-			sel.Select(ctx)
-		}
-		if !merged {
-			return fail("pull request was not merged")
-		}
+	// Merge phase (gate merge-pr).
+	if err := runMergePhase(ctx, in.OrgID, in.ProjectID, pr.PRNumber, in.Gates, &status); err != nil {
+		return fail(err.Error())
 	}
 
 	// Wait for the build (spawned by the merge webhook, driven by the funnel).
@@ -274,41 +156,4 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 	status.Phase = TaskPhaseDone
 	markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted, "")
 	return TaskFlowResult{Issue: in.Issue, Outcome: OutcomeSucceeded}, nil
-}
-
-// awaitRunStatus blocks for one RunStatusSignal or the timeout. ok=false on
-// timeout.
-func awaitRunStatus(ctx workflow.Context, ch workflow.ReceiveChannel, timeout time.Duration) (RunStatusSignal, bool) {
-	var got RunStatusSignal
-	received := false
-	timer := workflow.NewTimer(ctx, timeout)
-	sel := workflow.NewSelector(ctx)
-	sel.AddReceive(ch, func(c workflow.ReceiveChannel, _ bool) {
-		c.Receive(ctx, &got)
-		received = true
-	})
-	sel.AddFuture(timer, func(workflow.Future) {})
-	sel.Select(ctx)
-	return got, received
-}
-
-// markRunStatus best-effort records the run's terminal status in the lookup
-// index (the workflow's own truth is Temporal; this keeps the DB index fresh
-// for signalers and the list endpoint).
-func markRunStatus(ctx workflow.Context, workflowID, statusStr, reason string) {
-	_ = workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).SetWorkflowRunStatus, SetWorkflowRunStatusInput{
-		WorkflowID: workflowID,
-		Status:     statusStr,
-		Reason:     reason,
-	}).Get(ctx, nil)
-}
-
-// withDefaultActivityOpts returns a context carrying the default activity
-// options for short adapter activities (2m start-to-close per attempt; no
-// explicit RetryPolicy, so the Temporal SERVER default applies — unlimited
-// attempts with backoff).
-func withDefaultActivityOpts(ctx workflow.Context) workflow.Context {
-	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 2 * time.Minute,
-	})
 }

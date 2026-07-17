@@ -86,4 +86,39 @@ describe("TasksList", () => {
 
     expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
   });
+
+  it("hides the validation task (its status rides the deployments board)", () => {
+    mockTasks = [
+      task({ issueNumber: 7, title: "Coding task", derivedStatus: "in_progress" }),
+      task({
+        issueNumber: 20,
+        title: "Validate acceptance criteria",
+        executorClass: "validation",
+        operation: "validate",
+        derivedStatus: "in_progress",
+      }),
+    ];
+
+    render(<TasksList projectName="acme" />);
+
+    expect(screen.getByText("Coding task")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Validate acceptance criteria"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the empty state when only the validation task exists", () => {
+    mockTasks = [
+      task({
+        issueNumber: 20,
+        title: "Validate acceptance criteria",
+        executorClass: "validation",
+        derivedStatus: "in_progress",
+      }),
+    ];
+
+    render(<TasksList projectName="acme" />);
+
+    expect(screen.getByText(/No tasks yet/)).toBeInTheDocument();
+  });
 });

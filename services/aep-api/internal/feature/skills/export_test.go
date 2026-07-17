@@ -28,14 +28,33 @@ package skills
 // These symbols are compiled only into the test binary.
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 )
 
+// testLibraryFS is the platform skill source for tests: the repo-root skills/
+// directory (the single authored library), located relative to this file so it
+// is independent of the working directory — five levels up from
+// internal/feature/skills/ to the repo root, then skills/. Mirrors what
+// production injects via os.DirFS(config.SkillsDir).
+func testLibraryFS(t *testing.T) fs.FS {
+	t.Helper()
+	_, self, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("skills: runtime.Caller failed")
+	}
+	root := filepath.Join(filepath.Dir(self), "..", "..", "..", "..", "..", "skills")
+	return os.DirFS(root)
+}
+
 // ComponentStore is an exported handle around a real SkillService backed by
 // the gitfs engine over real bare origins. The component tier wires Svc into
-// api.HumaDeps and drives the real HTTP chain against it end-to-end.
+// api.Deps and drives the real HTTP chain against it end-to-end.
 type ComponentStore struct {
 	Svc  *SkillService
 	host *testGitHost
@@ -47,7 +66,7 @@ type ComponentStore struct {
 // as production does.
 func NewComponentStore(t *testing.T) *ComponentStore {
 	host := newTestGitHost(t)
-	svc := NewSkillService(gitrepo.NewGitOpsService(fakeResolver{}, host.engine), host)
+	svc := NewSkillService(gitrepo.NewGitOpsService(fakeResolver{}, host.engine), host, testLibraryFS(t))
 	return &ComponentStore{Svc: svc, host: host}
 }
 

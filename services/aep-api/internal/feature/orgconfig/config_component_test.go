@@ -53,6 +53,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
+	"github.com/wso2/aep/aep-api/internal/platform/contracttest"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -186,27 +187,26 @@ func newConfigHarnessOpts(t *testing.T, thunder thundersvc.Client, appClientID s
 		"http://localhost:8090", appClientID,
 	)
 
-	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{OrgConfigSvc: svc}})
+	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{OrgConfigSvc: svc}})
 	return &configHarness{h: h, db: db, gh: gh, anth: anth}
 }
 
 // --- decode helpers ---------------------------------------------------------
 
 type cfgProblem struct {
-	Title  string `json:"title"`
-	Status int    `json:"status"`
-	Detail string `json:"detail"`
+	Code   string `json:"code"`
+	Detail string `json:"message"`
 	Errors []struct {
 		Message  string `json:"message"`
-		Location string `json:"location"`
-	} `json:"errors"`
+		Location string `json:"field"`
+	} `json:"details"`
 }
 
 func decodeCfgProblem(t *testing.T, body string) cfgProblem {
 	t.Helper()
 	var p cfgProblem
-	if err := json.Unmarshal([]byte(body), &p); err != nil {
-		t.Fatalf("not an RFC-9457 problem body: %v\n%s", err, body)
+	if err := json.Unmarshal([]byte(body), &p); err != nil || p.Code == "" {
+		t.Fatalf("not a flat error envelope: %v\n%s", err, body)
 	}
 	return p
 }
@@ -458,11 +458,11 @@ func TestConfigComponent_C3_ProbeFailsOldKeyStaysActive(t *testing.T) {
 	// Flip the probe to reject, then try to replace.
 	c.anth.setStatus(http.StatusUnauthorized)
 	resp := c.h.AsOrg("acme").Patch(configPath, llmConnect(goodAnthKey2))
-	if resp.Code != 422 {
-		t.Fatalf("probe fail: want 422, got %d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != 400 {
+		t.Fatalf("probe fail: want 400, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if p := decodeCfgProblem(t, resp.Body.String()); len(p.Errors) == 0 || p.Errors[0].Location != "body.llm" {
-		t.Fatalf("422 must point at body.llm: %s", resp.Body.String())
+	if p := componenttest.DecodeEnvelope(t, resp.Body.String()); len(p.Details) == 0 || p.Details[0].Field != "body.llm" {
+		t.Fatalf("400 must point at body.llm: %s", resp.Body.String())
 	}
 	// The old key is untouched.
 	if after := c.h.AsOrg("acme").Get(configPath).Body.String(); after != before {
@@ -514,8 +514,8 @@ func TestConfigComponent_C6_SchemaRejections(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			resp := c.h.AsOrg("acme").Patch(configPath, tc.body)
-			if resp.Code != 422 {
-				t.Fatalf("%s: want 422 schema rejection, got %d body=%s", tc.name, resp.Code, resp.Body.String())
+			if resp.Code != 400 {
+				t.Fatalf("%s: want 400 schema rejection, got %d body=%s", tc.name, resp.Code, resp.Body.String())
 			}
 		})
 	}
@@ -543,11 +543,11 @@ func TestConfigComponent_D2_PatProbeFails(t *testing.T) {
 	c.gh.on("GET", "/user", 401, `{"message":"Bad credentials"}`)
 
 	resp := c.h.AsOrg("acme").Patch(configPath, `{"gitProvider":{"kind":"github","mode":"pat","pat":"bad","githubLogin":"ada"}}`)
-	if resp.Code != 422 {
-		t.Fatalf("probe fail: want 422, got %d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != 400 {
+		t.Fatalf("probe fail: want 400, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if p := decodeCfgProblem(t, resp.Body.String()); len(p.Errors) == 0 || p.Errors[0].Location != "body.gitProvider" {
-		t.Fatalf("422 must point at body.gitProvider: %s", resp.Body.String())
+	if p := componenttest.DecodeEnvelope(t, resp.Body.String()); len(p.Details) == 0 || p.Details[0].Field != "body.gitProvider" {
+		t.Fatalf("400 must point at body.gitProvider: %s", resp.Body.String())
 	}
 	// Nothing persisted.
 	var count int64
@@ -560,10 +560,10 @@ func TestConfigComponent_D2_PatProbeFails(t *testing.T) {
 func TestConfigComponent_D3_AppModeSchemaRejected(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarness(t)
-	// mode enum is pat-only → app is a schema 422 before the handler.
+	// mode enum is pat-only → app is a schema 400 before the handler.
 	resp := c.h.AsOrg("acme").Patch(configPath, `{"gitProvider":{"kind":"github","mode":"app","pat":"x","githubLogin":"ada"}}`)
-	if resp.Code != 422 {
-		t.Fatalf("mode app: want 422 schema rejection, got %d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != 400 {
+		t.Fatalf("mode app: want 400 schema rejection, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -571,12 +571,12 @@ func TestConfigComponent_D4_NullPointsAtDisconnect(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarness(t)
 	resp := c.h.AsOrg("acme").Patch(configPath, `{"gitProvider":null}`)
-	if resp.Code != 422 {
-		t.Fatalf("gitProvider null: want 422, got %d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != 400 {
+		t.Fatalf("gitProvider null: want 400, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	p := decodeCfgProblem(t, resp.Body.String())
-	if len(p.Errors) == 0 || p.Errors[0].Location != "body.gitProvider" || !strings.Contains(p.Detail, "disconnect") {
-		t.Fatalf("422 must point at the disconnect action: %s", resp.Body.String())
+	p := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if len(p.Details) == 0 || p.Details[0].Field != "body.gitProvider" || !strings.Contains(p.Message, "disconnect") {
+		t.Fatalf("400 must point at the disconnect action: %s", resp.Body.String())
 	}
 }
 
@@ -598,7 +598,7 @@ func TestConfigComponent_D5_PatOverAppIsConflict(t *testing.T) {
 	if resp.Code != 409 {
 		t.Fatalf("pat-over-app: want 409, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if p := decodeCfgProblem(t, resp.Body.String()); len(p.Errors) == 0 || p.Errors[0].Location != "body.gitProvider" {
+	if p := componenttest.DecodeEnvelope(t, resp.Body.String()); len(p.Details) == 0 || p.Details[0].Field != "body.gitProvider" {
 		t.Fatalf("409 must point at body.gitProvider: %s", resp.Body.String())
 	}
 }
@@ -644,11 +644,11 @@ func TestConfigComponent_E3_NullRejected(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarness(t)
 	resp := c.h.AsOrg("acme").Patch(configPath, `{"idp":null}`)
-	if resp.Code != 422 {
-		t.Fatalf("idp null: want 422, got %d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != 400 {
+		t.Fatalf("idp null: want 400, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if p := decodeCfgProblem(t, resp.Body.String()); len(p.Errors) == 0 || p.Errors[0].Location != "body.idp" {
-		t.Fatalf("422 must point at body.idp: %s", resp.Body.String())
+	if p := componenttest.DecodeEnvelope(t, resp.Body.String()); len(p.Details) == 0 || p.Details[0].Field != "body.idp" {
+		t.Fatalf("400 must point at body.idp: %s", resp.Body.String())
 	}
 }
 
@@ -717,11 +717,11 @@ func TestConfigComponent_F3_AtomicityLLMNotPersistedWhenGitFails(t *testing.T) {
 	c.gh.on("GET", "/user", 401, `{"message":"Bad credentials"}`)
 
 	resp := c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"`+goodAnthKey+`"},"gitProvider":{"kind":"github","mode":"pat","pat":"bad","githubLogin":"ada"}}`)
-	if resp.Code != 422 {
-		t.Fatalf("atomic fail: want 422, got %d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != 400 {
+		t.Fatalf("atomic fail: want 400, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if p := decodeCfgProblem(t, resp.Body.String()); len(p.Errors) == 0 || p.Errors[0].Location != "body.gitProvider" {
-		t.Fatalf("422 must point at body.gitProvider: %s", resp.Body.String())
+	if p := componenttest.DecodeEnvelope(t, resp.Body.String()); len(p.Details) == 0 || p.Details[0].Field != "body.gitProvider" {
+		t.Fatalf("400 must point at body.gitProvider: %s", resp.Body.String())
 	}
 	// The valid llm section must NOT have been persisted (probe-before-persist).
 	var llmCount, gitCount int64
@@ -748,10 +748,10 @@ func TestConfigComponent_F4_EmptyPatchIsNoOp(t *testing.T) {
 func TestConfigComponent_F5_UnknownTopLevelKeyRejected(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarness(t)
-	// The `llms` plural typo is an unknown field → Huma rejects it (422).
+	// The `llms` plural typo is an unknown field → the contract validator rejects it (400).
 	resp := c.h.AsOrg("acme").Patch(configPath, `{"llms":{"kind":"anthropic","apiKey":"`+goodAnthKey+`"}}`)
-	if resp.Code != 422 {
-		t.Fatalf("unknown key: want 422, got %d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != 400 {
+		t.Fatalf("unknown key: want 400, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -859,14 +859,12 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 
 func TestConfigComponent_H2_SpecShape(t *testing.T) {
 	t.Parallel()
-	spec, err := api.GenerateOpenAPIYAML()
-	if err != nil {
-		t.Fatalf("spec: %v", err)
-	}
-	s := string(spec)
+	// Assert the /config surface stays typed in the committed contract.
+	s := string(contracttest.SourceYAML(t))
+	// paths and schemas live in one document.
 	for _, want := range []string{"get-config", "update-config", "ConfigProjection", "ConfigPatch"} {
 		if !strings.Contains(s, want) {
-			t.Errorf("spec missing %q", want)
+			t.Errorf("contract missing %q", want)
 		}
 	}
 	// The /config ops must be typed — no untyped map bodies (additionalProperties: {}).
@@ -877,11 +875,7 @@ func TestConfigComponent_H2_SpecShape(t *testing.T) {
 
 func TestConfigComponent_H1b_SkillsRenamed(t *testing.T) {
 	t.Parallel()
-	spec, err := api.GenerateOpenAPIYAML()
-	if err != nil {
-		t.Fatalf("spec: %v", err)
-	}
-	s := string(spec)
+	s := string(contracttest.SourceYAML(t))
 	if !strings.Contains(s, "/skills") {
 		t.Errorf("spec missing renamed /skills routes")
 	}

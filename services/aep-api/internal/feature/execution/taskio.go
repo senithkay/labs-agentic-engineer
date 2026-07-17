@@ -17,7 +17,6 @@
 package execution
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
@@ -39,8 +38,9 @@ const (
 	// reasonPROpenPrefix + the PR number is stamped on a succeeded coding row
 	// when its PR opens, so the sweep can GET the live PR state to reconcile a
 	// missed close/merge webhook (§5 — PR state is native GitHub truth, healed
-	// by the sweep, never a DB opinion).
-	reasonPROpenPrefix = "pr#"
+	// by the sweep, never a DB opinion). Aliases the shared encoding so the write
+	// site here and the project status builder's PR link agree on one prefix.
+	reasonPROpenPrefix = taskmeta.ReasonPROpenPrefix
 )
 
 // openPRNumber returns the PR number a succeeded coding row claims is open, or
@@ -49,12 +49,7 @@ func openPRNumber(row *models.Execution) int {
 	if row == nil || row.Kind != string(taskmeta.KindCoding) || row.Status != string(taskmeta.ExecSucceeded) {
 		return 0
 	}
-	rest, ok := strings.CutPrefix(row.Reason, reasonPROpenPrefix)
-	if !ok {
-		return 0
-	}
-	n, _ := strconv.Atoi(rest)
-	return n
+	return taskmeta.OpenPRNumber(row.Reason)
 }
 
 // factsFromIssue parses a live GitHub issue into TaskFacts + its machine block.

@@ -28,7 +28,7 @@ this is safe) and cannot scale independently of the API. Acceptable at this
 scale; revisit by extracting the `devflow` package into its own `main` if the
 worker ever needs independent scaling.
 
-## The two workflows
+## The workflows
 
 `services/aep-api/internal/feature/devflow/`
 
@@ -46,7 +46,10 @@ One run per build/version. Steps, each gate auto by default:
    issues) → read back the planned tasks
 5. fail fast on a dependency cycle
 6. **execute** — dependency-aware task fan-out (below)
-7. **validate gate** → validation step (stub today)
+7. **validate** — quality bar (every planned task succeeded, checked BEFORE the
+   gate so a doomed run never waits for approval) → **validate gate** →
+   OpenChoreo consistency check (`Validate`: every design component has a Ready
+   deployment) → spawn ONE `ValidationFlowWorkflow` child and await its result
 8. **complete gate** → done
 
 ### TaskFlowWorkflow (`workflow_task.go`)
@@ -65,6 +68,37 @@ One child per task:
    funnel — the workflow does not dispatch it)
 7. await `deploy-status`
 8. report the outcome to the parent
+
+### ValidationFlowWorkflow (`workflow_validation.go`)
+
+The validating phase's orchestrator — one child per dev run, built for N
+parallel validation lanes over ONE issue and ONE PR:
+
+1. `ResolveValidationTask` (idempotent ensure + find of the project's
+   `aep:validation` issue); 0 ⇒ return a `skipped` result, record no row
+2. record the run (`kind=validation`, the issue number, parented to the DEV
+   run) — this row makes the orchestrator the **issue's webhook-signal owner**
+3. **start-coding gate** → per lane: `DispatchCoding` + spawn a
+   `ValidationTaskWorkflow` child (parallel, `TERMINATE` close policy)
+4. **signal pump** — routes the issue's signals to the lanes until every lane
+   child returned: a `job-status` is forwarded to its lane by `ExecutionID`;
+   `pr-opened` records the PR number and (today) completes the e2e lane, whose
+   runner opens the validation PR at job end
+5. any lane failed ⇒ the phase fails (failures are data, not workflow errors)
+6. all lanes succeeded ⇒ **merge-pr gate** → merge the single validation PR
+   (shared `runMergePhase`); merge is terminal — a validation issue spawns no
+   post-merge build
+
+### ValidationTaskWorkflow (`workflow_validation.go`)
+
+One child per validation lane (e2e only today). Deliberately thin: it awaits
+the terminal state the orchestrator forwards via `lane-status` (or a wait
+timeout) and reports it back — the extension seam for lane-specific steps
+(scenario judging loops, retries) later. Adding a lane = another entry in the
+orchestrator's lane slice; deferred platform work for a second lane: a
+job-succeeded watcher signal (success == PR today), lane-qualified funnel
+admission (`TryAdmit` is one-active-execution-per-issue), and a finalize step
+combining lane branches + reports into the single PR.
 
 ### Dependency-aware scheduling
 
@@ -87,6 +121,11 @@ their events into Temporal signals via a nil-safe `Signaler` (`signaler.go`):
 | `codingagent.JobWatcher` | `job-status` (coding-job failure) |
 | `genai` finish hook | `design-turn-done` |
 | `/devflows/.../gates/{gate}` API | `gate-decision` |
+| `ValidationFlowWorkflow` (internal) | `lane-status` → its lane children |
+
+An issue's signals go to whichever running row `RunningTaskByIssue` resolves —
+a coding task's `kind=task` row, or the validation orchestrator's
+`kind=validation` row for the project's validation issue.
 
 Best-effort: no `workflow_runs` row (the old-console flow, or Temporal down) is a
 debug-log no-op, so a webhook handler never fails because a workflow could not be
@@ -106,6 +145,8 @@ visible as `PendingGate` in the status query. Gate names: dev `design`, `plan`,
 - Dev workflow ID: `devflow-<org>-<project>-<tag>` (the tag makes it unique per
   build; a completed version re-runs under the same id via `AllowDuplicate`)
 - Task workflow ID: `taskflow-<org>-<project>-<tag>-<issueNumber>`
+- Validation orchestrator ID: `validationflow-<org>-<project>-<tag>`; lane
+  child ID: `valtask-<org>-<project>-<tag>-<lane>-<issueNumber>`
 - **Lookup**: a Postgres `workflow_runs` table (`models.DevflowRun`, partial
   unique index `(repo, issue_number) WHERE kind='task' AND status='running'`) is
   the signaler's point-lookup index and the list endpoint's source. Temporal
@@ -159,7 +200,9 @@ Workflows are testable in isolation with `go.temporal.io/sdk/testsuite` — no
 Temporal server, DB, or aep-api needed (activities mocked, signals delivered via
 `RegisterDelayedCallback`). Covered: happy paths, coding-fail, PR-rejected,
 manual gate approve/reject/timeout, pending-gate query, design-skip, cycle
-fast-fail, failed-dep-skips-dependent, and the strict ID formats.
+fast-fail, failed-dep-skips-dependent, the strict ID formats, and the
+validation tree (skip-on-no-criteria, pump forwarding to a real lane child,
+lane failure, merge rejection — `workflow_validation_test.go`).
 
 ## Key files
 

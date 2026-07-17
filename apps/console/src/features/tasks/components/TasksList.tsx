@@ -68,7 +68,12 @@ export function TasksList({
     );
   }
 
-  if (tasks.data.length === 0) {
+  // The project's validation task is surfaced on the deployments board (its
+  // status rides deploy.validation), not as a coding-task row here — it targets
+  // the whole project, not a component.
+  const visibleTasks = tasks.data.filter((t) => t.executorClass !== "validation");
+
+  if (visibleTasks.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
         {tag
@@ -92,7 +97,7 @@ export function TasksList({
           </ListingTable.Row>
         </ListingTable.Head>
         <ListingTable.Body>
-          {tasks.data.map((t) => {
+          {visibleTasks.map((t) => {
             // Provision/config gates are platform-driven (approved in the Build
             // drawer, resolved out-of-band): there is no task page to open, so the
             // row is non-clickable — you watch its status and open the GitHub issue.

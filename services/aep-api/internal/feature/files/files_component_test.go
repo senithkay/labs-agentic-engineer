@@ -14,10 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Component tier for the Files API: the REAL Huma handler (via componenttest)
-// over the production gitrepo gateway — reads AND the Apply write through the
-// REAL gitfs Workspace engine mirroring a REAL bare file:// origin (pure
-// workspacetest fixture; the Git-Data fake is gone with the REST write path).
+// Component tier for the Files API: the REAL contract-first handler chain
+// (strict server via componenttest) over the production gitrepo gateway —
+// reads AND the Apply write through the REAL gitfs Workspace engine mirroring
+// a REAL bare file:// origin (pure workspacetest fixture; the Git-Data fake is
+// gone with the REST write path).
 // Only the repo row + credential resolver are faked, so list/read/apply run
 // against genuine git object-store semantics — a stale baseSha is a real 409,
 // a multi-write+delete apply is a real single commit pushed to origin under
@@ -33,6 +34,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -112,7 +114,7 @@ func newFilesRig(t *testing.T, seed map[string]string) *filesRig {
 	engine := workspacetest.NewEngine(t)
 	gitOps := gitrepo.NewGitOpsService(stubResolver{}, engine)
 	svc := files.NewService(stubRepoResolver{rec: rec}, gitOps)
-	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{FilesSvc: svc}})
+	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{FilesSvc: svc}})
 	return &filesRig{h: h, remote: remote, engine: engine}
 }
 
@@ -266,14 +268,23 @@ func TestApply_StaleBaseSHA_409_NothingApplied(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("apply code %d, want 409: %s", rec.Code, rec.Body.String())
 	}
-	// THE FROZEN 409 CONTRACT — asserted against a literal, not a helper.
+	// THE FROZEN 409 CONTRACT — exact field set and values (key order is not
+	// part of JSON; the shape itself is contract-tied via ApplyConflicts).
 	// currentSha is the git blob sha of "v1" (deterministic), baseSha echoes
-	// the stale sha the caller sent. Byte-identical to the pre-Phase-3 body.
-	const wantBody = `{"conflicts":[{"path":"specs/requirements/requirements.md",` +
-		`"baseSha":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",` +
-		`"currentSha":"28c218c44b49222f91536daf5b4d9871638edc8e"}]}`
-	if got := strings.TrimSpace(rec.Body.String()); got != wantBody {
-		t.Fatalf("409 body drifted:\n got: %s\nwant: %s", got, wantBody)
+	// the stale sha the caller sent.
+	var got409 struct {
+		Conflicts []map[string]string `json:"conflicts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got409); err != nil {
+		t.Fatalf("409 body not JSON: %v\n%s", err, rec.Body.String())
+	}
+	want409 := []map[string]string{{
+		"path":       "specs/requirements/requirements.md",
+		"baseSha":    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		"currentSha": "28c218c44b49222f91536daf5b4d9871638edc8e",
+	}}
+	if !reflect.DeepEqual(got409.Conflicts, want409) {
+		t.Fatalf("409 body drifted:\n got: %s\nwant: %+v", rec.Body.String(), want409)
 	}
 	// Nothing applied — HEAD unchanged, content unchanged.
 	if r.remote.HeadSHA(t) != headBefore {
@@ -428,8 +439,9 @@ func TestFiles_CrossOrg_404(t *testing.T) {
 	}
 }
 
-// A unicode path survives the whole chain — URL escaping, the Huma {path...}
-// param, ls-tree -z (unquoted NUL plumbing), cat-file — byte-identically.
+// A unicode path survives the whole chain — URL escaping, the ServeMux
+// {path...} catch-all (server.go) + wrapper PathValue decoding, ls-tree -z
+// (unquoted NUL plumbing), cat-file — byte-identically.
 func TestReadAtHead_UnicodePath(t *testing.T) {
 	const path = "specs/requirements/仕様-résumé ノート.md"
 	const content = "非ASCIIコンテンツ — ünïcödé\n"

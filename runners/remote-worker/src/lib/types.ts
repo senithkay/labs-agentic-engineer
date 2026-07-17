@@ -63,4 +63,11 @@ export interface DispatchRequest {
    * predates Endpoint Spec Discovery.
    */
   mcpToken?: string;
+  /**
+   * Task kind from AEP_TASK_KIND (default "implementation"). Validation
+   * tasks preload the `aep:aep-validation` skill body alongside `aep:aep`
+   * so the workflow is in context at startup — description-triggered
+   * loading proved unreliable for a skill the whole run depends on.
+   */
+  taskKind: "implementation" | "validation";
 }

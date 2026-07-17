@@ -21,6 +21,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
@@ -44,10 +46,10 @@ type buildTrigger struct {
 
 func ocWithBuildCapture(cap *buildTrigger) *ocmocks.ComponentClientMock {
 	return &ocmocks.ComponentClientMock{
-		TriggerBuildAtCommitFunc: func(_ context.Context, _, _, componentName, commitSHA, secretRef, runName string) (*models.WorkflowRun, error) {
+		TriggerBuildAtCommitFunc: func(_ context.Context, _, _, componentName, commitSHA, secretRef, runName string) (*apigen.WorkflowRun, error) {
 			cap.called = true
 			cap.sha, cap.secretRef, cap.component, cap.runName = commitSHA, secretRef, componentName, runName
-			return &models.WorkflowRun{Name: runName}, nil
+			return &apigen.WorkflowRun{Name: runName}, nil
 		},
 	}
 }

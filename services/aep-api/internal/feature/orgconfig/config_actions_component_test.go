@@ -30,8 +30,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
+	"github.com/wso2/aep/aep-api/internal/platform/contracttest"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -211,13 +211,11 @@ func TestConfigComponent_Discovery_Upstream502(t *testing.T) {
 
 func TestConfigComponent_H1_LegacyRoutesRetired(t *testing.T) {
 	t.Parallel()
-	// Spec-level: no /org/* path survives (Decision 3).
-	spec, err := api.GenerateOpenAPIYAML()
-	if err != nil {
-		t.Fatalf("spec: %v", err)
-	}
+	// Contract-level: no /org/* path survives (Decision 3). The served spec
+	// IS the committed contract (embedded at build time).
+	spec := contracttest.SourceYAML(t)
 	if strings.Contains(string(spec), "/org/") {
-		t.Fatalf("generated spec still carries /org/* routes")
+		t.Fatalf("committed contract still carries /org/* routes")
 	}
 
 	// Runtime: the retired user-JWT routes 404 (not aliased).

@@ -34,6 +34,9 @@ func TestLabelBuilders(t *testing.T) {
 	if got := StatusLabel(StatusReadyForReview); got != "aep:status/ready_for_review" {
 		t.Errorf("StatusLabel = %q", got)
 	}
+	if got := ClassLabel(ClassValidation); got != "aep:validation" {
+		t.Errorf("ClassLabel(validation) = %q", got)
+	}
 	if got := SpecTagLabel("v3"); got != "aep:spec/v3" {
 		t.Errorf("SpecTagLabel(v3) = %q", got)
 	}
@@ -45,6 +48,14 @@ func TestLabelBuilders(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("NewTaskLabels = %v; want %v", got, want)
 	}
+	gotV := NewTaskLabels(ClassValidation, OriginSpecPlan)
+	wantV := []string{"aep:task", "aep:validation", "aep:origin/spec-plan"}
+	if !reflect.DeepEqual(gotV, wantV) {
+		t.Errorf("NewTaskLabels(validation) = %v; want %v", gotV, wantV)
+	}
+	if !ClassValidation.Valid() {
+		t.Error("ClassValidation should be Valid()")
+	}
 }
 
 func TestClassify(t *testing.T) {
@@ -52,6 +63,7 @@ func TestClassify(t *testing.T) {
 		"aep:task":               KindMarker,
 		"aep:coding":             KindClass,
 		"aep:ops":                KindClass,
+		"aep:validation":         KindClass,
 		"aep:origin/incident":    KindOrigin,
 		"aep:execute":            KindExecute,
 		"aep:hold":               KindHold,

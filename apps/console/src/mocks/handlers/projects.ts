@@ -1,5 +1,7 @@
 import { http, HttpResponse } from "msw";
 import type { components } from "../../generated/aep-api";
+
+type ApiError = components["schemas"]["Error"];
 import {
   deleteProjectError,
   duplicateProjectError,
@@ -42,7 +44,6 @@ export const projectsHandlers = [
     if (scenario() === "error") {
       return HttpResponse.json(projectsError, {
         status: 500,
-        headers: { "Content-Type": "application/problem+json" },
       });
     }
     const params = new URL(request.url).searchParams;
@@ -74,7 +75,6 @@ export const projectsHandlers = [
     if (currentProjects().some((p) => p.name === body.name)) {
       return HttpResponse.json(duplicateProjectError, {
         status: 409,
-        headers: { "Content-Type": "application/problem+json" },
       });
     }
     const project: Project = {
@@ -95,12 +95,10 @@ export const projectsHandlers = [
     if (!project) {
       return HttpResponse.json(
         {
-          type: "about:blank",
-          status: 404,
-          title: "Not Found",
-          detail: `Project ${String(params.projectName)} not found`,
-        },
-        { status: 404, headers: { "Content-Type": "application/problem+json" } },
+          code: "not_found",
+          message: `Project ${String(params.projectName)} not found`,
+        } satisfies ApiError,
+        { status: 404 },
       );
     }
     return HttpResponse.json(project);
@@ -112,19 +110,16 @@ export const projectsHandlers = [
     if (localStorage.getItem("aep:mock:projects:delete") === "error") {
       return HttpResponse.json(deleteProjectError, {
         status: 500,
-        headers: { "Content-Type": "application/problem+json" },
       });
     }
     const name = String(params.projectName);
     if (!currentProjects().some((p) => p.name === name)) {
       return HttpResponse.json(
         {
-          type: "about:blank",
-          status: 404,
-          title: "Not Found",
-          detail: `Project ${name} not found`,
-        },
-        { status: 404, headers: { "Content-Type": "application/problem+json" } },
+          code: "not_found",
+          message: `Project ${name} not found`,
+        } satisfies ApiError,
+        { status: 404 },
       );
     }
     deletedProjects.add(name);

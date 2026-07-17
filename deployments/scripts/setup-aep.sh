@@ -126,6 +126,16 @@ else
     echo "⚠️  Could not determine runner image from $CODING_AGENT_MANIFEST — skipping pre-import."
 fi
 
+# Build + import the validation-task runner image (Playwright/Debian). It has no
+# published counterpart, so it's built locally once per machine and imported into
+# the node — self-contained, no shared registry. Guarded (skips when the image
+# exists); non-fatal so a build hiccup never blocks platform setup. Validation
+# dispatch (proxy path) reads it via compose VALIDATION_RUNNER_IMAGE, defaulted
+# to the same tag. Rebuild manually with `make build-validation-runner`.
+echo ""
+bash "$SCRIPT_DIR/build-validation-runner.sh" \
+    || echo "⚠️  validation runner image build/import failed — validation dispatch stays disabled until fixed (make build-validation-runner)"
+
 # ============================================================================
 # OpenChoreo infrastructure resources
 # ============================================================================

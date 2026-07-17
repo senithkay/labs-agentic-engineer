@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/gen"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -43,9 +45,9 @@ import (
 // the result back via ListDeployments. Wrappers for the write side of
 // that chain are deliberately absent — no caller needs them yet.
 type ComponentClient interface {
-	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*models.ComponentList, error)
-	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*models.Component, error)
-	CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*models.Component, error)
+	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*apigen.ComponentList, error)
+	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*apigen.Component, error)
+	CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*apigen.Component, error)
 	// UpdateComponentWorkflowEnvVars writes per-component env vars onto each
 	// of the component's ReleaseBindings at
 	// `spec.workloadOverrides.container.env`. Per-env (one RB per
@@ -99,7 +101,7 @@ type ComponentClient interface {
 	UpdateComponentTraitEnvironmentConfigs(ctx context.Context, orgName, projectName, componentName string, configs map[string]map[string]interface{}) error
 
 	// Deploy (read-only — auto-deploy on the Component drives the chain)
-	ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*models.DeploymentList, error)
+	ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*apigen.DeploymentList, error)
 
 	// ListProjectReleaseBindings returns the org's ReleaseBindings owned by
 	// projectName — all environments, all components, in ONE org-scoped list
@@ -116,20 +118,20 @@ type ComponentClient interface {
 	// workflow synthesises the git Secret from the org's SecretReference
 	// (provisioned by BuildCredentialsService). Empty leaves it blank — the
 	// build clones unauthenticated (public repos only).
-	TriggerBuild(ctx context.Context, orgName, projectName, componentName, secretRef, runName string) (*models.WorkflowRun, error)
+	TriggerBuild(ctx context.Context, orgName, projectName, componentName, secretRef, runName string) (*apigen.WorkflowRun, error)
 	// TriggerBuildAtCommit creates a WorkflowRun pinned to commitSHA via
 	// params.repository.revision.commit. Mirrors agent-manager's pattern at
 	// agent-manager-service/clients/openchoreosvc/client/builds.go:71-85.
 	// See TriggerBuild for the `runName` + `secretRef` contracts.
-	TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*models.WorkflowRun, error)
+	TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*apigen.WorkflowRun, error)
 	// TriggerCodingAgent creates a WorkflowRun of ClusterWorkflow
 	// `aep-coding-agent` for the per-task ephemeral pod that runs the
 	// Claude Agent SDK against the task's feature branch. The label
 	// `aep.openchoreo.dev/coding-agent-task` carries the taskId so
 	// the BFF watcher can correlate runs back to the task.
-	TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*models.WorkflowRun, error)
-	ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*models.WorkflowRunList, error)
-	GetWorkflowRun(ctx context.Context, orgName, runName string) (*models.WorkflowRun, error)
+	TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*apigen.WorkflowRun, error)
+	ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*apigen.WorkflowRunList, error)
+	GetWorkflowRun(ctx context.Context, orgName, runName string) (*apigen.WorkflowRun, error)
 }
 
 // CodingAgentParams is the input to TriggerCodingAgent. Mirrors the schema
@@ -191,7 +193,7 @@ func designComponentType(ocType string) string {
 	return strings.TrimPrefix(ocType, "deployment/")
 }
 
-func componentToModel(c gen.Component) models.Component {
+func componentToModel(c gen.Component) apigen.Component {
 	var projectName, componentType string
 	var autoBuild, autoDeploy bool
 	if c.Spec != nil {
@@ -216,7 +218,7 @@ func componentToModel(c gen.Component) models.Component {
 		status = latestConditionReason(c.Status.Conditions)
 	}
 
-	return models.Component{
+	return apigen.Component{
 		UID:         derefStr(c.Metadata.Uid),
 		Name:        FriendlyComponentName(c.Metadata.Name, projectName),
 		ProjectName: projectName,
@@ -235,7 +237,7 @@ func componentToModel(c gen.Component) models.Component {
 // "Pending". `Completed` flips when WorkflowCompleted has Status=True —
 // watchers gate terminal transitions on this, not on substring-matching the
 // Status string.
-func workflowRunToModel(run gen.WorkflowRun) models.WorkflowRun {
+func workflowRunToModel(run gen.WorkflowRun) apigen.WorkflowRun {
 	var componentName, projectName string
 	if run.Metadata.Labels != nil {
 		componentName = label(run.Metadata.Labels, string(LabelKeyComponent))
@@ -261,11 +263,11 @@ func workflowRunToModel(run gen.WorkflowRun) models.WorkflowRun {
 		}
 	}
 
-	var tasks []models.WorkflowRunTask
+	var tasks []apigen.WorkflowRunTask
 	if run.Status != nil && run.Status.Tasks != nil {
-		tasks = make([]models.WorkflowRunTask, 0, len(*run.Status.Tasks))
+		tasks = make([]apigen.WorkflowRunTask, 0, len(*run.Status.Tasks))
 		for _, t := range *run.Status.Tasks {
-			tasks = append(tasks, models.WorkflowRunTask{
+			tasks = append(tasks, apigen.WorkflowRunTask{
 				Name:        t.Name,
 				Phase:       derefStr(t.Phase),
 				Message:     derefStr(t.Message),
@@ -275,7 +277,7 @@ func workflowRunToModel(run gen.WorkflowRun) models.WorkflowRun {
 		}
 	}
 
-	return models.WorkflowRun{
+	return apigen.WorkflowRun{
 		Name:          run.Metadata.Name,
 		Status:        status,
 		StartedAt:     derefTimeRFC3339(run.Metadata.CreationTimestamp),
@@ -288,7 +290,7 @@ func workflowRunToModel(run gen.WorkflowRun) models.WorkflowRun {
 
 // deploymentFromReleaseBinding pulls the first HTTP external URL from the
 // binding's resolved endpoints via the typed `ExternalURLs.Http *EndpointURL`.
-func deploymentFromReleaseBinding(rb gen.ReleaseBinding) models.Deployment {
+func deploymentFromReleaseBinding(rb gen.ReleaseBinding) apigen.Deployment {
 	var projectName, componentName, environment, releaseName string
 	if rb.Spec != nil {
 		projectName = rb.Spec.Owner.ProjectName
@@ -312,7 +314,7 @@ func deploymentFromReleaseBinding(rb gen.ReleaseBinding) models.Deployment {
 		status = latestConditionReason(rb.Status.Conditions)
 	}
 
-	return models.Deployment{
+	return apigen.Deployment{
 		Name:          rb.Metadata.Name,
 		Environment:   environment,
 		ReleaseName:   releaseName,
@@ -343,7 +345,7 @@ func formatEndpointURL(u *gen.EndpointURL) string {
 
 // -- Component CRUD ----------------------------------------------------------
 
-func (c *componentClient) ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*models.ComponentList, error) {
+func (c *componentClient) ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*apigen.ComponentList, error) {
 	params := &gen.ListComponentsParams{}
 	sel := gen.LabelSelectorParam(fmt.Sprintf("%s=%s", string(LabelKeyProject), projectName))
 	params.LabelSelector = &sel
@@ -369,14 +371,14 @@ func (c *componentClient) ListComponents(ctx context.Context, orgName, projectNa
 		})
 	}
 
-	items := make([]models.Component, len(resp.JSON200.Items))
+	items := make([]apigen.Component, len(resp.JSON200.Items))
 	for i, comp := range resp.JSON200.Items {
 		items[i] = componentToModel(comp)
 	}
-	return &models.ComponentList{Items: items}, nil
+	return &apigen.ComponentList{Items: items}, nil
 }
 
-func (c *componentClient) GetComponent(ctx context.Context, orgName, projectName, componentName string) (*models.Component, error) {
+func (c *componentClient) GetComponent(ctx context.Context, orgName, projectName, componentName string) (*apigen.Component, error) {
 	k8sName := ScopedComponentName(projectName, componentName)
 	resp, err := c.oc.GetComponentWithResponse(ctx, orgName, k8sName)
 	if err != nil {
@@ -394,7 +396,7 @@ func (c *componentClient) GetComponent(ctx context.Context, orgName, projectName
 	return &comp, nil
 }
 
-func (c *componentClient) CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*models.Component, error) {
+func (c *componentClient) CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*apigen.Component, error) {
 	resp, err := c.oc.CreateComponentWithResponse(ctx, orgName, buildCreateComponentBody(projectName, req))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create component: %w", err)
@@ -882,7 +884,7 @@ func workflowEnvVarRefsToGen(envVars []models.WorkflowEnvVarRef) *[]gen.EnvVar {
 
 // -- Deployments (read-only) -------------------------------------------------
 
-func (c *componentClient) ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*models.DeploymentList, error) {
+func (c *componentClient) ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*apigen.DeploymentList, error) {
 	scopedComp := ScopedComponentName(projectName, componentName)
 	componentQ := gen.ComponentQueryParam(scopedComp)
 	resp, err := c.oc.ListReleaseBindingsWithResponse(ctx, orgName, &gen.ListReleaseBindingsParams{
@@ -899,11 +901,11 @@ func (c *componentClient) ListDeployments(ctx context.Context, orgName, projectN
 		})
 	}
 
-	items := make([]models.Deployment, len(resp.JSON200.Items))
+	items := make([]apigen.Deployment, len(resp.JSON200.Items))
 	for i, rb := range resp.JSON200.Items {
 		items[i] = deploymentFromReleaseBinding(rb)
 	}
-	return &models.DeploymentList{Items: items}, nil
+	return &apigen.DeploymentList{Items: items}, nil
 }
 
 // ListProjectReleaseBindings lists the org's ReleaseBindings and keeps the
@@ -970,11 +972,11 @@ func releaseBindingSummary(rb gen.ReleaseBinding) models.ReleaseBindingSummary {
 
 // -- WorkflowRuns (builds + coding-agent) ------------------------------------
 
-func (c *componentClient) TriggerBuild(ctx context.Context, orgName, projectName, componentName, secretRef, runName string) (*models.WorkflowRun, error) {
+func (c *componentClient) TriggerBuild(ctx context.Context, orgName, projectName, componentName, secretRef, runName string) (*apigen.WorkflowRun, error) {
 	return c.triggerBuildInner(ctx, orgName, projectName, componentName, "", secretRef, runName)
 }
 
-func (c *componentClient) TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*models.WorkflowRun, error) {
+func (c *componentClient) TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*apigen.WorkflowRun, error) {
 	return c.triggerBuildInner(ctx, orgName, projectName, componentName, commitSHA, secretRef, runName)
 }
 
@@ -989,7 +991,7 @@ func (c *componentClient) TriggerBuildAtCommit(ctx context.Context, orgName, pro
 // Production callers (dispatch path, console "Build" button) pass runName
 // because they staged the per-WorkflowRun build Secret with that name
 // upfront.
-func (c *componentClient) triggerBuildInner(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*models.WorkflowRun, error) {
+func (c *componentClient) triggerBuildInner(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*apigen.WorkflowRun, error) {
 	scopedComp := ScopedComponentName(projectName, componentName)
 
 	compResp, err := c.oc.GetComponentWithResponse(ctx, orgName, scopedComp)
@@ -1128,7 +1130,7 @@ func cloneParameterMap(in map[string]interface{}) map[string]interface{} {
 // purposes — the project + component identifiers flow in via the
 // `parameters.task.*` fields that the runner reads. The `aep.*`
 // label catalog carries them for the BFF watcher instead.
-func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*models.WorkflowRun, error) {
+func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*apigen.WorkflowRun, error) {
 	scopedComp := ScopedComponentName(params.ProjectName, params.ComponentName)
 
 	// Run name shape: coding-agent-<short-task>-<unixMs>. K8s names must be
@@ -1202,7 +1204,7 @@ func codingAgentParameters(p CodingAgentParams) map[string]interface{} {
 // createWorkflowRun is the shared POST path for both trigger flows. opName
 // goes into the network-error wrap to keep slog logs distinguishable
 // (trigger build / trigger coding-agent).
-func (c *componentClient) createWorkflowRun(ctx context.Context, orgName string, body gen.CreateWorkflowRunJSONRequestBody, opName string) (*models.WorkflowRun, error) {
+func (c *componentClient) createWorkflowRun(ctx context.Context, orgName string, body gen.CreateWorkflowRunJSONRequestBody, opName string) (*apigen.WorkflowRun, error) {
 	resp, err := c.oc.CreateWorkflowRunWithResponse(ctx, orgName, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to %s: %w", opName, err)
@@ -1223,7 +1225,7 @@ func (c *componentClient) createWorkflowRun(ctx context.Context, orgName string,
 	return &run, nil
 }
 
-func (c *componentClient) ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*models.WorkflowRunList, error) {
+func (c *componentClient) ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*apigen.WorkflowRunList, error) {
 	scopedComp := ScopedComponentName(projectName, componentName)
 	sel := gen.LabelSelectorParam(fmt.Sprintf("%s=%s", string(LabelKeyComponent), scopedComp))
 	params := &gen.ListWorkflowRunsParams{LabelSelector: &sel}
@@ -1249,14 +1251,14 @@ func (c *componentClient) ListWorkflowRuns(ctx context.Context, orgName, project
 		})
 	}
 
-	items := make([]models.WorkflowRun, len(resp.JSON200.Items))
+	items := make([]apigen.WorkflowRun, len(resp.JSON200.Items))
 	for i, run := range resp.JSON200.Items {
 		items[i] = workflowRunToModel(run)
 	}
-	return &models.WorkflowRunList{Items: items}, nil
+	return &apigen.WorkflowRunList{Items: items}, nil
 }
 
-func (c *componentClient) GetWorkflowRun(ctx context.Context, orgName, runName string) (*models.WorkflowRun, error) {
+func (c *componentClient) GetWorkflowRun(ctx context.Context, orgName, runName string) (*apigen.WorkflowRun, error) {
 	resp, err := c.oc.GetWorkflowRunWithResponse(ctx, orgName, runName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workflow run: %w", err)

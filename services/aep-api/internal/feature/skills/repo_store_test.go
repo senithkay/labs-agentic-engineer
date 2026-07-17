@@ -142,7 +142,7 @@ func (fakeResolver) Resolve(context.Context, string) (credentials.Credential, er
 // as the Workspace port.
 func newTestStore(t *testing.T) (*SkillService, *testGitHost) {
 	host := newTestGitHost(t)
-	svc := NewSkillService(gitrepo.NewGitOpsService(fakeResolver{}, host.engine), host)
+	svc := NewSkillService(gitrepo.NewGitOpsService(fakeResolver{}, host.engine), host, testLibraryFS(t))
 	return svc, host
 }
 
@@ -217,7 +217,7 @@ func TestRepoWebURL_ProjectsCloneURLToHTMLURL(t *testing.T) {
 // catalog's degrade-to-empty; the console shows its connect-GitHub guidance.
 func TestRepoWebURL_DegradesToEmpty(t *testing.T) {
 	t.Parallel()
-	svc := NewSkillService(nil, nil)
+	svc := NewSkillService(nil, nil, nil)
 	if got := svc.RepoWebURL(context.Background(), "org1"); got != "" {
 		t.Fatalf("RepoWebURL on degraded service = %q, want empty", got)
 	}

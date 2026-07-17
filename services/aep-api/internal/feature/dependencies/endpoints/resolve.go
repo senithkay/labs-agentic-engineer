@@ -279,7 +279,7 @@ func (c *Catalog) readDesign(ctx context.Context, orgHandle, project string, des
 //
 // The off-platform-with-build fallback (repo coords from the OC Component's
 // Workflow.Parameters) is intentionally NOT wired: the aep-api OC client's
-// GetComponent projects the CR onto models.Component, which drops the workflow
+// GetComponent projects the CR onto gen.Component, which drops the workflow
 // spec, so those coords are not reachable without extending the client. Left
 // best-effort per the Task A2 brief; app-factory providers resolve fully via
 // the git_repositories path above.

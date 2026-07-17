@@ -39,6 +39,7 @@ import {
   groupDeploymentCards,
   type DeploymentCard,
 } from "../lib/deploymentRows";
+import { validationView } from "../lib/pipeline";
 
 // Chip vocabulary for a card's state (#216): the label keeps the backend's
 // raw condition reason (it's the vocabulary operators see in OpenChoreo),
@@ -173,13 +174,23 @@ function BoardColumn({
   cards,
   emptyText,
   version,
+  validation,
+  validationUrl,
 }: {
   title: string;
   column: string;
   cards: DeploymentCard[];
   emptyText: string;
   version?: string;
+  // The whole-project validation run state for this environment (dev only), with
+  // a link to its PR. null = nothing to show.
+  validation?: ReturnType<typeof validationView>;
+  validationUrl?: string;
 }) {
+  // Capitalize the shared lowercase label for the chip ("validating" → "Validating").
+  const validationLabel = validation
+    ? validation.label.charAt(0).toUpperCase() + validation.label.slice(1)
+    : "";
   return (
     <Box
       sx={{
@@ -208,6 +219,29 @@ function BoardColumn({
             title="Spec version live in this environment"
           />
         )}
+        {validation &&
+          (validationUrl ? (
+            <Chip
+              label={validationLabel}
+              size="small"
+              color={validation.tone as "info" | "success" | "error"}
+              variant="outlined"
+              clickable
+              component="a"
+              href={validationUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="Open the validation PR"
+            />
+          ) : (
+            <Chip
+              label={validationLabel}
+              size="small"
+              color={validation.tone as "info" | "success" | "error"}
+              variant="outlined"
+              title="Validation status"
+            />
+          ))}
       </Stack>
       {cards.length === 0 ? (
         <Typography
@@ -245,6 +279,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   // dev ("v1"); the layout already runs this query, so the read is free.
   const status = useProjectStatus(projectName);
   const devVersion = status.data?.deploy.version || undefined;
+  // Whole-project validation runs against dev after components deploy; surface
+  // its coarse state (and a link to its PR) on the Development column header.
+  const devValidation = validationView(status.data?.deploy.validation ?? "");
+  const devValidationUrl = status.data?.deploy.validationUrl || undefined;
 
   if (components.isPending || (componentNames.length > 0 && deployments.isPending)) {
     return (
@@ -304,6 +342,8 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           cards={board.development}
           emptyText="Nothing in development yet."
           {...(devVersion && { version: devVersion })}
+          validation={devValidation}
+          {...(devValidationUrl && { validationUrl: devValidationUrl })}
         />
         <BoardColumn
           title="Production"

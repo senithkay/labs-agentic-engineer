@@ -80,7 +80,7 @@ const (
 // WorkflowRun condition Reasons. Mirrors OC's
 // internal/controller/workflowrun/controller_conditions.go reason constants.
 // Watchers compare against these instead of substring-matching the reason
-// string lifted into models.WorkflowRun.Status.
+// string lifted into gen.WorkflowRun.Status.
 const (
 	ReasonWorkflowSucceeded = "WorkflowSucceeded"
 	ReasonWorkflowFailed    = "WorkflowFailed"

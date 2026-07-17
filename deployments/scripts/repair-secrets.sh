@@ -132,6 +132,16 @@ while IFS= read -r WRITE; do
     fi
 done < <(echo "$BODY" | jq -c '.orgs[].writes[]')
 
+# The workflow-plane registry push secret is platform-scoped (not per-org) and
+# also lives only in OpenBao — an OpenBao restart wipes it and every subsequent
+# build's publish step hangs on a SecretSyncedError ExternalSecret. The local
+# registry accepts anonymous pushes, so an empty-auth dockerconfigjson is the
+# correct value; re-seed it if absent (idempotent overwrite is harmless).
+echo "🐳 Ensuring workflow-plane registry-push-secret..."
+kubectl -n openbao exec openbao-0 -- sh -c \
+    'VAULT_ADDR=http://127.0.0.1:8200 vault kv put -mount=secret registry-push-secret value="{\"auths\":{}}"' >/dev/null \
+    && echo "  ✅ registry-push-secret" || echo "  ⚠️  could not seed registry-push-secret (openbao-0 unreachable?)"
+
 echo "🔐 Reseed complete: $WROTE write(s) across $ORG_COUNT org(s)$( [ "$FAILED" -gt 0 ] && echo "; $FAILED failed" )."
 
 # Surface per-org errors from the BFF (cred-store misses, etc.).

@@ -32,12 +32,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // --- port fakes --------------------------------------------------------------
@@ -98,9 +101,10 @@ func (f *fakeWebhookSvc) Register(ctx context.Context, orgID, projectID string) 
 // feature drives: DeleteByProject (the orphan purge). Every other verb is
 // unreachable from the project feature and returns zero.
 type fakeExecs struct {
-	DeleteByProjectFunc func(ctx context.Context, orgID, projectID string) error
-	deleteArgs          [2]string
-	deleteCalls         int
+	DeleteByProjectFunc     func(ctx context.Context, orgID, projectID string) error
+	LatestPerKindScopedFunc func(ctx context.Context, orgID, repo string, issue int) (map[string]*models.Execution, error)
+	deleteArgs              [2]string
+	deleteCalls             int
 }
 
 func (f *fakeExecs) DeleteByProject(ctx context.Context, orgID, projectID string) error {
@@ -129,7 +133,10 @@ func (f *fakeExecs) GetByIDScoped(context.Context, string, string) (*models.Exec
 func (f *fakeExecs) LatestPerKind(context.Context, string, int) (map[string]*models.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) LatestPerKindScoped(context.Context, string, string, int) (map[string]*models.Execution, error) {
+func (f *fakeExecs) LatestPerKindScoped(ctx context.Context, orgID, repo string, issue int) (map[string]*models.Execution, error) {
+	if f.LatestPerKindScopedFunc != nil {
+		return f.LatestPerKindScopedFunc(ctx, orgID, repo, issue)
+	}
 	return nil, nil
 }
 func (f *fakeExecs) LatestPerKindForRepo(context.Context, string) (map[int]map[string]*models.Execution, error) {
@@ -189,7 +196,7 @@ func TestTranslateHTTPError(t *testing.T) {
 func TestListProjects_TranslatesOCError(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{
-		ListProjectsFunc: func(context.Context, string, int, string) (*models.ProjectList, error) {
+		ListProjectsFunc: func(context.Context, string, int, string) (*apigen.ProjectList, error) {
 			return nil, openchoreo.ErrNotFound
 		},
 	}
@@ -202,8 +209,8 @@ func TestListProjects_TranslatesOCError(t *testing.T) {
 func TestListProjects_SearchFiltersPageCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{
-		ListProjectsFunc: func(context.Context, string, int, string) (*models.ProjectList, error) {
-			return &models.ProjectList{Items: []models.Project{
+		ListProjectsFunc: func(context.Context, string, int, string) (*apigen.ProjectList, error) {
+			return &apigen.ProjectList{Items: []apigen.Project{
 				{Name: "billing-api", DisplayName: "Billing"},
 				{Name: "web-shop", DisplayName: "Shop Front"},
 				{Name: "svc-x", DisplayName: "Mobile BILLING helper"},
@@ -230,9 +237,9 @@ func TestListProjects_SurfacesNextCursorAndPassesParams(t *testing.T) {
 	var gotLimit int
 	var gotCursor string
 	oc := &ocmocks.ProjectClientMock{
-		ListProjectsFunc: func(_ context.Context, _ string, limit int, cursor string) (*models.ProjectList, error) {
+		ListProjectsFunc: func(_ context.Context, _ string, limit int, cursor string) (*apigen.ProjectList, error) {
 			gotLimit, gotCursor = limit, cursor
-			return &models.ProjectList{Items: []models.Project{{Name: "a"}}, NextCursor: "next-tok"}, nil
+			return &apigen.ProjectList{Items: []apigen.Project{{Name: "a"}}, NextCursor: "next-tok"}, nil
 		},
 	}
 	svc := NewProjectService(oc, nil, nil, nil, nil)
@@ -255,8 +262,8 @@ func TestListProjects_SurfacesNextCursorAndPassesParams(t *testing.T) {
 func TestListProjects_JoinsRepoURLBestEffort(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{
-		ListProjectsFunc: func(context.Context, string, int, string) (*models.ProjectList, error) {
-			return &models.ProjectList{Items: []models.Project{
+		ListProjectsFunc: func(context.Context, string, int, string) (*apigen.ProjectList, error) {
+			return &apigen.ProjectList{Items: []apigen.Project{
 				{Name: "web"},
 				{Name: "no-repo"},
 			}}, nil
@@ -303,8 +310,8 @@ func TestListProjects_JoinsRepoURLBestEffort(t *testing.T) {
 func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{
-		CreateProjectFunc: func(_ context.Context, org string, req *models.CreateProjectRequest) (*models.Project, error) {
-			return &models.Project{Name: req.Name, NamespaceName: org}, nil
+		CreateProjectFunc: func(_ context.Context, org string, req *apigen.CreateProjectRequest) (*apigen.Project, error) {
+			return &apigen.Project{Name: req.Name, NamespaceName: org}, nil
 		},
 	}
 	var repoOrg, repoProject, repoProjectName, repoOverride string
@@ -320,7 +327,7 @@ func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
 	svc := NewProjectService(oc, repoSvc, webhooks, nil, nil)
 	svc.SetSkillsProvisioner(skills)
 
-	p, err := svc.CreateProject(context.Background(), "acme", &models.CreateProjectRequest{Name: "web"})
+	p, err := svc.CreateProject(context.Background(), "acme", &apigen.CreateProjectRequest{Name: "web"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -346,8 +353,8 @@ func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
 func TestCreateProject_RepoNameOverridesProvisionedRepoName(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{
-		CreateProjectFunc: func(_ context.Context, org string, req *models.CreateProjectRequest) (*models.Project, error) {
-			return &models.Project{Name: req.Name, NamespaceName: org}, nil
+		CreateProjectFunc: func(_ context.Context, org string, req *apigen.CreateProjectRequest) (*apigen.Project, error) {
+			return &apigen.Project{Name: req.Name, NamespaceName: org}, nil
 		},
 	}
 	var repoProject, repoOverride string
@@ -359,7 +366,7 @@ func TestCreateProject_RepoNameOverridesProvisionedRepoName(t *testing.T) {
 	}
 	svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{}, nil, nil)
 
-	req := &models.CreateProjectRequest{Name: "gym", RepoName: "gym-repo", Prompt: "a workout tracker"}
+	req := &apigen.CreateProjectRequest{Name: "gym", RepoName: "gym-repo", Prompt: "a workout tracker"}
 	if _, err := svc.CreateProject(context.Background(), "acme", req); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -387,8 +394,8 @@ func TestCreateProject_RepoNameConflictRollsBackProject(t *testing.T) {
 			t.Parallel()
 			var deletedProject string
 			oc := &ocmocks.ProjectClientMock{
-				CreateProjectFunc: func(_ context.Context, org string, req *models.CreateProjectRequest) (*models.Project, error) {
-					return &models.Project{Name: req.Name, NamespaceName: org}, nil
+				CreateProjectFunc: func(_ context.Context, org string, req *apigen.CreateProjectRequest) (*apigen.Project, error) {
+					return &apigen.Project{Name: req.Name, NamespaceName: org}, nil
 				},
 				DeleteProjectFunc: func(_ context.Context, _, projectName string) error {
 					deletedProject = projectName
@@ -405,7 +412,7 @@ func TestCreateProject_RepoNameConflictRollsBackProject(t *testing.T) {
 				return nil, nil
 			}}, nil, nil)
 
-			req := &models.CreateProjectRequest{Name: "gym", RepoName: tc.repoName}
+			req := &apigen.CreateProjectRequest{Name: "gym", RepoName: tc.repoName}
 			_, err := svc.CreateProject(context.Background(), "acme", req)
 			if !gitrepo.IsRepoNameConflict(err) {
 				t.Fatalf("err = %v, want the repo-name-conflict sentinel surfaced", err)
@@ -420,7 +427,7 @@ func TestCreateProject_RepoNameConflictRollsBackProject(t *testing.T) {
 func TestCreateProject_OCErrorShortCircuits(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{
-		CreateProjectFunc: func(context.Context, string, *models.CreateProjectRequest) (*models.Project, error) {
+		CreateProjectFunc: func(context.Context, string, *apigen.CreateProjectRequest) (*apigen.Project, error) {
 			return nil, openchoreo.ErrConflict
 		},
 	}
@@ -430,7 +437,7 @@ func TestCreateProject_OCErrorShortCircuits(t *testing.T) {
 		return nil, nil
 	}}, nil, nil)
 
-	if _, err := svc.CreateProject(context.Background(), "acme", &models.CreateProjectRequest{Name: "web"}); !errors.Is(err, openchoreo.ErrConflict) {
+	if _, err := svc.CreateProject(context.Background(), "acme", &apigen.CreateProjectRequest{Name: "web"}); !errors.Is(err, openchoreo.ErrConflict) {
 		t.Fatalf("want the OC conflict error surfaced, got %v", err)
 	}
 }
@@ -438,8 +445,8 @@ func TestCreateProject_OCErrorShortCircuits(t *testing.T) {
 func TestCreateProject_RepoFailureIsBestEffort(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{
-		CreateProjectFunc: func(_ context.Context, _ string, req *models.CreateProjectRequest) (*models.Project, error) {
-			return &models.Project{Name: req.Name}, nil
+		CreateProjectFunc: func(_ context.Context, _ string, req *apigen.CreateProjectRequest) (*apigen.Project, error) {
+			return &apigen.Project{Name: req.Name}, nil
 		},
 	}
 	repoSvc := &fakeRepoSvc{
@@ -450,7 +457,7 @@ func TestCreateProject_RepoFailureIsBestEffort(t *testing.T) {
 	webhooks := &fakeWebhookSvc{}
 	svc := NewProjectService(oc, repoSvc, webhooks, nil, nil)
 
-	p, err := svc.CreateProject(context.Background(), "acme", &models.CreateProjectRequest{Name: "web"})
+	p, err := svc.CreateProject(context.Background(), "acme", &apigen.CreateProjectRequest{Name: "web"})
 	if err != nil || p == nil {
 		t.Fatalf("repo provisioning failure must not fail project creation: p=%v err=%v", p, err)
 	}
@@ -462,8 +469,8 @@ func TestCreateProject_RepoFailureIsBestEffort(t *testing.T) {
 func TestCreateProject_WebhookFailureIsBestEffort(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{
-		CreateProjectFunc: func(_ context.Context, _ string, req *models.CreateProjectRequest) (*models.Project, error) {
-			return &models.Project{Name: req.Name}, nil
+		CreateProjectFunc: func(_ context.Context, _ string, req *apigen.CreateProjectRequest) (*apigen.Project, error) {
+			return &apigen.Project{Name: req.Name}, nil
 		},
 	}
 	repoSvc := &fakeRepoSvc{
@@ -476,7 +483,7 @@ func TestCreateProject_WebhookFailureIsBestEffort(t *testing.T) {
 	}}
 	svc := NewProjectService(oc, repoSvc, webhooks, nil, nil)
 
-	if _, err := svc.CreateProject(context.Background(), "acme", &models.CreateProjectRequest{Name: "web"}); err != nil {
+	if _, err := svc.CreateProject(context.Background(), "acme", &apigen.CreateProjectRequest{Name: "web"}); err != nil {
 		t.Fatalf("webhook failure must not fail project creation: %v", err)
 	}
 }
@@ -572,12 +579,18 @@ func TestDeleteProject_RepoCleanupFailureIsSwallowed(t *testing.T) {
 // fakeRunReader / fakeBindingsReader fake the stage-source ports
 // (status_stages.go) — the build/deploy inputs of the status poll.
 type fakeRunReader struct {
-	rows []models.DevflowRun
-	err  error
+	rows          []models.DevflowRun
+	err           error
+	validationRun *models.DevflowRun
+	validationErr error
 }
 
 func (f fakeRunReader) ListByProject(context.Context, string, string, string) ([]models.DevflowRun, error) {
 	return f.rows, f.err
+}
+
+func (f fakeRunReader) ValidationRunByParent(context.Context, string, string, string) (*models.DevflowRun, error) {
+	return f.validationRun, f.validationErr
 }
 
 func (f fakeRunReader) DeleteByProject(context.Context, string, string) error { return nil }
@@ -595,14 +608,17 @@ func (f fakeBindingsReader) ListProjectReleaseBindings(context.Context, string, 
 // ready repo row + the three poll sources (git snapshot, dev run rows, dev
 // bindings) as fakes.
 type statusFixture struct {
-	snap        artifacts.StatusSnapshot
-	snapErr     error
-	counts      map[string]int // ComponentCountAtTag fixture, keyed by tag
-	countErr    error
-	runs        []models.DevflowRun
-	runsErr     error
-	bindings    []models.ReleaseBindingSummary
-	bindingsErr error
+	snap          artifacts.StatusSnapshot
+	snapErr       error
+	counts        map[string]int // ComponentCountAtTag fixture, keyed by tag
+	countErr      error
+	runs          []models.DevflowRun
+	runsErr       error
+	bindings      []models.ReleaseBindingSummary
+	bindingsErr   error
+	validationRun *models.DevflowRun               // validation child of the newest dev run (nil = none)
+	validationErr error                            // ValidationRunByParent error
+	execs         repositories.ExecutionRepository // nil = no PR lookup (validationUrl falls back to the issue)
 }
 
 func (fx statusFixture) service() *projectService {
@@ -630,8 +646,9 @@ func (fx statusFixture) service() *projectService {
 			return &models.GitRepository{Status: "ready", RepoURL: "https://github.com/o/r.git"}, nil
 		},
 	}
-	svc := NewProjectService(nil, repoSvc, nil, fakeArtifacts, nil)
-	svc.SetStageSources(fakeRunReader{rows: fx.runs, err: fx.runsErr},
+	svc := NewProjectService(nil, repoSvc, nil, fakeArtifacts, fx.execs)
+	svc.SetStageSources(
+		fakeRunReader{rows: fx.runs, err: fx.runsErr, validationRun: fx.validationRun, validationErr: fx.validationErr},
 		fakeBindingsReader{items: fx.bindings, err: fx.bindingsErr})
 	return svc
 }
@@ -776,7 +793,7 @@ func TestGetProjectStatus_PhaseLadder(t *testing.T) {
 				t.Errorf("hasDesign = %v, want %v", st.HasDesign, tc.wantHasDesign)
 			}
 			// The nested spec stage mirrors the snapshot ungated.
-			want := models.SpecStage{
+			want := apigen.SpecStage{
 				Exists:  tc.fx.snap.HasSpec,
 				Version: tc.fx.snap.SpecVersion,
 				Dirty:   tc.fx.snap.SpecDirty,

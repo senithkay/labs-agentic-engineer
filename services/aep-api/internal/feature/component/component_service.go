@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
@@ -40,9 +42,9 @@ import (
 // generate-workload-cr step is the only writer of the Workload CR. The
 // BFF reads ReleaseBindings via ListDeployments.
 type ComponentService interface {
-	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*models.ComponentList, error)
-	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*models.Component, error)
-	CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*models.Component, error)
+	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*apigen.ComponentList, error)
+	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*apigen.Component, error)
+	CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*apigen.Component, error)
 	// EnsureComponent idempotently provisions the OpenChoreo Component CR for a
 	// design component (by friendly name), so a merged-PR build has a Component to
 	// build. It is the coding-dispatch pre-flight (tasks-github-native): the CR
@@ -52,18 +54,18 @@ type ComponentService interface {
 	UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []models.WorkflowEnvVarRef) error
 
 	// Deploy (read-only — autoDeploy on the Component drives the chain)
-	ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*models.DeploymentList, error)
+	ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*apigen.DeploymentList, error)
 
 	// OpenAPI for the Test tab. Reads the spec from
 	// `specs/design/components/<name>/openapi.yaml`. The Test tab's
 	// swagger-ui invokes the deployed endpoint directly; CORS is enabled
 	// on the service ClusterComponentType's HTTPRoute.
-	GetComponentOpenAPI(ctx context.Context, orgName, projectName, componentName string) (*models.ComponentOpenAPI, error)
+	GetComponentOpenAPI(ctx context.Context, orgName, projectName, componentName string) (*apigen.ComponentOpenAPI, error)
 
 	// Build (workflow runs)
-	TriggerBuild(ctx context.Context, orgName, projectName, componentName string) (*models.WorkflowRun, error)
-	ListBuilds(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*models.WorkflowRunList, error)
-	GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName string) (*models.BuildLogs, error)
+	TriggerBuild(ctx context.Context, orgName, projectName, componentName string) (*apigen.WorkflowRun, error)
+	ListBuilds(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*apigen.WorkflowRunList, error)
+	GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName string) (*apigen.BuildLogs, error)
 }
 
 // BuildSecretStager pre-stages the org's build git Secret on the workflow
@@ -99,7 +101,7 @@ func NewComponentService(client openchoreo.ComponentClient, observClient observa
 	}
 }
 
-func (s *componentService) ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*models.ComponentList, error) {
+func (s *componentService) ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*apigen.ComponentList, error) {
 	list, err := s.client.ListComponents(ctx, orgName, projectName, limit, cursor)
 	if err != nil {
 		return nil, err
@@ -107,7 +109,7 @@ func (s *componentService) ListComponents(ctx context.Context, orgName, projectN
 	return list, nil
 }
 
-func (s *componentService) GetComponent(ctx context.Context, orgName, projectName, componentName string) (*models.Component, error) {
+func (s *componentService) GetComponent(ctx context.Context, orgName, projectName, componentName string) (*apigen.Component, error) {
 	comp, err := s.client.GetComponent(ctx, orgName, projectName, componentName)
 	if err != nil {
 		return nil, err
@@ -115,7 +117,7 @@ func (s *componentService) GetComponent(ctx context.Context, orgName, projectNam
 	return comp, nil
 }
 
-func (s *componentService) CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*models.Component, error) {
+func (s *componentService) CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*apigen.Component, error) {
 	comp, err := s.client.CreateComponent(ctx, orgName, projectName, req)
 	if err != nil {
 		return nil, err
@@ -233,7 +235,7 @@ func (s *componentService) UpdateWorkflowEnvVars(ctx context.Context, orgName, p
 // deploy, configs). Returns ErrComponentNotFound when no design exists or
 // no component matches, ErrComponentNotService when the component exists
 // but isn't a "service".
-func (s *componentService) GetComponentOpenAPI(ctx context.Context, orgName, projectName, componentName string) (*models.ComponentOpenAPI, error) {
+func (s *componentService) GetComponentOpenAPI(ctx context.Context, orgName, projectName, componentName string) (*apigen.ComponentOpenAPI, error) {
 	if s.artifactStore == nil {
 		return nil, fmt.Errorf("artifact store not configured")
 	}
@@ -252,12 +254,12 @@ func (s *componentService) GetComponentOpenAPI(ctx context.Context, orgName, pro
 			continue
 		}
 		if c.ComponentType != models.ComponentTypeService {
-			return &models.ComponentOpenAPI{
+			return &apigen.ComponentOpenAPI{
 				ComponentName: componentName,
 				ComponentType: c.ComponentType,
 			}, ErrComponentNotService
 		}
-		return &models.ComponentOpenAPI{
+		return &apigen.ComponentOpenAPI{
 			ComponentName: componentName,
 			ComponentType: c.ComponentType,
 			Spec:          c.OpenAPISpec,
@@ -266,7 +268,7 @@ func (s *componentService) GetComponentOpenAPI(ctx context.Context, orgName, pro
 	return nil, ErrComponentNotFound
 }
 
-func (s *componentService) ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*models.DeploymentList, error) {
+func (s *componentService) ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*apigen.DeploymentList, error) {
 	list, err := s.client.ListDeployments(ctx, orgName, projectName, componentName)
 	if err != nil {
 		return nil, err
@@ -274,7 +276,7 @@ func (s *componentService) ListDeployments(ctx context.Context, orgName, project
 	return list, nil
 }
 
-func (s *componentService) TriggerBuild(ctx context.Context, orgName, projectName, componentName string) (*models.WorkflowRun, error) {
+func (s *componentService) TriggerBuild(ctx context.Context, orgName, projectName, componentName string) (*apigen.WorkflowRun, error) {
 	// Pre-stage the per-WorkflowRun build Secret in workflows-<orgID> so
 	// the shared dockerfile-builder workflow's checkout-source mounts a
 	// populated Secret (see docs/design/build-credential-injection.md).
@@ -306,7 +308,7 @@ func (s *componentService) TriggerBuild(ctx context.Context, orgName, projectNam
 	return run, nil
 }
 
-func (s *componentService) ListBuilds(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*models.WorkflowRunList, error) {
+func (s *componentService) ListBuilds(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*apigen.WorkflowRunList, error) {
 	list, err := s.client.ListWorkflowRuns(ctx, orgName, projectName, componentName, limit, cursor)
 	if err != nil {
 		return nil, err
@@ -314,7 +316,7 @@ func (s *componentService) ListBuilds(ctx context.Context, orgName, projectName,
 	return list, nil
 }
 
-func (s *componentService) GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName string) (*models.BuildLogs, error) {
+func (s *componentService) GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName string) (*apigen.BuildLogs, error) {
 	if s.observClient == nil {
 		return nil, ErrLogsUnavailable
 	}

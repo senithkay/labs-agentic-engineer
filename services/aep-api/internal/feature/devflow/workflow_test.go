@@ -175,7 +175,7 @@ func (l *countsLog) all() []SetWorkflowRunTaskCountsInput {
 }
 
 // registerDevActivities mocks every dev-workflow activity. plannedTasks tunes
-// the plan the fan-out schedules; the returned log records the task-count
+// the plan the fan-out schedules. The returned log records the task-count
 // writes.
 func registerDevActivities(env *testsuite.TestWorkflowEnvironment, plannedTasks []PlannedTask) *countsLog {
 	var acts *Activities
@@ -199,14 +199,29 @@ func registerDevActivities(env *testsuite.TestWorkflowEnvironment, plannedTasks 
 	return log
 }
 
+// mockValidationFlow registers + mocks the validating phase's orchestrator
+// child so dev tests pin the dev workflow's handling of its RESULT; the
+// orchestration itself is covered by workflow_validation_test.go.
+func mockValidationFlow(env *testsuite.TestWorkflowEnvironment, res ValidationFlowResult, err error) {
+	env.RegisterWorkflow(ValidationFlowWorkflow)
+	env.OnWorkflow(ValidationFlowWorkflow, mock.Anything, mock.Anything).Return(res, err)
+}
+
+// validationSkipped is the orchestrator result for a project with no
+// acceptance criteria — the default for dev tests not exercising validation.
+func validationSkipped() ValidationFlowResult {
+	return ValidationFlowResult{Outcome: ValidationOutcomeSkipped, Reason: "no acceptance criteria"}
+}
+
 func TestDevFlowWorkflow_HappyPath(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
 	tasks := []PlannedTask{{Issue: 1, Key: "api"}, {Issue: 2, Key: "web"}}
 	registerDevActivities(env, tasks)
-	// Mock the task child workflow so this test stays a dev-workflow unit test.
+	// Mock the child workflows so this test stays a dev-workflow unit test.
 	env.RegisterWorkflow(TaskFlowWorkflow)
 	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Outcome: OutcomeSucceeded}, nil)
+	mockValidationFlow(env, validationSkipped(), nil)
 
 	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
 
@@ -362,4 +377,127 @@ func TestDevFlowWorkflow_CycleFastFails(t *testing.T) {
 	require.NoError(t, env.GetWorkflowResult(&res))
 	require.Equal(t, DevPhaseFailed, res.Phase)
 	require.Contains(t, res.Error, "cycle")
+}
+
+// The validating phase spawns the orchestrator child once every
+// implementation task succeeded, and surfaces its outcome + lanes.
+func TestDevFlowWorkflow_Validating_RunsValidationChild(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}})
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	// Implementation task (issue 1) succeeds.
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.MatchedBy(func(in TaskFlowInput) bool { return in.Issue == 1 })).
+		Return(TaskFlowResult{Issue: 1, Outcome: OutcomeSucceeded}, nil)
+	// The orchestrator child gets the dev run's identity and reports one
+	// succeeded e2e lane.
+	env.RegisterWorkflow(ValidationFlowWorkflow)
+	env.OnWorkflow(ValidationFlowWorkflow, mock.Anything, mock.MatchedBy(func(in ValidationFlowInput) bool {
+		return in.Repo == "org1/proj1" && in.Tag == "v1" && in.DevWorkflowID != ""
+	})).Return(ValidationFlowResult{
+		Outcome: OutcomeSucceeded, PRNumber: 55,
+		Lanes: []ValidationLaneResult{{Kind: LaneE2E, Issue: 99, Outcome: OutcomeSucceeded}},
+	}, nil)
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res DevFlowStatus
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, DevPhaseDone, res.Phase)
+	require.NotNil(t, res.Validation)
+	require.Equal(t, "validationflow-org1-proj1-v1", res.Validation.WorkflowID)
+	require.Equal(t, OutcomeSucceeded, res.Validation.Outcome)
+	require.Len(t, res.Validation.Lanes, 1)
+	require.Equal(t, 99, res.Validation.Lanes[0].Issue)
+}
+
+// The quality bar fails the run BEFORE the validate gate when a task did not
+// succeed: the gate is manual + never approved, so a fail-fast that ran before
+// the gate is the only way this completes (it never blocks on the gate) — and
+// the orchestrator child is never spawned.
+func TestDevFlowWorkflow_Validating_FailsBeforeGateWhenTaskFailed(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}})
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Issue: 1, Outcome: OutcomeFailed}, nil)
+	// No orchestrator registered: spawning it would error the run differently
+	// than the asserted quality-bar failure.
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{
+		OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1",
+		Gates: GateConfig{Auto: map[string]bool{GateValidate: false}},
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res DevFlowStatus
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, DevPhaseFailed, res.Phase)
+	require.Contains(t, res.Error, "did not succeed")
+}
+
+// No acceptance criteria → the orchestrator reports a skip; the dev run
+// records the note and completes.
+func TestDevFlowWorkflow_Validating_SkipsWhenNoCriteria(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}})
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Issue: 1, Outcome: OutcomeSucceeded}, nil)
+	mockValidationFlow(env, validationSkipped(), nil)
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res DevFlowStatus
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, DevPhaseDone, res.Phase)
+	require.NotNil(t, res.Validation)
+	require.Contains(t, res.Validation.Outcome, "skipped")
+}
+
+// A failed validation phase (lane or merge failure, reported as data) fails
+// the run with the orchestrator's reason.
+func TestDevFlowWorkflow_Validating_FailsOnChildFailure(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}})
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Issue: 1, Outcome: OutcomeSucceeded}, nil)
+	mockValidationFlow(env, ValidationFlowResult{
+		Outcome: OutcomeFailed, Reason: "lane e2e (#99): coding job failed",
+	}, nil)
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res DevFlowStatus
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, DevPhaseFailed, res.Phase)
+	require.Contains(t, res.Error, "validation run did not succeed")
+	require.Contains(t, res.Error, "lane e2e (#99)")
+}
+
+// A mechanical orchestrator failure (crash/timeout) fails the run.
+func TestDevFlowWorkflow_Validating_FailsOnChildError(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}})
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Issue: 1, Outcome: OutcomeSucceeded}, nil)
+	mockValidationFlow(env, ValidationFlowResult{}, errors.New("boom"))
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res DevFlowStatus
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, DevPhaseFailed, res.Phase)
+	require.Contains(t, res.Error, "validation run failed")
 }

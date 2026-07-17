@@ -619,6 +619,11 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 		}
 	}
 
+	// The project's aep:validation Task is NOT minted here: it is born in the
+	// planning pass (task.PlanSession mints it right after the plan tap creates
+	// the implementation issues), so it lands in the same phase as them and
+	// never appears in the plan turn's existing-task context.
+
 	if s.taskSvc != nil {
 		if rerr := s.taskSvc.ReconcilePendingForDesignChange(ctx, orgID, projectID); rerr != nil {
 			slog.WarnContext(ctx, "task reconciliation after design save failed", "error", rerr)

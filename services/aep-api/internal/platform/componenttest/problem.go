@@ -23,27 +23,29 @@ import (
 	"testing"
 )
 
-// Problem is the RFC-9457 body shape Huma serves for every error. Shared here
-// so per-feature component tests stop re-rolling it (Pilot B review nit).
-type Problem struct {
-	Title  string `json:"title"`
-	Status int    `json:"status"`
-	Detail string `json:"detail"`
-	Errors []struct {
-		Message  string `json:"message"`
-		Location string `json:"location"`
-	} `json:"errors"`
+// Envelope is the flat error body the contract-first edge serves for every
+// non-2xx response: {code, message, details?} (contract schema Error).
+type Envelope struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details []struct {
+		Field   string `json:"field"`
+		Message string `json:"message"`
+	} `json:"details"`
 }
 
-// DecodeProblem parses an RFC-9457 problem body, failing the test on anything
+// DecodeEnvelope parses a flat error envelope, failing the test on anything
 // that isn't one.
-func DecodeProblem(t testing.TB, body string) Problem {
+func DecodeEnvelope(t testing.TB, body string) Envelope {
 	t.Helper()
-	var p Problem
-	if err := json.Unmarshal([]byte(body), &p); err != nil {
-		t.Fatalf("not an RFC-9457 problem body: %v\n%s", err, body)
+	var e Envelope
+	if err := json.Unmarshal([]byte(body), &e); err != nil {
+		t.Fatalf("not a flat error envelope: %v\n%s", err, body)
 	}
-	return p
+	if e.Code == "" {
+		t.Fatalf("error envelope missing code:\n%s", body)
+	}
+	return e
 }
 
 // GoldenFieldSet reads a harvested golden JSON object (testdata/harvest/golden)

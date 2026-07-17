@@ -46,7 +46,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint typecheck license license-check tools clean eval cover
+.PHONY: install gen build dev test lint typecheck license license-check tools clean eval cover build-validation-runner
 
 install:
 	$(PNPM) install
@@ -100,6 +100,12 @@ license-check:
 
 tools:
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+
+# Local-dev helper (not a uniform verb): build + k3d-import the validation-task
+# runner image. setup-aep.sh runs this automatically at setup; use it to force a
+# rebuild after changing Dockerfile.validation — `make build-validation-runner FORCE=1`.
+build-validation-runner:
+	FORCE=$(FORCE) bash deployments/scripts/build-validation-runner.sh
 
 clean:
 	$(TURBO) run build --force >/dev/null 2>&1 || true

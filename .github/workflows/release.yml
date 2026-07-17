@@ -35,11 +35,21 @@ jobs:
           - name: aep-api
             dockerfile: services/aep-api/Dockerfile
             context: services/aep-api
+            buildContexts: skills=skills
           - name: agents
             dockerfile: services/agents/Dockerfile
             context: .
+          - name: collab
+            dockerfile: services/collab/Dockerfile
+            context: .
+          - name: aep-mcp-server
+            dockerfile: services/aep-mcp-server/Dockerfile
+            context: .
           - name: remote-worker
             dockerfile: runners/remote-worker/Dockerfile
+            context: runners/remote-worker
+          - name: remote-worker-validation
+            dockerfile: runners/remote-worker/Dockerfile.validation
             context: runners/remote-worker
           - name: console
             dockerfile: apps/console/Dockerfile
@@ -65,6 +75,9 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          # aep-api pulls repo-root skills/ in as a named context (empty for
+          # every other image); see services/aep-api/Dockerfile COPY --from=skills.
+          build-contexts: ${{ matrix.buildContexts }}
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
@@ -122,10 +135,17 @@ jobs:
           yq -i '.aepAgents.image.repository = "${{ env.IMAGE_PREFIX }}/agents"' /tmp/platform/values.yaml
           yq -i '.aepAgents.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
           yq -i '.aepAgents.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
+          yq -i '.collab.image.repository = "${{ env.IMAGE_PREFIX }}/collab"' /tmp/platform/values.yaml
+          yq -i '.collab.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.collab.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
+          yq -i '.aepMcpServer.image.repository = "${{ env.IMAGE_PREFIX }}/aep-mcp-server"' /tmp/platform/values.yaml
+          yq -i '.aepMcpServer.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.aepMcpServer.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
           yq -i '.console.image.repository = "${{ env.IMAGE_PREFIX }}/console"' /tmp/platform/values.yaml
           yq -i '.console.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
           yq -i '.console.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
           yq -i '.codingAgentDispatch.clusterGatewayProxy.image = "${{ env.IMAGE_PREFIX }}/cluster-gateway-proxy:${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.validationRunner.image = "${{ env.IMAGE_PREFIX }}/remote-worker-validation:${{ inputs.version }}"' /tmp/platform/values.yaml
 
           helm package /tmp/platform --destination /tmp/charts
 
@@ -169,7 +189,10 @@ jobs:
           - \`ghcr.io/wso2/aep/aep-server:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/aep-api:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/agents:${{ inputs.version }}\`
+          - \`ghcr.io/wso2/aep/collab:${{ inputs.version }}\`
+          - \`ghcr.io/wso2/aep/aep-mcp-server:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/remote-worker:${{ inputs.version }}\`
+          - \`ghcr.io/wso2/aep/remote-worker-validation:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/console:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/cluster-gateway-proxy:${{ inputs.version }}\`"
 

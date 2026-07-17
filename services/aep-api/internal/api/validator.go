@@ -1,0 +1,144 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package api
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"sync"
+
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
+	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+)
+
+// contractRouter memoizes the parsed contract + kin router: both are
+// read-only after construction (kin's schema-pattern cache is its own
+// package-level sync.Map), and every handler construction — production once,
+// but one per componenttest harness — would otherwise re-parse the spec and
+// rebuild the route tree.
+var contractRouter = sync.OnceValue(func() routers.Router {
+	// GetSpec decodes the contract that oapi-codegen baked into the binary
+	// (embedded-spec) — the same committed contract the handlers generate from.
+	// It panics on failure: a decode error is a build defect, not a runtime
+	// condition.
+	doc, err := apigen.GetSpec()
+	if err != nil {
+		panic(fmt.Sprintf("embedded contract failed to load: %v", err))
+	}
+	router, err := legacyrouter.NewRouter(doc)
+	if err != nil {
+		panic(fmt.Sprintf("contract router: %v", err))
+	}
+	return router
+})
+
+// requestValidator validates every routable request against the committed
+// contract BEFORE it reaches the generated handler chain: schema-invalid
+// input never reaches a handler and is answered with the flat envelope
+// (400 validation_failed + field details). Design notes:
+//
+//   - Route-miss falls through to the router untouched — the generated mux
+//     owns 404s, and the read-file catch-all (nested {path} segments, which
+//     the single-segment contract template cannot match) stays servable.
+//   - Security requirements are NOT checked here (AuthenticationFunc is a
+//     no-op): authN is the outer JWKS middleware's job and authZ (tenant
+//     gate) runs deny-by-default inside the strict chain.
+func requestValidator(next http.Handler) http.Handler {
+	router := contractRouter()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		route, pathParams, err := router.FindRoute(r)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		input := &openapi3filter.RequestValidationInput{
+			Request:    r,
+			PathParams: pathParams,
+			Route:      route,
+			Options: &openapi3filter.Options{
+				AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+				// Multipart bodies (skill import): kin would io.ReadAll the
+				// whole upload and schema-decode every part — including the
+				// binary tarball — only to check the file field is present,
+				// which the handler's own 400 already enforces. The strict
+				// wrapper re-parses the multipart anyway; skip the redundant
+				// 2-3x in-memory copies.
+				ExcludeRequestBody: hasMultipartBody(route),
+			},
+		}
+		if err := openapi3filter.ValidateRequest(r.Context(), input); err != nil {
+			writeValidationError(w, err)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hasMultipartBody reports whether the matched operation declares a
+// multipart/form-data request body.
+func hasMultipartBody(route *routers.Route) bool {
+	if route == nil || route.Operation == nil || route.Operation.RequestBody == nil || route.Operation.RequestBody.Value == nil {
+		return false
+	}
+	_, ok := route.Operation.RequestBody.Value.Content["multipart/form-data"]
+	return ok
+}
+
+// writeValidationError maps a kin-openapi request-validation failure onto the
+// envelope: 400 validation_failed with one details entry per schema violation.
+func writeValidationError(w http.ResponseWriter, err error) {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		writeErrorEnvelope(w, http.StatusRequestEntityTooLarge, "request_too_large",
+			"request body exceeds the size limit", nil)
+		return
+	}
+	var reqErr *openapi3filter.RequestError
+	if !errors.As(err, &reqErr) {
+		writeErrorEnvelope(w, http.StatusBadRequest, CodeValidationFailed, err.Error(), nil)
+		return
+	}
+
+	loc := "body"
+	if reqErr.Parameter != nil {
+		loc = reqErr.Parameter.In + "." + reqErr.Parameter.Name
+	}
+
+	var schemaErr *openapi3.SchemaError
+	if errors.As(reqErr.Err, &schemaErr) {
+		field := loc
+		if ptr := strings.Join(schemaErr.JSONPointer(), "."); ptr != "" {
+			field = loc + "." + ptr
+		}
+		writeErrorEnvelope(w, http.StatusBadRequest, CodeValidationFailed, "request validation failed",
+			[]apigen.ErrorDetail{{Field: field, Message: schemaErr.Reason}})
+		return
+	}
+
+	msg := reqErr.Reason
+	if msg == "" {
+		msg = reqErr.Error()
+	}
+	writeErrorEnvelope(w, http.StatusBadRequest, CodeValidationFailed, "request validation failed",
+		[]apigen.ErrorDetail{{Field: loc, Message: msg}})
+}

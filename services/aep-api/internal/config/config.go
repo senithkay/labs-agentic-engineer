@@ -108,6 +108,13 @@ type Config struct {
 	ServiceAuth   ServiceAuthConfig
 	Workspace     WorkspaceConfig
 
+	// SkillsDir is the on-disk platform skill library the BFF seeds + reconciles
+	// into each org's skills repo (SKILLS_DIR). It is COPY'd into the image from
+	// the repo-root skills/ directory (the single authored source) — no longer
+	// go:embed'd. Defaults to /app/skills (the image path); tests inject their
+	// own fs.FS and never read this.
+	SkillsDir string
+
 	// AgentPlatformURL is the URL the coding-agent runner pod uses to call
 	// back to the BFF (every former git-service endpoint is served by the
 	// merged aep-api now) for credentials refresh + skills pull. Reachable
@@ -201,6 +208,13 @@ type Config struct {
 	// feature. Enabled iff HostPort is set — unset leaves aep-api fully
 	// functional with the workflow endpoints answering 503.
 	Temporal TemporalConfig
+
+	// AgentValidationRunnerImage is the docker image a VALIDATION Job uses:
+	// the Playwright-capable runner variant (Dockerfile.validation — Debian
+	// base + baked chromium + playwright-cli). Empty disables validation
+	// dispatch (the validation executor fails loudly), since the alpine coding
+	// image cannot run chromium.
+	AgentValidationRunnerImage string
 
 	// AgentClusterSecretStore is the ESO ClusterSecretStore that backs
 	// per-run ExternalSecret reads in the remote-worker NS on DP.

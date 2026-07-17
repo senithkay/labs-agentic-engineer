@@ -382,6 +382,19 @@ func buildView(issue gitrepo.IssueInfo, latestSpecTag string, execs map[string]*
 	}
 	derived := taskmeta.Derive(facts, execFacts)
 
+	// Validation Tasks run coding→PR→merge with NO post-merge build (the devflow's
+	// validating phase: dispatch → PR → merge, no build/deploy). Derive infers a
+	// merge only from a following build Execution, so it never sees a validation
+	// merge and reads the closed, merged issue as abandoned → the console renders
+	// "Failed" for a validation that actually completed. Surface a completed
+	// validation (issue closed with a succeeded coding run) as deployed → "Done".
+	// A genuinely failed validation run (coding failed) is untouched, staying Failed.
+	if labels.Class == taskmeta.ClassValidation && derived == taskmeta.StatusAbandoned {
+		if c := execs[string(taskmeta.KindCoding)]; c != nil && c.Status == string(taskmeta.ExecSucceeded) {
+			derived = taskmeta.StatusDeployed
+		}
+	}
+
 	view := TaskView{
 		IssueNumber:   issue.Number,
 		Title:         issue.Title,

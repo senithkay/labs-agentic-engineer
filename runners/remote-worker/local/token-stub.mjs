@@ -23,6 +23,17 @@
 //   POST /internal/v1/tasks/{taskId}/credentials/refresh
 //     -> { "token": $GITHUB_PAT, "taskId": <echoed from path> }
 //
+// For a validation run it also plays the validation-context endpoint so the
+// aep-validation skill can fetch its deployed endpoints (never in the issue):
+//
+//   GET /internal/v1/executions/{id}/validation-context
+//     -> { endpoints:[{component,url}], credentials:null, criteriaPath }
+//
+// The endpoints point at localhost dev servers the agent starts in-container
+// (the local-dev-servers path in the aep-validation skill); credentials are
+// null (auth-gated criteria then land not_run). Override the endpoints with
+// VALIDATION_CONTEXT_JSON to validate a different sample.
+//
 // The taskId echo satisfies credhelper.sh's anti-misroute tripwire.
 // Identity fields are deliberately omitted so the runner keeps the
 // AEP_IDENTITY_* values it was launched with (no drift rewrite).
@@ -49,8 +60,26 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 const bind = process.env.STUB_BIND || "127.0.0.1";
 const expectedBearer = process.env.STUB_BEARER ?? "";
 
-const REFRESH_RE = /^\/internal\/v1\/tasks\/([^/]+)\/credentials\/refresh$/;
+// Both scopings: the runner uses tasks/{id} when AEP_PLATFORM_URL is unset
+// (git-service fallback) and executions/{id} when it is set (the current
+// execution-keyed model). Match either so the stub serves both run shapes.
+const REFRESH_RE = /^\/internal\/v1\/(?:tasks|executions)\/([^/]+)\/credentials\/refresh$/;
+const VALIDATION_CONTEXT_RE = /^\/internal\/v1\/executions\/([^/]+)\/validation-context$/;
+const VALIDATION_REPORT_RE = /^\/internal\/v1\/executions\/([^/]+)\/validation-report$/;
 const JSON_HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
+
+// The validation-context payload the stub returns. Localhost dev servers the
+// agent starts in its own container; override via VALIDATION_CONTEXT_JSON.
+const validationContext = process.env.VALIDATION_CONTEXT_JSON
+  ? JSON.parse(process.env.VALIDATION_CONTEXT_JSON)
+  : {
+      endpoints: [
+        { component: "hello-web", url: "http://localhost:5173" },
+        { component: "hello-api", url: "http://localhost:9090" },
+      ],
+      credentials: null,
+      criteriaPath: "specs/validation/validation-criteria.json",
+    };
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -58,8 +87,13 @@ const server = http.createServer((req, res) => {
     res.writeHead(200).end("ok");
     return;
   }
-  const m = req.method === "POST" ? REFRESH_RE.exec(url.pathname) : null;
-  if (!m) {
+  // Runner callbacks that require the per-run bearer: credentials/refresh
+  // (POST), validation-context (GET), validation-report (POST). Everything
+  // else 404s.
+  const refreshM = req.method === "POST" ? REFRESH_RE.exec(url.pathname) : null;
+  const contextM = req.method === "GET" ? VALIDATION_CONTEXT_RE.exec(url.pathname) : null;
+  const reportM = req.method === "POST" ? VALIDATION_REPORT_RE.exec(url.pathname) : null;
+  if (!refreshM && !contextM && !reportM) {
     console.error(`[token-stub] 404 ${req.method} ${url.pathname}`);
     res.writeHead(404, JSON_HEADERS).end('{"error":"not found"}');
     return;
@@ -69,6 +103,21 @@ const server = http.createServer((req, res) => {
     res.writeHead(401, JSON_HEADERS).end('{"error":"unauthorized"}');
     return;
   }
+  if (contextM) {
+    console.error(`[token-stub] 200 validation-context for execution ${contextM[1]}`);
+    res.writeHead(200, JSON_HEADERS).end(JSON.stringify(validationContext));
+    return;
+  }
+  if (reportM) {
+    // Drain the body so the runner's POST completes, then ack.
+    req.resume();
+    req.on("end", () => {
+      console.error(`[token-stub] 200 validation-report for execution ${reportM[1]}`);
+      res.writeHead(200, JSON_HEADERS).end('{"ok":true}');
+    });
+    return;
+  }
+  const m = refreshM;
   let taskId;
   try {
     taskId = decodeURIComponent(m[1]);
