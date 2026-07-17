@@ -35,7 +35,7 @@ import (
 func BuildImage(ctx context.Context, projectRoot, dockerfile, buildContext, tag string, out io.Writer) error {
 	df := filepath.Join(projectRoot, dockerfile)
 	cxt := filepath.Join(projectRoot, buildContext)
-	fmt.Fprintf(out, "→ docker build -f %s -t %s %s\n", df, tag, cxt)
+	_, _ = fmt.Fprintf(out, "→ docker build -f %s -t %s %s\n", df, tag, cxt)
 	c := exec.CommandContext(ctx, "docker", "build", "-f", df, "-t", tag, cxt)
 	// BuildKit is required for the Dockerfiles' `--mount=type=cache` steps, which
 	// keep dev rebuilds fast (skip reinstall / reuse the pnpm + Vite caches).
@@ -51,7 +51,7 @@ func BuildImage(ctx context.Context, projectRoot, dockerfile, buildContext, tag 
 // ImportImage loads a locally-built image into the named k3d cluster's nodes so
 // pods can run it without a registry pull (pullPolicy: Never).
 func ImportImage(ctx context.Context, tag, cluster string, out io.Writer) error {
-	fmt.Fprintf(out, "→ k3d image import %s -c %s\n", tag, cluster)
+	_, _ = fmt.Fprintf(out, "→ k3d image import %s -c %s\n", tag, cluster)
 	c := exec.CommandContext(ctx, "k3d", "image", "import", tag, "-c", cluster)
 	c.Stdout = out
 	c.Stderr = out

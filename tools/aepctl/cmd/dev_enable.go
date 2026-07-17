@@ -67,11 +67,11 @@ func runDevEnable(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Fprintln(os.Stdout, "Dev mode: enabled")
+	_, _ = fmt.Fprintln(os.Stdout, "Dev mode: enabled")
 	if p := viper.GetString("dev.project_path"); p != "" {
-		fmt.Fprintf(os.Stdout, "Project:  %s\n", p)
+		_, _ = fmt.Fprintf(os.Stdout, "Project:  %s\n", p)
 	} else {
-		fmt.Fprintln(os.Stdout, "Project:  (not set) — run `aep dev set-path <dir>` before reloading")
+		_, _ = fmt.Fprintln(os.Stdout, "Project:  (not set) — run `aep dev set-path <dir>` before reloading")
 	}
 	fmt.Fprintf(os.Stdout, "Config:   %s\n", cfgFile)
 	return nil
@@ -83,7 +83,7 @@ func runDevDisable(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stdout, "Dev mode: disabled")
+	_, _ = fmt.Fprintln(os.Stdout, "Dev mode: disabled")
 	fmt.Fprintf(os.Stdout, "Config:   %s\n", cfgFile)
 	return nil
 }

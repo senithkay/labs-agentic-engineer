@@ -72,7 +72,7 @@ func runDevServe(cmd *cobra.Command, args []string) error {
 	}
 	if len(s.DevServerCmd) == 0 {
 		return fmt.Errorf("%s has no local dev server. Backend services run in-cluster "+
-			"because other services reach them by cluster DNS — use `aep dev reload %s`.", s.Name, s.Name)
+			"because other services reach them by cluster DNS — use `aep dev reload %s`", s.Name, s.Name)
 	}
 	if _, err := exec.LookPath(s.DevServerCmd[0]); err != nil {
 		return fmt.Errorf("%q is required to run the %s dev server but was not found in PATH", s.DevServerCmd[0], s.Name)

@@ -297,7 +297,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("create OpenBao seal values file: %w", err)
 		}
-		defer os.Remove(sealFile.Name())
+		defer func() { _ = os.Remove(sealFile.Name()) }()
 		if _, err := sealFile.WriteString(sealValues); err != nil {
 			return fmt.Errorf("write OpenBao seal values: %w", err)
 		}
