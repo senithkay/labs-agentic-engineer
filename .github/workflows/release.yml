@@ -178,7 +178,7 @@ jobs:
           ### Install
 
           \`\`\`bash
-          helm install aep oci://ghcr.io/wso2/aep/charts/bootstrap \\
+          helm install aep oci://ghcr.io/wso2/aep/charts/aep-bootstrap \\
             --version ${{ inputs.version }} -n wso2-aep --create-namespace
 
           aep platform install \\
