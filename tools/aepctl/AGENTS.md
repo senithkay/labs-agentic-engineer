@@ -44,6 +44,10 @@ in-cluster `aep-cli-config` ConfigMap > code default**.
   every command, including `install` (which can't read the ConfigMap — it doesn't
   exist pre-install). Lets users keep one file instead of a long flag list. See
   `config.example.yaml` for the schema. Loaded by `config.LoadFile` (MergeInConfig).
+- **`aep platform config init [-o file]`** writes an annotated, defaults-filled
+  starter config (the `config.example.yaml` template, embedded via go:embed in
+  `main.go`). This is how a fresh user with no cluster/repo gets a file to edit —
+  there's nothing to `export` pre-install. Refuses to overwrite an existing `-o`.
 - **`aep platform config use <file>`** records that file as the active one (pointer
   at `~/.aep/active-config`), so later commands load it **without** `--config`.
   `config which` prints it, `config clear` unsets it. Whenever a config file is in

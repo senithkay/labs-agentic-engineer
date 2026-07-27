@@ -37,6 +37,46 @@ var configCmd = &cobra.Command{
 	Short: "Manage the in-cluster AEP configuration",
 }
 
+// ConfigTemplate is the annotated starter config, injected from main via
+// go:embed of config.example.yaml. `config init` writes it out.
+var ConfigTemplate string
+
+var configInitOutput string
+
+// configInitCmd writes a defaults-filled starter config file. This is how a
+// fresh user (no cluster, no repo) gets a config to edit — nothing to export
+// yet, so generate one from the embedded template.
+var configInitCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Write a starter config file pre-filled with defaults (edit, then 'config use')",
+	Long: `Writes an annotated config file with every setting at its default value.
+Edit it for your cluster, then either pass it with --config or make it the
+active file with 'aep platform config use <file>'.
+
+With no --output the template is written to stdout:
+  aep platform config init > aep.yaml`,
+	Args:        cobra.NoArgs,
+	Annotations: map[string]string{"skipClusterConfig": "true"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if ConfigTemplate == "" {
+			return fmt.Errorf("no embedded config template available in this build")
+		}
+		if configInitOutput == "" {
+			fmt.Print(ConfigTemplate)
+			return nil
+		}
+		if _, err := os.Stat(configInitOutput); err == nil {
+			return fmt.Errorf("%s already exists — refusing to overwrite (remove it or choose another --output)", configInitOutput)
+		}
+		if err := os.WriteFile(configInitOutput, []byte(ConfigTemplate), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", configInitOutput, err)
+		}
+		fmt.Printf("Wrote starter config: %s\n", configInitOutput)
+		fmt.Println("Edit it, then: aep platform config use " + configInitOutput)
+		return nil
+	},
+}
+
 var configImportFile string
 
 var configImportCmd = &cobra.Command{
@@ -140,10 +180,12 @@ var configClearCmd = &cobra.Command{
 
 func init() {
 	platformCmd.AddCommand(configCmd)
+	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configImportCmd)
 	configCmd.AddCommand(configUseCmd)
 	configCmd.AddCommand(configWhichCmd)
 	configCmd.AddCommand(configClearCmd)
+	configInitCmd.Flags().StringVarP(&configInitOutput, "output", "o", "", "write the template to this file instead of stdout")
 	configImportCmd.Flags().StringVar(&configImportFile, "config", "", "path to local config YAML file (required)")
 	_ = configImportCmd.MarkFlagRequired("config")
 }

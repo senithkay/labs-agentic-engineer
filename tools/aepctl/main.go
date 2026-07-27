@@ -16,8 +16,20 @@
 
 package main
 
-import "github.com/wso2/aep/aepctl/cmd"
+import (
+	_ "embed"
+
+	"github.com/wso2/aep/aepctl/cmd"
+)
+
+// configTemplate is the annotated, defaults-filled config file that
+// `aep platform config init` writes out. Embedded so a freshly-downloaded
+// binary can produce a starter config with no cluster and no repo checkout.
+//
+//go:embed config.example.yaml
+var configTemplate string
 
 func main() {
+	cmd.ConfigTemplate = configTemplate
 	cmd.Execute()
 }
