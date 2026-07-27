@@ -67,11 +67,20 @@ func init() {
 	// command, including `install`, so a config file can replace a long flag list.
 	cobra.OnInitialize(func() {
 		config.Init()
-		if configFile != "" {
-			if err := config.LoadFile(configFile); err != nil {
+		// Resolve the config file: an explicit --config wins, otherwise the file
+		// recorded by `aep platform config use`. When one is used, tell the user
+		// (to stderr) which file is in effect — every command that depends on it
+		// surfaces the source.
+		path := configFile
+		if path == "" {
+			path = config.ActiveConfig()
+		}
+		if path != "" {
+			if err := config.LoadFile(path); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
+			fmt.Fprintf(os.Stderr, "Using config file: %s\n", path)
 		}
 	})
 	rootCmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "path to kubeconfig file (default: $HOME/.kube/config)")

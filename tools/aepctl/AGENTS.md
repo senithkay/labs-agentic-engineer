@@ -44,6 +44,11 @@ in-cluster `aep-cli-config` ConfigMap > code default**.
   every command, including `install` (which can't read the ConfigMap — it doesn't
   exist pre-install). Lets users keep one file instead of a long flag list. See
   `config.example.yaml` for the schema. Loaded by `config.LoadFile` (MergeInConfig).
+- **`aep platform config use <file>`** records that file as the active one (pointer
+  at `~/.aep/active-config`), so later commands load it **without** `--config`.
+  `config which` prints it, `config clear` unsets it. Whenever a config file is in
+  effect (via `--config` or the pointer), every command prints `Using config file:
+  <path>` to stderr so the source is never a surprise.
 - After `install` runs, it writes non-sensitive config to the `aep-cli-config`
   ConfigMap in `wso2-aep`; subsequent commands load it via `PersistentPreRunE`
   (`install` is annotated `skipClusterConfig`).

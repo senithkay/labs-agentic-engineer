@@ -84,3 +84,38 @@ platform:
 		}
 	})
 }
+
+// TestActiveConfigPointer verifies `config use`/`which`/`clear` round-trips
+// through the ~/.aep/active-config pointer file.
+func TestActiveConfigPointer(t *testing.T) {
+	// Isolate HOME so we don't touch the real ~/.aep.
+	t.Setenv("HOME", t.TempDir())
+
+	if got := ActiveConfig(); got != "" {
+		t.Fatalf("no pointer set: got %q, want empty", got)
+	}
+
+	cfg := filepath.Join(t.TempDir(), "aep.yaml")
+	if err := os.WriteFile(cfg, []byte("server: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	abs, err := SetActiveConfig(cfg)
+	if err != nil {
+		t.Fatalf("SetActiveConfig: %v", err)
+	}
+	if got := ActiveConfig(); got != abs {
+		t.Fatalf("after set: got %q, want %q", got, abs)
+	}
+
+	if err := ClearActiveConfig(); err != nil {
+		t.Fatalf("ClearActiveConfig: %v", err)
+	}
+	if got := ActiveConfig(); got != "" {
+		t.Fatalf("after clear: got %q, want empty", got)
+	}
+
+	if _, err := SetActiveConfig(filepath.Join(t.TempDir(), "nope.yaml")); err == nil {
+		t.Fatal("SetActiveConfig on missing file: expected error, got nil")
+	}
+}

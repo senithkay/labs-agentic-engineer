@@ -19,6 +19,8 @@ package config
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -99,6 +101,73 @@ func Init() {
 	viper.SetDefault("thunder.admin_client_id", "openchoreo-system-app")
 	viper.SetDefault("thunder.admin_client_secret", "openchoreo-system-app-secret")
 	viper.SetDefault("thunder.public_url", "http://thunder.openchoreo.localhost:8080")
+}
+
+// activeConfigRef is the local state file recording the config file selected by
+// `aep platform config use`, so commands pick it up without a --config flag.
+func activeConfigRef() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return filepath.Join(home, ".aep", "active-config"), nil
+}
+
+// SetActiveConfig records path (resolved to absolute) as the active config file
+// for future commands. Errors if the file does not exist.
+func SetActiveConfig(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return "", fmt.Errorf("config file %s: %w", abs, err)
+	}
+	ref, err := activeConfigRef()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(ref), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(ref, []byte(abs+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
+// ActiveConfig returns the recorded active config file path, or "" if none is
+// set (or the recorded file no longer exists — a stale pointer is ignored).
+func ActiveConfig() string {
+	ref, err := activeConfigRef()
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(ref)
+	if err != nil {
+		return ""
+	}
+	p := strings.TrimSpace(string(b))
+	if p == "" {
+		return ""
+	}
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
+}
+
+// ClearActiveConfig removes the recorded active config file pointer. No-op if
+// none is set.
+func ClearActiveConfig() error {
+	ref, err := activeConfigRef()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(ref); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // LoadFile merges a local YAML config file into viper. It layers ABOVE the

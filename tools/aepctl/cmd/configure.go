@@ -87,9 +87,63 @@ Example config file:
 	RunE: runConfigImport,
 }
 
+// configUseCmd records a local config file so future commands load it
+// automatically — no need to pass --config every time.
+var configUseCmd = &cobra.Command{
+	Use:   "use <path>",
+	Short: "Set the config file future commands use (no --config needed)",
+	Long: `Records <path> as the active config file. Subsequent aep commands load it
+automatically (equivalent to passing --config <path> each time). Override for a
+single command with --config, or drop it with 'aep platform config clear'.`,
+	Args: cobra.ExactArgs(1),
+	// Local operation — no cluster needed.
+	Annotations: map[string]string{"skipClusterConfig": "true"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		abs, err := config.SetActiveConfig(args[0])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Active config file set: %s\n", abs)
+		fmt.Println("Future aep commands will use it (override with --config, or run 'aep platform config clear').")
+		return nil
+	},
+}
+
+// configWhichCmd prints the active config file, if any.
+var configWhichCmd = &cobra.Command{
+	Use:         "which",
+	Short:       "Print the active config file (set by 'config use')",
+	Annotations: map[string]string{"skipClusterConfig": "true"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if p := config.ActiveConfig(); p != "" {
+			fmt.Println(p)
+		} else {
+			fmt.Println("no active config file set")
+		}
+		return nil
+	},
+}
+
+// configClearCmd removes the active config file pointer.
+var configClearCmd = &cobra.Command{
+	Use:         "clear",
+	Short:       "Unset the active config file (set by 'config use')",
+	Annotations: map[string]string{"skipClusterConfig": "true"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := config.ClearActiveConfig(); err != nil {
+			return err
+		}
+		fmt.Println("Active config file cleared.")
+		return nil
+	},
+}
+
 func init() {
 	platformCmd.AddCommand(configCmd)
 	configCmd.AddCommand(configImportCmd)
+	configCmd.AddCommand(configUseCmd)
+	configCmd.AddCommand(configWhichCmd)
+	configCmd.AddCommand(configClearCmd)
 	configImportCmd.Flags().StringVar(&configImportFile, "config", "", "path to local config YAML file (required)")
 	_ = configImportCmd.MarkFlagRequired("config")
 }
