@@ -99,10 +99,42 @@ func init() {
 	initCmd.Flags().String("secret-manager-api-url", "", "URL of the managed secret-manager API service (production; omit to deploy the local stub)")
 	_ = viper.BindPFlag("codingagent.secret_manager_api.url", initCmd.Flags().Lookup("secret-manager-api-url"))
 	registerThunderFlags(initCmd)
+
+	// Bind the remaining install flags to viper keys so a --config file (and
+	// AEP_* env vars) can supply them without a long command line. An explicitly
+	// passed flag still wins (viper precedence: flag > env > file > default).
+	for flag, key := range map[string]string{
+		"platform-chart":        "platform.chart",
+		"platform-version":      "platform.version",
+		"platform-release":      "platform.release",
+		"namespace":             "platform.namespace",
+		"console-url":           "console.public_url",
+		"api-url":               "aep_api.public_url",
+		"build-plane-namespace": "oc.build_plane_namespace",
+		"registry-service":      "oc.registry_service",
+		"oc-namespace":          "oc.namespace",
+		"skip-oc-version-check": "oc.skip_version_check",
+	} {
+		_ = viper.BindPFlag(key, initCmd.Flags().Lookup(flag))
+	}
 }
 
 func runAEPInit(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+
+	// Resolve every install setting through viper so a --config file / AEP_* env
+	// var can supply it (an explicitly-passed flag still wins). Must run before
+	// any of these values are used below.
+	initPlatformChart = viper.GetString("platform.chart")
+	initPlatformVersion = viper.GetString("platform.version")
+	initPlatformRelease = viper.GetString("platform.release")
+	initPlatformNamespace = viper.GetString("platform.namespace")
+	initConsoleURL = viper.GetString("console.public_url")
+	initAPIURL = viper.GetString("aep_api.public_url")
+	initBuildPlaneNamespace = viper.GetString("oc.build_plane_namespace")
+	initRegistryService = viper.GetString("oc.registry_service")
+	initOCNamespace = viper.GetString("oc.namespace")
+	initSkipOCVersionCheck = viper.GetBool("oc.skip_version_check")
 
 	if _, err := exec.LookPath("helm"); err != nil {
 		return fmt.Errorf("helm is required but was not found in PATH\nInstall it from https://helm.sh/docs/intro/install/ and try again")

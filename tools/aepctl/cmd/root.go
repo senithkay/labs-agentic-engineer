@@ -26,7 +26,10 @@ import (
 	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
 )
 
-var kubeconfig string
+var (
+	kubeconfig string
+	configFile string
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "aep",
@@ -59,6 +62,18 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(config.Init)
+	// config.Init sets defaults + AEP_* env binding; when --config is given we
+	// then merge the file (below flags/env, above defaults). Runs for every
+	// command, including `install`, so a config file can replace a long flag list.
+	cobra.OnInitialize(func() {
+		config.Init()
+		if configFile != "" {
+			if err := config.LoadFile(configFile); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		}
+	})
 	rootCmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "path to kubeconfig file (default: $HOME/.kube/config)")
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "path to a config YAML file; its keys apply to all commands (including install). Flags and AEP_* env vars override it")
 }

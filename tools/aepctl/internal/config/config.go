@@ -101,6 +101,19 @@ func Init() {
 	viper.SetDefault("thunder.public_url", "http://thunder.openchoreo.localhost:8080")
 }
 
+// LoadFile merges a local YAML config file into viper. It layers ABOVE the
+// code defaults / cluster ConfigMap but BELOW CLI flags and AEP_* env vars, so
+// precedence is: flag > env var > --config file > cluster ConfigMap > default.
+// Used by every command (including `install`) when --config is passed, letting
+// users keep a single file instead of a long flag list.
+func LoadFile(path string) error {
+	viper.SetConfigFile(path)
+	if err := viper.MergeInConfig(); err != nil {
+		return fmt.Errorf("read config file %s: %w", path, err)
+	}
+	return nil
+}
+
 // LoadFromCluster reads the aep-cli-config ConfigMap from the given namespace
 // and loads each entry into viper via SetDefault, so CLI flags and AEP_* env
 // vars still take precedence. Returns nil if the ConfigMap does not yet exist

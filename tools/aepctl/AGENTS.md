@@ -37,9 +37,20 @@ buf generate   # or: protoc with protoc-gen-go + protoc-gen-go-grpc
 
 ## Config
 
-CLI has no local config file. After `aep init` runs, it writes non-sensitive config to the
-`aep-cli-config` ConfigMap in `wso2-aep`. All subsequent commands read from it automatically
-via `PersistentPreRunE`. Sensitive values (Thunder admin secret) come from the ESO-synced
-`aep-thunder-secrets` Secret. CLI flags and `AEP_*` env vars always override the ConfigMap.
+Resolution order (highest wins): **CLI flag > `AEP_*` env var > `--config` file >
+in-cluster `aep-cli-config` ConfigMap > code default**.
+
+- **`--config <file>`** (persistent flag): a local YAML whose keys feed viper for
+  every command, including `install` (which can't read the ConfigMap — it doesn't
+  exist pre-install). Lets users keep one file instead of a long flag list. See
+  `config.example.yaml` for the schema. Loaded by `config.LoadFile` (MergeInConfig).
+- After `install` runs, it writes non-sensitive config to the `aep-cli-config`
+  ConfigMap in `wso2-aep`; subsequent commands load it via `PersistentPreRunE`
+  (`install` is annotated `skipClusterConfig`).
+- Sensitive values (Thunder admin secret) come from the ESO-synced
+  `aep-thunder-secrets` Secret, never the ConfigMap.
+
+Every install flag is bound to a viper key (`init.go`), so config-file / env-var
+values flow through even when the flag isn't passed.
 
 Server reads env vars injected by the bootstrap Helm chart.

@@ -1,0 +1,54 @@
+# Example aep CLI config. Pass to any command with --config:
+#
+#   aep platform install --config aep.yaml
+#
+# Every key below can also be a CLI flag or an AEP_* env var. Precedence is:
+#   CLI flag  >  AEP_* env var  >  this file  >  in-cluster ConfigMap  >  default
+# So a config file replaces a long flag list; override individual values with a
+# flag or env var when needed (e.g. AEP_OC_NAMESPACE=... or --oc-namespace ...).
+
+# gRPC URL of the in-cluster aep-server (deployed by the bootstrap chart).
+server: http://aep-server.openchoreo.localhost:8080
+
+platform:
+  # Chart version pulled from GHCR (ignored when 'chart' is a local path).
+  version: latest
+  # chart: ./deployments/helm-charts/platform   # local path for dev installs
+  release: aep-platform
+  namespace: wso2-aep
+  workspaces:
+    # ReadWriteOnce for k3d/local; ReadWriteMany for production.
+    access_mode: ReadWriteOnce
+
+oc:
+  # Namespace where the OpenChoreo control-plane is installed. Local setup uses
+  # openchoreo-control-plane; the production default is openchoreo-system.
+  namespace: openchoreo-control-plane
+  api_url: http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080
+  build_plane_namespace: openchoreo-workflow-plane
+  registry_service: registry
+  skip_version_check: false
+
+console:
+  public_url: http://console.openchoreo.localhost:8080
+
+aep_api:
+  public_url: http://api.openchoreo.localhost:8080
+
+codingagent:
+  # LOCAL DEV ONLY — deploy the in-cluster cluster-gateway-proxy + secret-manager-api
+  # stubs. In production leave false and set the *_url values to managed services.
+  local_stubs:
+    enabled: false
+  cluster_gateway_proxy:
+    url: ""
+  secret_manager_api:
+    url: ""
+
+webhook:
+  # Public URL registered on each repo's webhook (prod: real HTTPS ingress;
+  # local: a smee.io channel).
+  delivery_url: ""
+
+thunder:
+  public_url: http://thunder.openchoreo.localhost:8080
