@@ -34,7 +34,7 @@ import (
 
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Manage the in-cluster AEP configuration",
+	Short: "Manage AEP config — local config files and the in-cluster ConfigMap",
 }
 
 // ConfigTemplate is the annotated starter config, injected from main via
@@ -51,10 +51,10 @@ var configInitCmd = &cobra.Command{
 	Short: "Write a starter config file pre-filled with defaults (edit, then 'config use')",
 	Long: `Writes an annotated config file with every setting at its default value.
 Edit it for your cluster, then either pass it with --config or make it the
-active file with 'aep platform config use <file>'.
+active file with 'aep config use <file>'.
 
 With no --output the template is written to stdout:
-  aep platform config init > aep.yaml`,
+  aep config init > aep.yaml`,
 	Args:        cobra.NoArgs,
 	Annotations: map[string]string{"skipClusterConfig": "true"},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -72,7 +72,7 @@ With no --output the template is written to stdout:
 			return fmt.Errorf("write %s: %w", configInitOutput, err)
 		}
 		fmt.Printf("Wrote starter config: %s\n", configInitOutput)
-		fmt.Println("Edit it, then: aep platform config use " + configInitOutput)
+		fmt.Println("Edit it, then: aep config use " + configInitOutput)
 		return nil
 	},
 }
@@ -134,7 +134,7 @@ var configUseCmd = &cobra.Command{
 	Short: "Set the config file future commands use (no --config needed)",
 	Long: `Records <path> as the active config file. Subsequent aep commands load it
 automatically (equivalent to passing --config <path> each time). Override for a
-single command with --config, or drop it with 'aep platform config clear'.`,
+single command with --config, or drop it with 'aep config clear'.`,
 	Args: cobra.ExactArgs(1),
 	// Local operation — no cluster needed.
 	Annotations: map[string]string{"skipClusterConfig": "true"},
@@ -144,7 +144,7 @@ single command with --config, or drop it with 'aep platform config clear'.`,
 			return err
 		}
 		fmt.Printf("Active config file set: %s\n", abs)
-		fmt.Println("Future aep commands will use it (override with --config, or run 'aep platform config clear').")
+		fmt.Println("Future aep commands will use it (override with --config, or run 'aep config clear').")
 		return nil
 	},
 }
@@ -179,7 +179,7 @@ var configClearCmd = &cobra.Command{
 }
 
 func init() {
-	platformCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(configCmd)
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configImportCmd)
 	configCmd.AddCommand(configUseCmd)

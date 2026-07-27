@@ -68,7 +68,7 @@ func init() {
 	cobra.OnInitialize(func() {
 		config.Init()
 		// Resolve the config file: an explicit --config wins, otherwise the file
-		// recorded by `aep platform config use`. When one is used, tell the user
+		// recorded by `aep config use`. When one is used, tell the user
 		// (to stderr) which file is in effect — every command that depends on it
 		// surfaces the source.
 		path := configFile

@@ -63,7 +63,7 @@ func init() {
 	platformCmd.AddCommand(uninstallCmd)
 	uninstallCmd.Flags().StringVar(&uninstallNamespace, "namespace", "wso2-aep", "Kubernetes namespace where the platform chart is installed")
 	uninstallCmd.Flags().StringVar(&uninstallPlatformRelease, "platform-release", "aep-platform", "Helm release name of the platform chart")
-	uninstallCmd.Flags().BoolVar(&uninstallPurgeConfig, "purge-config", false, "Also delete the aep-cli-config ConfigMap written by aep platform configure / install")
+	uninstallCmd.Flags().BoolVar(&uninstallPurgeConfig, "purge-config", false, "Also delete the aep-cli-config ConfigMap written by aep config import / install")
 	uninstallCmd.Flags().BoolVarP(&uninstallYes, "yes", "y", false, "Skip confirmation prompt")
 }
 

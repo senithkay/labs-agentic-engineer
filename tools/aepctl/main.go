@@ -23,7 +23,7 @@ import (
 )
 
 // configTemplate is the annotated, defaults-filled config file that
-// `aep platform config init` writes out. Embedded so a freshly-downloaded
+// `aep config init` writes out. Embedded so a freshly-downloaded
 // binary can produce a starter config with no cluster and no repo checkout.
 //
 //go:embed config.example.yaml

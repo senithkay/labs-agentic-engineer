@@ -149,7 +149,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	_, cmErr := k8sClient.CoreV1().ConfigMaps(initPlatformNamespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})
 	if cmErr == nil {
 		_, _ = fmt.Fprintf(os.Stderr, "warning: existing %s found — re-running install will overwrite it.\n", config.ConfigMapName)
-		_, _ = fmt.Fprintf(os.Stderr, "  Export your config first with: aep platform config export\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  Export your config first with: aep config export\n")
 	}
 
 	// 0a. Prerequisite guard — verify the OpenChoreo version meets the minimum

@@ -104,7 +104,7 @@ func Init() {
 }
 
 // activeConfigRef is the local state file recording the config file selected by
-// `aep platform config use`, so commands pick it up without a --config flag.
+// `aep config use`, so commands pick it up without a --config flag.
 func activeConfigRef() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

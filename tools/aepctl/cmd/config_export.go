@@ -40,9 +40,9 @@ var configExportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export the in-cluster config to a local YAML file",
 	Long: `Reads the aep-cli-config ConfigMap from the cluster and writes it as a
-YAML file you can edit and re-apply with 'aep platform config import'.
+YAML file you can edit and re-apply with 'aep config import'.
 
-  aep platform config export --output aep-config.yaml
+  aep config export --output aep-config.yaml
 
 Use - as the output path to print to stdout instead of writing a file.`,
 	RunE: runConfigExport,
