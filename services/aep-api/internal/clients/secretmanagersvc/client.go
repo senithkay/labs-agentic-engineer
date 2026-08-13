@@ -162,10 +162,20 @@ func (c *secretManagementClient) requireOCClient() error {
 	return nil
 }
 
+// ocOrgNS resolves the OC SecretReference API namespace for a location.
+// When OCOrgName is set (the OC org name, e.g. "default"), it is used directly.
+// Otherwise, falls back to deriving the wc-* namespace from OrgBaseNamespace —
+// this is the legacy path; OC's ReleaseBinding controller cannot find refs placed
+// there, so callers should always set OCOrgName.
+func ocOrgNS(location SecretLocation) string {
+	if location.OCOrgName != "" {
+		return location.OCOrgName
+	}
+	return tenant.OrgBaseNamespace(location.OrgName)
+}
+
 func (c *secretManagementClient) upsertSecretReference(ctx context.Context, location SecretLocation, kvPath string, secretKeys []string) (string, error) {
-	// D-SR-namespace: OrgName is the org UUID; OC calls need the derived
-	// k8s base namespace (wc-<ouId8>-<sha256[:8]>), not the raw UUID.
-	orgNS := tenant.OrgBaseNamespace(location.OrgName)
+	orgNS := ocOrgNS(location)
 	name := location.SecretRefName()
 	req := CreateSecretReferenceRequest{
 		Namespace:       orgNS,
@@ -260,8 +270,7 @@ func (c *secretManagementClient) DeleteSecret(ctx context.Context, location Secr
 		if err := c.requireOCClient(); err != nil {
 			return err
 		}
-		orgNS := tenant.OrgBaseNamespace(location.OrgName)
-		if err := c.ocClient.DeleteSecretReference(ctx, orgNS, secretRefName); err != nil {
+		if err := c.ocClient.DeleteSecretReference(ctx, ocOrgNS(location), secretRefName); err != nil {
 			if !errors.Is(err, ErrNotFound) {
 				return fmt.Errorf("delete SecretReference: %w", err)
 			}

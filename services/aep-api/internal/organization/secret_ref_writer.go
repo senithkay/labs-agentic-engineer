@@ -108,6 +108,7 @@ func (w *SecretRefWriter) WriteAnthropic(ctx context.Context, ocOrgID string, ro
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:    orgUUID,
+		OCOrgName:  ocOrgID,
 		EntityName: role.SecretRefEntity(),
 		SecretKey:  secretmanagersvc.SecretKeyAPIKey,
 	}
@@ -152,6 +153,7 @@ func (w *SecretRefWriter) WriteGitHubPAT(ctx context.Context, ocOrgID string, pa
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:    orgUUID,
+		OCOrgName:  ocOrgID,
 		EntityName: "github-pat",
 		SecretKey:  secretmanagersvc.SecretKeyAPIKey,
 	}
@@ -201,6 +203,7 @@ func (w *SecretRefWriter) WriteExternalResourceSecret(ctx context.Context, ocOrg
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:     orgUUID,
+		OCOrgName:   ocOrgID,
 		ProjectName: projectName,
 		EntityName:  entityName,
 	}
@@ -272,6 +275,7 @@ func (w *SecretRefWriter) DeleteAnthropic(ctx context.Context, ocOrgID string, r
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:    orgUUID,
+		OCOrgName:  ocOrgID,
 		EntityName: role.SecretRefEntity(),
 		SecretKey:  secretmanagersvc.SecretKeyAPIKey,
 	}
@@ -320,6 +324,7 @@ func (w *SecretRefWriter) WritePublisher(ctx context.Context, ocOrgID, clientID,
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:    orgUUID,
+		OCOrgName:  ocOrgID,
 		EntityName: "publisher",
 	}
 	secretRefName, err := w.client.CreateSecret(ctx, loc, map[string]string{
@@ -364,6 +369,7 @@ func (w *SecretRefWriter) DeletePublisher(ctx context.Context, ocOrgID string) e
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:    orgUUID,
+		OCOrgName:  ocOrgID,
 		EntityName: "publisher",
 	}
 	refName := derefPreferString(row.SecretRefName, row.SMAPISecretRefName)
@@ -391,6 +397,7 @@ func (w *SecretRefWriter) DeleteGitHubPAT(ctx context.Context, ocOrgID string) e
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:    orgUUID,
+		OCOrgName:  ocOrgID,
 		EntityName: "github-pat",
 		SecretKey:  secretmanagersvc.SecretKeyAPIKey,
 	}
