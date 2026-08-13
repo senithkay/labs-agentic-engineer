@@ -1,0 +1,212 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: aep-api
+    app.kubernetes.io/managed-by: {{ .Release.Service}}
+    app.kubernetes.io/part-of: aep
+spec:
+  replicas: {{ .Values.aepApi.replicas | default 1 }}
+  selector: 
+    matchLabels: 
+      app: aep-api
+  template:
+    metadata:
+      labels: 
+        app: aep-api
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      serviceAccountName: aep-api
+      securityContext:
+        # Shared workspaces PVC is handed to the pod's fsGroup so the
+        # non-root runtime user (uid 1000) can write it.
+        fsGroup: 1000
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z postgres.{{ .Release.Namespace }}.svc.cluster.local 5432; do sleep 2; done']
+      containers:
+        - name: aep-api
+          image: "{{ .Values.aepApi.image.repository }}:{{ .Values.aepApi.image.tag }}"
+          imagePullPolicy: {{ .Values.aepApi.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.aepApi.port }}
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources: {{ toYaml .Values.aepApi.resources | nindent 12 }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            - name: SERVER_PORT
+              value: {{ .Values.aepApi.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.aepApi.logLevel | quote }}
+            - name: DEPLOYMENT_TIER
+              value: {{ .Values.aepApi.deploymentTier | quote }}
+            - name: TEST_MODE
+              value: "false"
+            - name: LOCAL_OPENBAO_REPAIR
+              value: "false"
+            - name: AEP_WORKSPACE_ROOT
+              value: "/workspaces"
+            - name: AEP_WORKSPACE_REAP_INTERVAL
+              value: {{ .Values.workspaces.reapInterval | default "5m" | quote }}
+            - name: AEP_WORKSPACE_SNAPSHOT_MAX_AGE
+              value: {{ .Values.workspaces.snapshotMaxAge | default "1h" | quote }}
+            - name: AEP_WORKSPACE_TRASH_MAX_AGE
+              value: {{ .Values.workspaces.trashMaxAge | default "1h" | quote }}
+            - name: AEP_WORKSPACE_ORG_QUOTA_BYTES
+              value: {{ .Values.workspaces.orgQuotaBytes | default "2147483648" | quote }}
+            - name: AEP_WORKSPACE_DISK_HIGH_PCT
+              value: {{ .Values.workspaces.diskHighPct | default "85" | quote }}
+            - name: AEP_WORKSPACE_DISK_LOW_PCT
+              value: {{ .Values.workspaces.diskLowPct | default "70" | quote }}
+            # aep-* covers the AEP clients (aud = client id, all aep-*).
+            # openchoreo-rca-agent is added so the SRE/RCA agent's token (aud =
+            # its client id) is accepted for issue-create + report publish —
+            # matches setup.sh's BFF_AUDIENCE default.
+            - name: JWT_AUDIENCE
+              value: "aep-*,openchoreo-rca-agent"
+            - name: SERVICE_AUTH_CLIENT_ID
+              value: {{ .Values.aepApi.serviceAuth.clientId | quote }}
+            - name: SERVICE_AUTH_TOKEN_URL
+              value: "{{ .Values.thunder.adminURL }}/oauth2/token"
+            - name: SERVICE_AUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-thunder-secrets
+                  key: AEP_API_CLIENT_SECRET
+            - name: SERVICE_AUTH_HOST_HEADER
+              value: ""
+            - name: BFF_TASK_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aep-task-signing-key
+                  key: task-signing.pem
+            - name: BFF_TASK_TOKEN_ISSUER
+              value: {{ .Values.taskSigning.issuer | quote }}
+            - name: BFF_TASK_TOKEN_AUDIENCE
+              value: {{ .Values.taskSigning.audience | quote }}
+            - name: BFF_PUBLIC_URL
+              value: {{ .Values.aepApi.publicURL | quote }}
+            - name: OBSERVER_OAUTH_CLIENT_ID
+              value: {{ .Values.observer.clientId | quote }}
+            - name: OBSERVER_OAUTH_HOST_HEADER
+              value: ""
+            - name: PLATFORM_API_SERVICE_BASE_URL
+              valueFrom: 
+                configMapKeyRef:
+                  name: platform-configs
+                  key: PLATFORM_API_SERVICE_BASE_URL
+            - name: JWKS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: THUNDER_JWKS_URL
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: THUNDER_ISSUER
+
+            - name: THUNDER_ADMIN_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: THUNDER_ADMIN_URL
+            - name: THUNDER_SYSTEM_CLIENT_ID
+              value: "aep-system-client"
+            - name: AGENTS_SVC_BASE_URL
+              value: "http://aep-agents.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.aepAgents.port }}"
+            - name: AGENT_PLATFORM_URL
+              value: "http://aep-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.aepApi.port }}"
+            # The one runner image, used by both task kinds.
+            - name: AGENT_RUNNER_IMAGE
+              value: {{ .Values.codingAgentRunner.image | quote }}
+            # OpenBao-direct secrets delivery (local-only). Cloud injects a
+            # different SecretsProvider via the overlay; OPENBAO_* must be
+            # absent there.
+            {{- if .Values.codingAgentDispatch.openBaoDirect.enabled }}
+            - name: OPENBAO_ADDR
+              value: {{ .Values.openbao.addr | quote }}
+            - name: OPENBAO_TOKEN
+              value: {{ .Values.openbao.token | quote }}
+            {{- end }}
+            # GitHub webhook delivery URL registered on each repo. Local → smee.io
+            # channel (forwarded in-cluster by the smee-client); prod → the real
+            # public ingress URL. Unset → webhooks not registered (task state won't
+            # advance on PR events).
+            {{- if .Values.webhook.deliveryURL }}
+            - name: GITHUB_WEBHOOK_DELIVERY_URL
+              value: {{ .Values.webhook.deliveryURL | quote }}
+            {{- end }}
+
+            # secrets — all values sourced from ESO-synced K8s Secrets (written by aep init)
+            - name: AGENTS_SVC_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-agents-secrets
+                  key: AGENTS_JWT_SECRET
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-webhook-secrets
+                  key: GITHUB_WEBHOOK_SECRET
+            - name: THUNDER_SYSTEM_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-thunder-secrets
+                  key: THUNDER_SYSTEM_CLIENT_SECRET
+            - name: OAUTH_STATE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aep-oauth-secrets
+                  key: OAUTH_STATE_SIGNING_KEY
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@postgres.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.postgres.database }}?sslmode=disable"
+            {{- if .Values.temporal.enabled }}
+            # Temporal (devflow workflows). Points the in-process worker at the
+            # in-cluster temporal-frontend Service. Plain host:port — CoreDNS
+            # answers gRPC's SRV probe, so the compose `passthrough:///` scheme
+            # is not needed. Disabled (temporal.enabled=false) omits these so
+            # devflow is off: no worker starts and /devflows answers 503.
+            - name: TEMPORAL_HOSTPORT
+              value: {{ printf "temporal-frontend.%s.svc.cluster.local:7233" .Release.Namespace | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+            - name: TEMPORAL_TASKQUEUE
+              value: {{ .Values.temporal.taskQueue | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: aep-workspaces

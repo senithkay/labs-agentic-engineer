@@ -1,0 +1,12 @@
+# Build output
+aep
+aepclt
+dist/
+
+# Config
+.aep/
+
+# Go
+*.test
+*.out
+vendor/
