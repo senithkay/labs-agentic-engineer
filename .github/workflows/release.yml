@@ -223,7 +223,7 @@ jobs:
           go-version-file: go.work
 
       - name: Build aep
-        working-directory: tools/aepctl
+        working-directory: tools/aectl
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -236,7 +236,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aep-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: tools/aepctl/aep-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext || '' }}
+          path: tools/aectl/aep-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext || '' }}
 
   # ─── CTL: create GitHub release ──────────────────────────────────────────────
   create-ctl-release:

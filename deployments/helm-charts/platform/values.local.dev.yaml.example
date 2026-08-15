@@ -20,7 +20,7 @@
 #   cp values.local.dev.yaml.example values.local.dev.yaml   # git-ignored
 #   # edit, then: make dev-cluster
 #
-# This mirrors the aepctl config model (webhook.delivery_url / webhook.local_smee
+# This mirrors the aectl config model (webhook.delivery_url / webhook.local_smee
 # in ~/.aep/config.yaml): the developer supplies the delivery URL — nothing is
 # auto-created. Put any local-only chart overrides here (images, replicas, flags).
 

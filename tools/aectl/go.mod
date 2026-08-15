@@ -1,4 +1,4 @@
-module github.com/wso2/aep/aepctl
+module github.com/wso2/aep/aectl
 
 go 1.26.0
 

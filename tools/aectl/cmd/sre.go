@@ -36,7 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
-	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
+	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
 )
 
 // SRE (RCA) agent install. Brings the OpenChoreo Observability Plane + SRE/RCA
@@ -284,7 +284,7 @@ func applyTemplate(ctx context.Context, applier *k8s.Applier, fieldManager, ns, 
 	if err := t.Execute(&buf, p); err != nil {
 		return err
 	}
-	return applier.ApplyYAML(ctx, "aepctl-sre", ns, buf.String())
+	return applier.ApplyYAML(ctx, "aectl-sre", ns, buf.String())
 }
 
 // ensureClusterGatewayCA copies the cluster gateway CA cert from the
@@ -384,7 +384,7 @@ func patchConfigMap(ctx context.Context, client *kubernetes.Clientset, ns, name 
 }
 
 func rolloutRestart(ctx context.Context, client *kubernetes.Clientset, ns, name string) error {
-	patch := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"aepctl.wso2.com/restartedAt":%q}}}}}`,
+	patch := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"aectl.wso2.com/restartedAt":%q}}}}}`,
 		time.Now().UTC().Format(time.RFC3339))
 	_, err := client.AppsV1().Deployments(ns).Patch(ctx, name, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
 	return err
@@ -458,7 +458,7 @@ func writeTempValues(prefix, tmpl string, p sreParams) (string, func(), error) {
 	if err != nil {
 		return "", nil, err
 	}
-	f, err := os.CreateTemp("", "aepctl-"+prefix+"-*.yaml")
+	f, err := os.CreateTemp("", "aectl-"+prefix+"-*.yaml")
 	if err != nil {
 		return "", nil, err
 	}

@@ -1,4 +1,4 @@
-# AGENTS.md — tools/aepctl
+# AGENTS.md — tools/aectl
 
 AEP Control Plane CLI. Single binary (`aep`) that installs AEP, provisions OpenBao, and manages Thunder OAuth clients.
 

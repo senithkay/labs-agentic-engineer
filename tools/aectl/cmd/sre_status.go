@@ -26,7 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
+	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
 )
 
 var sreStatusObsNamespace string

@@ -28,8 +28,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/wso2/aep/aepctl/internal/config"
-	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/config"
+	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
 )
 
 var configCmd = &cobra.Command{
@@ -55,7 +55,7 @@ as empty (their zero value). thunder.admin_client_secret is intentionally
 ignored — it is managed by OpenBao/ESO and never stored in the ConfigMap.
 
 Start from the defaults template:
-  aep platform config import --config ~/aepctl-configs/defaults.yaml`,
+  aep platform config import --config ~/aectl-configs/defaults.yaml`,
 	RunE: runConfigImport,
 }
 
@@ -117,7 +117,7 @@ func runConfigImport(cmd *cobra.Command, args []string) error {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      config.ConfigMapName,
 				Namespace: aepNamespace,
-				Labels:    map[string]string{"app.kubernetes.io/managed-by": "aepctl"},
+				Labels:    map[string]string{"app.kubernetes.io/managed-by": "aectl"},
 			},
 			Data: data,
 		}, metav1.CreateOptions{})

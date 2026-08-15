@@ -22,8 +22,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/wso2/aep/aepctl/internal/config"
-	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/config"
+	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
 )
 
 var kubeconfig string

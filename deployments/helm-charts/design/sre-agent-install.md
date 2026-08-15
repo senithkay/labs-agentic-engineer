@@ -1,7 +1,7 @@
-# SRE (RCA) agent on the aepctl/Helm install path
+# SRE (RCA) agent on the aectl/Helm install path
 
 Final-state notes for how the OpenChoreo SRE/RCA agent is brought up on the
-Helm/`aepctl` install, at parity with the local docker-compose path
+Helm/`aectl` install, at parity with the local docker-compose path
 (`deployments/scripts/setup-observability.sh`).
 
 ## What runs where
@@ -50,7 +50,7 @@ The `aep-secret-reader` policy already covers the new `aep/opensearch-*` paths.
 
 ## In-cluster vs docker-compose
 
-| | docker-compose (setup.sh) | aepctl/Helm |
+| | docker-compose (setup.sh) | aectl/Helm |
 |---|---|---|
 | `AE_API_URL` | `http://host.k3d.internal:3401` | `http://aep-mcp-server.<ns>.svc.cluster.local:3400` |
 | `AEP_API_URL` | `http://host.k3d.internal:9090` | `http://aep-api.<ns>.svc.cluster.local:9090` |

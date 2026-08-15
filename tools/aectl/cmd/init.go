@@ -33,10 +33,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/wso2/aep/aepctl/internal/bootstrap"
-	"github.com/wso2/aep/aepctl/internal/config"
-	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
-	"github.com/wso2/aep/aepctl/internal/openbao"
+	"github.com/wso2/aep/aectl/internal/bootstrap"
+	"github.com/wso2/aep/aectl/internal/config"
+	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/openbao"
 )
 
 const (
