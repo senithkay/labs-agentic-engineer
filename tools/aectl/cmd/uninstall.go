@@ -42,10 +42,10 @@ var (
 
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
-	Short: "Remove what aep platform install deployed",
+	Short: "Remove what aectl platform install deployed",
 	Long: `Uninstalls the platform Helm chart and deletes its PersistentVolumeClaims.
 
-This command reverses exactly what aep platform install did:
+This command reverses exactly what aectl platform install did:
   - helm uninstall <platform-release>
   - deletes workspaces PVCs (Helm never removes these)
   - optionally deletes the aep-cli-config ConfigMap (--purge-config)
@@ -54,7 +54,7 @@ What it does NOT touch:
   - OpenBao secrets or ESO-synced Secrets
   - the wso2-aep namespace itself
 
-To also remove the SRE observability plane use aep sre uninstall (when available).`,
+To also remove the SRE observability plane use aectl sre uninstall (when available).`,
 	RunE: runUninstall,
 }
 

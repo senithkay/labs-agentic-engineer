@@ -36,10 +36,10 @@ var configTestCmd = &cobra.Command{
 correct type and format.
 
 Validate a local file before importing:
-  aep platform config test --config ~/aectl-configs/defaults.yaml
+  aectl platform config test --config ~/aectl-configs/defaults.yaml
 
 Validate what is currently in the cluster:
-  aep platform config test`,
+  aectl platform config test`,
 	RunE: runConfigTest,
 }
 

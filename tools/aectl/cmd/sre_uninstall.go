@@ -37,8 +37,8 @@ var (
 
 var sreUninstallCmd = &cobra.Command{
 	Use:   "uninstall",
-	Short: "Remove what aep sre install deployed",
-	Long: `Reverses exactly what aep sre install did:
+	Short: "Remove what aectl sre install deployed",
+	Long: `Reverses exactly what aectl sre install did:
 
   1. helm uninstall observability-logs-opensearch
   2. helm uninstall observability-plane
@@ -98,7 +98,7 @@ func runSreUninstall(cmd *cobra.Command, args []string) error {
 
 	// 2. Cluster-scoped CRs — these survive namespace deletion and must be
 	//    removed explicitly. They were created by the sreCRsTmpl apply in
-	//    aep sre install (step 6).
+	//    aectl sre install (step 6).
 	fmt.Println("Deleting cluster-scoped CRs...")
 	for _, cr := range []struct{ apiVersion, kind, name string }{
 		{"openchoreo.dev/v1alpha1", "ClusterObservabilityPlane", "default"},

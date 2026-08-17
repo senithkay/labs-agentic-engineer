@@ -46,7 +46,7 @@ var configImportCmd = &cobra.Command{
 config keys to the aep-cli-config ConfigMap in the wso2-aep namespace.
 Creates the namespace if it does not yet exist.
 
-This command must be run before 'aep platform install'. All config values
+This command must be run before 'aectl platform install'. All config values
 for the install must come from this ConfigMap — no hardcoded defaults are
 used at install time.
 
@@ -55,7 +55,7 @@ as empty (their zero value). thunder.admin_client_secret is intentionally
 ignored — it is managed by OpenBao/ESO and never stored in the ConfigMap.
 
 Start from the defaults template:
-  aep platform config import --config ~/aectl-configs/defaults.yaml`,
+  aectl platform config import --config ~/aectl-configs/defaults.yaml`,
 	RunE: runConfigImport,
 }
 
@@ -141,7 +141,7 @@ func runConfigImport(cmd *cobra.Command, args []string) error {
 	for _, k := range keys {
 		_, _ = fmt.Fprintf(os.Stdout, "  %s = %s\n", k, data[k])
 	}
-	_, _ = fmt.Fprintln(os.Stdout, "\nRun 'aep platform install' to apply.")
+	_, _ = fmt.Fprintln(os.Stdout, "\nRun 'aectl platform install' to apply.")
 	return nil
 }
 

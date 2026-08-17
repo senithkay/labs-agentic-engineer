@@ -180,7 +180,7 @@ jobs:
           helm install aep oci://ghcr.io/wso2/aep/charts/aep-bootstrap \\
             --version ${{ inputs.version }} -n wso2-aep --create-namespace
 
-          aep platform install \\
+          aectl platform install \\
             --platform-version ${{ inputs.version }}
           \`\`\`
 
@@ -195,7 +195,7 @@ jobs:
 
   # ─── CTL: build CLI binaries ─────────────────────────────────────────────────
   build-ctl-binaries:
-    name: Build aep binary (${{ matrix.goos }}/${{ matrix.goarch }})
+    name: Build aectl binary (${{ matrix.goos }}/${{ matrix.goarch }})
     if: ${{ inputs.component == 'ctl' || inputs.component == 'all' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -222,7 +222,7 @@ jobs:
         with:
           go-version-file: go.work
 
-      - name: Build aep
+      - name: Build aectl
         working-directory: tools/aectl
         env:
           GOOS: ${{ matrix.goos }}
@@ -230,13 +230,13 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           go build -trimpath -ldflags="-s -w -X main.version=${{ inputs.version }}" \
-            -o aep-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext || '' }} .
+            -o aectl-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext || '' }} .
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aep-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: tools/aectl/aep-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext || '' }}
+          name: aectl-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: tools/aectl/aectl-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext || '' }}
 
   # ─── CTL: create GitHub release ──────────────────────────────────────────────
   create-ctl-release:
@@ -253,7 +253,7 @@ jobs:
       - name: Download all binaries
         uses: actions/download-artifact@v4
         with:
-          pattern: aep-*
+          pattern: aectl-*
           path: dist
           merge-multiple: true
 
@@ -269,13 +269,13 @@ jobs:
 
           **Linux (amd64)**
           \`\`\`bash
-          curl -L https://github.com/${{ github.repository }}/releases/download/ctl%2Fv${{ inputs.version }}/aep-linux-amd64 \
-            -o /usr/local/bin/aep && chmod +x /usr/local/bin/aep
+          curl -L https://github.com/${{ github.repository }}/releases/download/ctl%2Fv${{ inputs.version }}/aectl-linux-amd64 \
+            -o /usr/local/bin/aectl && chmod +x /usr/local/bin/aectl
           \`\`\`
 
           **macOS (Apple Silicon)**
           \`\`\`bash
-          curl -L https://github.com/${{ github.repository }}/releases/download/ctl%2Fv${{ inputs.version }}/aep-darwin-arm64 \
-            -o /usr/local/bin/aep && chmod +x /usr/local/bin/aep
+          curl -L https://github.com/${{ github.repository }}/releases/download/ctl%2Fv${{ inputs.version }}/aectl-darwin-arm64 \
+            -o /usr/local/bin/aectl && chmod +x /usr/local/bin/aectl
           \`\`\`" \
-            dist/aep-*
+            dist/aectl-*

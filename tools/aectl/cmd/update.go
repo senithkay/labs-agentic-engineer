@@ -60,11 +60,11 @@ image, load it into the node runtime first, then set --pull-policy:
   k3d:  k3d image import myimage:mytag
   kind: kind load docker-image myimage:mytag
 
-  aep platform update --aep-api-image localhost/aep-api:hotfix --pull-policy Never
+  aectl platform update --aep-api-image localhost/aep-api:hotfix --pull-policy Never
 
 For arbitrary chart values not covered by a flag use --set (repeatable):
 
-  aep platform update --set aepApi.resources.limits.cpu=500m`,
+  aectl platform update --set aepApi.resources.limits.cpu=500m`,
 	RunE: runUpdate,
 }
 

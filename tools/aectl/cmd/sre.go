@@ -45,7 +45,7 @@ import (
 // install: secrets flow OpenBao->ESO (never plaintext), and the RCA->AEP handoff
 // targets in-cluster Service DNS instead of host.k3d.internal.
 //
-// Prerequisite: `aep init` must have run first (it registers the
+// Prerequisite: `aectl init` must have run first (it registers the
 // openchoreo-rca-agent Thunder client and seeds the OpenBao secrets this reads).
 
 var (
@@ -79,7 +79,7 @@ installs them if missing (idempotent), then applies the AEP integration:
 obs-namespace secrets (via OpenBao/ESO), the alert->RCA auto-trigger + AEP
 handoff wiring, the authz grants, and the observability CRs.
 
-Run 'aep init' first — it registers the openchoreo-rca-agent Thunder client and
+Run 'aectl init' first — it registers the openchoreo-rca-agent Thunder client and
 seeds the OpenBao secrets this command reads via External Secrets.`,
 	RunE: runSreInstall,
 }
@@ -186,12 +186,12 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("Applying obs-namespace SecretStore + ExternalSecrets (OpenBao->ESO)...")
 	if err := applyTemplate(ctx, applier, "sre-secrets", sreObsNamespace, sreSecretsTmpl, p); err != nil {
-		return fmt.Errorf("apply secrets: %w (did you run `aep init`?)", err)
+		return fmt.Errorf("apply secrets: %w (did you run `aectl init`?)", err)
 	}
 	// ESO must materialise the OpenSearch creds before the charts start.
 	for _, s := range []string{"opensearch-admin-credentials", "rca-agent-secret", "observer-secret"} {
 		if err := waitForSecret(ctx, client, sreObsNamespace, s, 2*time.Minute); err != nil {
-			return fmt.Errorf("%w\nESO did not sync %q — check the SecretStore/ExternalSecrets and that `aep init` seeded OpenBao", err, s)
+			return fmt.Errorf("%w\nESO did not sync %q — check the SecretStore/ExternalSecrets and that `aectl init` seeded OpenBao", err, s)
 		}
 	}
 	fmt.Println("✅ Secrets synced")

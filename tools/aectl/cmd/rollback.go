@@ -44,8 +44,8 @@ var rollbackCmd = &cobra.Command{
 Rolls back to the immediately preceding revision by default. Supply
 --revision to target a specific one (as shown by the history table).
 
-  aep platform rollback                  # roll back to previous
-  aep platform rollback --revision 3     # roll back to revision 3`,
+  aectl platform rollback                  # roll back to previous
+  aectl platform rollback --revision 3     # roll back to revision 3`,
 	RunE: runRollback,
 }
 

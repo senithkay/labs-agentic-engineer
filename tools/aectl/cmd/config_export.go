@@ -40,9 +40,9 @@ var configExportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export the in-cluster config to a local YAML file",
 	Long: `Reads the aep-cli-config ConfigMap from the cluster and writes it as a
-YAML file you can edit and re-apply with 'aep platform config import'.
+YAML file you can edit and re-apply with 'aectl platform config import'.
 
-  aep platform config export --output aep-config.yaml
+  aectl platform config export --output aep-config.yaml
 
 Use - as the output path to print to stdout instead of writing a file.`,
 	RunE: runConfigExport,
@@ -66,7 +66,7 @@ func runConfigExport(cmd *cobra.Command, args []string) error {
 	cm, err := client.CoreV1().ConfigMaps(aepNamespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("%s not found — run 'aep platform install' first", config.ConfigMapName)
+			return fmt.Errorf("%s not found — run 'aectl platform install' first", config.ConfigMapName)
 		}
 		return fmt.Errorf("read %s: %w", config.ConfigMapName, err)
 	}
