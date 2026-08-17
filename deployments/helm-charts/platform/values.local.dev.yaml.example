@@ -21,8 +21,9 @@
 #   # edit, then: make dev-cluster
 #
 # This mirrors the aectl config model (webhook.delivery_url / webhook.local_smee
-# in ~/.aep/config.yaml): the developer supplies the delivery URL — nothing is
-# auto-created. Put any local-only chart overrides here (images, replicas, flags).
+# imported into the aep-cli-config ConfigMap via 'aep platform config import'):
+# the developer supplies the delivery URL — nothing is auto-created. Put any
+# local-only chart overrides here (images, replicas, flags).
 
 # ── GitHub webhook delivery (component builds on PR merge) ───────────────────
 # Builds are triggered by a GitHub push/merge webhook hitting the BFF. GitHub

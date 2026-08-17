@@ -171,7 +171,7 @@ observer:
   clientId: "openchoreo-observer-resource-reader-client"
 
 platformAPI:
-  # In-cluster URL for the OpenChoreo platform API. aep init passes this from oc.api_url in ~/.aep/config.yaml.
+  # In-cluster URL for the OpenChoreo platform API. aep init passes this from oc.api_url in the aep-cli-config ConfigMap.
   baseURL: "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080"
 
 thunder:

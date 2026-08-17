@@ -185,7 +185,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		adminClientID := viper.GetString("thunder.admin_client_id")
 		adminClientSecret := viper.GetString("thunder.admin_client_secret")
 		if adminClientID == "" {
-			return fmt.Errorf("thunder.admin_client_id is not set — run 'aep platform config import' first or set it in ~/.aep/config.yaml")
+			return fmt.Errorf("thunder.admin_client_id is not set — run 'aep platform config import --config <file>' first")
 		}
 		if adminClientSecret == "" {
 			return fmt.Errorf("thunder.admin_client_secret is not set — set it via AEP_THUNDER_ADMIN_CLIENT_SECRET or re-run without --reuse-secrets")
