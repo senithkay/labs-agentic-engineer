@@ -49,8 +49,8 @@ func MultiSelect(title string, items []SelectItem) (selected []bool, confirmed b
 	// subsequent calls move the cursor back up and overwrite.
 	render := func(initial bool) {
 		if !initial {
-			// Move up past: blank(1) + items(N) + hint(1).
-			fmt.Printf("\033[%dA", len(items)+2)
+			// Move up past: blank(1) + items(N) + hint(1) + note(1).
+			fmt.Printf("\033[%dA", len(items)+3)
 		}
 		fmt.Print("\r\033[K\n") // blank separator line
 		for i, item := range items {
@@ -69,6 +69,8 @@ func MultiSelect(title string, items []SelectItem) (selected []bool, confirmed b
 		}
 		fmt.Printf("\r\033[K  %s\n",
 			colorize(ansiGray, "↑↓ navigate   space select   enter install   esc skip"))
+		fmt.Printf("\r\033[K  %s\n",
+			colorize(ansiGray, "· Custom resource types can also be applied later with kubectl apply"))
 	}
 
 	fmt.Printf("\n  %s\n", colorize(ansiGray, title))
@@ -138,6 +140,7 @@ func multiSelectFallback(title string, items []SelectItem, selected []bool) ([]b
 	for i, item := range items {
 		fmt.Printf("  [%d] %s — %s\n", i+1, item.Label, item.Description)
 	}
+	fmt.Printf("\n  %s\n", "· Custom resource types can also be applied later with kubectl apply")
 	fmt.Print("\n  Enter numbers to install (e.g. 1,2) or blank to skip: ")
 	var line string
 	fmt.Scanln(&line) //nolint:errcheck
