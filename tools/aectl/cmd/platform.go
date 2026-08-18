@@ -350,7 +350,22 @@ func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 				return fmt.Errorf("apply addon %s: %w", a.ID, err)
 			}
 		}
+		// Verify each key resource actually exists in the cluster.
+		for _, v := range a.VerifyResources {
+			ok, err := applier.Exists(ctx, v.APIVersion, v.Kind, v.Namespace, v.Name)
+			if err != nil {
+				sp.Fail(fmt.Sprintf("Verification failed for %s/%s", v.Kind, v.Name))
+				return fmt.Errorf("verify addon %s: %w", a.ID, err)
+			}
+			if !ok {
+				sp.Fail(fmt.Sprintf("%s/%s not found after apply", v.Kind, v.Name))
+				return fmt.Errorf("addon %s: %s/%s was not created", a.ID, v.Kind, v.Name)
+			}
+		}
 		sp.Success(fmt.Sprintf("%s applied", a.Label))
+		for _, v := range a.VerifyResources {
+			ui.Detail(fmt.Sprintf("%s/%s", v.Kind, v.Name))
+		}
 	}
 
 	if any {

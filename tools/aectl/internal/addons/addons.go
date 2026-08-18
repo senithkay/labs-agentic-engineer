@@ -28,6 +28,17 @@ type Addon struct {
 	// Manifests is a list of YAML strings applied in order via server-side apply.
 	// Each string may contain multiple documents separated by ---.
 	Manifests []string
+	// VerifyResources lists key objects that must exist after apply to confirm
+	// the addon was actually accepted by the cluster.
+	VerifyResources []VerifySpec
+}
+
+// VerifySpec identifies a single cluster object to GET after apply.
+type VerifySpec struct {
+	APIVersion string
+	Kind       string
+	Namespace  string // empty for cluster-scoped
+	Name       string
 }
 
 // Available is the ordered list of optional addons shown to the operator after
@@ -38,7 +49,12 @@ var Available = []Addon{
 		ID:          "postgres-cnpg",
 		Label:       "postgres-cnpg",
 		Description: "PostgreSQL via CloudNativePG (ClusterResourceType + RBAC)",
-		Manifests:   []string{postgresCNPGResourceType, postgresCNPGRBAC},
+		Manifests: []string{postgresCNPGResourceType, postgresCNPGRBAC},
+		VerifyResources: []VerifySpec{
+			{APIVersion: "openchoreo.dev/v1alpha1", Kind: "ClusterResourceType", Name: "postgres-cnpg"},
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "openchoreo-dataplane-cnpg"},
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRoleBinding", Name: "openchoreo-dataplane-cnpg"},
+		},
 	},
 }
 

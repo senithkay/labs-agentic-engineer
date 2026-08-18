@@ -127,6 +127,34 @@ func (a *Applier) apply(ctx context.Context, fieldManager, defaultNamespace stri
 	return nil
 }
 
+// Exists returns true if an object identified by apiVersion/kind/namespace/name
+// is present in the cluster, false if it is not found, and an error for any
+// other failure (e.g. the CRD itself is not installed).
+func (a *Applier) Exists(ctx context.Context, apiVersion, kind, namespace, name string) (bool, error) {
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return false, fmt.Errorf("parse apiVersion %q: %w", apiVersion, err)
+	}
+	gvk := gv.WithKind(kind)
+	mapping, err := a.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		return false, fmt.Errorf("resolve %s: %w", gvk.String(), err)
+	}
+	var ri dynamic.ResourceInterface
+	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+		ri = a.dyn.Resource(mapping.Resource).Namespace(namespace)
+	} else {
+		ri = a.dyn.Resource(mapping.Resource)
+	}
+	if _, err := ri.Get(ctx, name, metav1.GetOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get %s/%s: %w", kind, name, err)
+	}
+	return true, nil
+}
+
 // Delete removes a single object identified by apiVersion/kind/namespace/name,
 // resolving the GVK through discovery. A missing object is not an error (delete
 // is idempotent). namespace is ignored for cluster-scoped kinds.

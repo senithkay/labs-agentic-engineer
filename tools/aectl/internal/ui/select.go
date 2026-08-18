@@ -17,6 +17,7 @@
 package ui
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -43,12 +44,12 @@ func MultiSelect(title string, items []SelectItem) (selected []bool, confirmed b
 
 	cursor := 0
 
-	// render redraws all item rows + the hint footer.
-	// On the first call (initial=true) the cursor is already after the title line;
-	// on subsequent calls we move the cursor back up to overwrite.
+	// render redraws all item rows and the hint footer.
+	// On the first call (initial=true) the cursor is already below the title line;
+	// subsequent calls move the cursor back up and overwrite.
 	render := func(initial bool) {
 		if !initial {
-			// Move up past: blank(1) + items(N) + hint(1) = N+2 lines.
+			// Move up past: blank(1) + items(N) + hint(1).
 			fmt.Printf("\033[%dA", len(items)+2)
 		}
 		fmt.Print("\r\033[K\n") // blank separator line
@@ -77,43 +78,57 @@ func MultiSelect(title string, items []SelectItem) (selected []bool, confirmed b
 	if err != nil {
 		return multiSelectFallback(title, items, selected)
 	}
-
 	restore := func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }
 
-	buf := make([]byte, 16)
+	// bufio buffers the full OS read, so r.Buffered() tells us whether the
+	// ESC byte arrived alone (bare Esc key) or with companions (escape sequence
+	// like \033[A for arrow-up). This is the reliable way to distinguish them
+	// without needing a timeout.
+	r := bufio.NewReaderSize(os.Stdin, 32)
+
 	for {
-		n, err := os.Stdin.Read(buf)
-		if err != nil || n == 0 {
+		b, err := r.ReadByte()
+		if err != nil {
 			restore()
 			fmt.Println()
 			return selected, true
 		}
-		b := buf[:n]
 
-		switch {
-		case n == 1 && b[0] == 27: // bare Esc
-			restore()
-			fmt.Println()
-			return selected, false
-		case n == 1 && (b[0] == 13 || b[0] == 10): // Enter / Return
+		switch b {
+		case 27: // ESC or start of escape sequence (e.g. arrow keys)
+			if r.Buffered() == 0 {
+				// No bytes arrived with the ESC → standalone Esc key → skip.
+				restore()
+				fmt.Println()
+				return selected, false
+			}
+			next, _ := r.ReadByte()
+			if next != '[' {
+				break // unexpected sequence; ignore
+			}
+			seq, _ := r.ReadByte()
+			switch seq {
+			case 'A': // ↑
+				if cursor > 0 {
+					cursor--
+				}
+			case 'B': // ↓
+				if cursor < len(items)-1 {
+					cursor++
+				}
+			}
+		case ' ':
+			selected[cursor] = !selected[cursor]
+		case 13, 10: // Enter / Return
 			restore()
 			fmt.Println()
 			return selected, true
-		case n == 1 && b[0] == 3: // Ctrl+C
+		case 3: // Ctrl+C
 			restore()
 			fmt.Println()
 			os.Exit(1)
-		case n == 1 && b[0] == ' ':
-			selected[cursor] = !selected[cursor]
-		case n >= 3 && b[0] == 27 && b[1] == '[' && b[2] == 'A': // ↑
-			if cursor > 0 {
-				cursor--
-			}
-		case n >= 3 && b[0] == 27 && b[1] == '[' && b[2] == 'B': // ↓
-			if cursor < len(items)-1 {
-				cursor++
-			}
 		}
+
 		render(false)
 	}
 }
