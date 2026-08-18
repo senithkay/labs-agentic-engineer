@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/wso2/aep/aectl/internal/config"
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 var kubeconfig string
@@ -31,7 +32,11 @@ var kubeconfig string
 var rootCmd = &cobra.Command{
 	Use:   "aectl",
 	Short: "AEP CLI — deployment and operations tooling for the AEP platform",
-	Long:  `aep manages the lifecycle of an AEP platform installation on a Kubernetes cluster.`,
+	Long:  `aectl manages the lifecycle of an AEP platform installation on a Kubernetes cluster.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ui.Banner()
+		return cmd.Help()
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		client, err := k8s.NewClient(kubeconfig)
@@ -44,7 +49,7 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 		if n > 0 && cmd.CommandPath() == "aectl platform install" {
-			_, _ = fmt.Fprintf(os.Stderr, "note: applying %d pre-seeded config key(s) from %s — run 'aectl platform config export' to review\n", n, config.ConfigMapName)
+			ui.Warn(fmt.Sprintf("applying %d pre-seeded config key(s) from %s — run 'aectl platform config export' to review", n, config.ConfigMapName))
 		}
 		return config.LoadThunderSecretFromCluster(ctx, client, aepNamespace)
 	},

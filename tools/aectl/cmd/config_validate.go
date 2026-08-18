@@ -19,12 +19,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/wso2/aep/aectl/internal/config"
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 var configTestFile string
@@ -67,13 +67,13 @@ func runConfigTest(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(errs) > 0 {
-		_, _ = fmt.Fprintln(os.Stderr, "Config validation failed:")
+		ui.Fail("Config validation failed:")
 		for _, e := range errs {
-			_, _ = fmt.Fprintf(os.Stderr, "  %s\n", e)
+			ui.Detail(e)
 		}
 		return fmt.Errorf("config is invalid — fix the errors above")
 	}
 
-	_, _ = fmt.Fprintln(os.Stdout, "Config is valid.")
+	ui.Success("Config is valid")
 	return nil
 }

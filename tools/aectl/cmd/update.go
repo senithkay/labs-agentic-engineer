@@ -20,11 +20,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 var (
@@ -157,16 +157,15 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		helmArgs = append(helmArgs, "--set", s)
 	}
 
+	ui.Step(fmt.Sprintf("Upgrading platform chart %q", updatePlatformRelease))
 	var out bytes.Buffer
 	c := exec.CommandContext(ctx, "helm", helmArgs...)
 	c.Stdout = &out
 	c.Stderr = &out
-	fmt.Printf("Running helm upgrade %s...\n", updatePlatformRelease)
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("helm upgrade: %w\n%s", err, out.String())
 	}
-	_, _ = fmt.Fprintln(os.Stdout, out.String())
-	_, _ = fmt.Fprintln(os.Stdout, "Platform updated.")
+	ui.Success("Platform updated")
 	return nil
 }
 

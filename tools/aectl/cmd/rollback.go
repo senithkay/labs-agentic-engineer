@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 var (
@@ -65,7 +66,7 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show history so the operator can see what they are rolling back to.
-	fmt.Printf("Release history for %s:\n\n", rollbackPlatformRelease)
+	fmt.Printf("\n%s\n\n", ui.Bold(fmt.Sprintf("Release history for %s", rollbackPlatformRelease)))
 	histOut, _ := exec.CommandContext(ctx, "helm", "history",
 		rollbackPlatformRelease, "-n", rollbackNamespace,
 		"--max", "10", "--output", "table").CombinedOutput()
@@ -77,15 +78,16 @@ func runRollback(cmd *cobra.Command, args []string) error {
 		if rollbackRevision > 0 {
 			target = fmt.Sprintf("revision %d", rollbackRevision)
 		}
-		fmt.Printf("Roll back %q to %s? Type \"yes\" to confirm: ", rollbackPlatformRelease, target)
+		fmt.Printf("  Roll back %q to %s? Type \"yes\" to confirm: ", rollbackPlatformRelease, target)
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Scan()
 		if strings.TrimSpace(scanner.Text()) != "yes" {
-			fmt.Println("Aborted.")
+			ui.Print("Aborted.")
 			return nil
 		}
 	}
 
+	ui.Step(fmt.Sprintf("Rolling back %q", rollbackPlatformRelease))
 	helmArgs := []string{"rollback", rollbackPlatformRelease, "-n", rollbackNamespace}
 	if rollbackRevision > 0 {
 		helmArgs = append(helmArgs, strconv.Itoa(rollbackRevision))
@@ -98,7 +100,6 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("helm rollback: %w\n%s", err, out.String())
 	}
-	_, _ = fmt.Fprintln(os.Stdout, strings.TrimSpace(out.String()))
-	_, _ = fmt.Fprintln(os.Stdout, "Rollback complete.")
+	ui.Success("Rollback complete")
 	return nil
 }

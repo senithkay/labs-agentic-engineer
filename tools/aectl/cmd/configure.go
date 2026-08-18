@@ -19,7 +19,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/spf13/cobra"
@@ -30,6 +29,7 @@ import (
 
 	"github.com/wso2/aep/aectl/internal/config"
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 var configCmd = &cobra.Command{
@@ -71,9 +71,9 @@ func runConfigImport(cmd *cobra.Command, args []string) error {
 
 	// Validate the file before touching the cluster. Fail fast on errors.
 	if errs := config.ValidateFile(configImportFile); len(errs) > 0 {
-		_, _ = fmt.Fprintln(os.Stderr, "Config file validation failed:")
+		ui.Fail("Config file validation failed:")
 		for _, e := range errs {
-			_, _ = fmt.Fprintf(os.Stderr, "  %s\n", e)
+			ui.Detail(e)
 		}
 		return fmt.Errorf("fix the errors above and re-run import")
 	}
@@ -86,7 +86,7 @@ func runConfigImport(cmd *cobra.Command, args []string) error {
 	}
 
 	if fv.IsSet("thunder.admin_client_secret") {
-		_, _ = fmt.Fprintln(os.Stderr, "warning: thunder.admin_client_secret is managed by OpenBao/ESO — ignoring")
+		ui.Warn("thunder.admin_client_secret is managed by OpenBao/ESO — ignoring")
 	}
 
 	// Write ALL recognised keys. Keys absent from the file are stored as empty
@@ -137,11 +137,14 @@ func runConfigImport(cmd *cobra.Command, args []string) error {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	_, _ = fmt.Fprintf(os.Stdout, "Wrote %d key(s) to %s/%s:\n", len(keys), aepNamespace, config.ConfigMapName)
+	ui.Success(fmt.Sprintf("Wrote %d key(s) to %s/%s", len(keys), aepNamespace, config.ConfigMapName))
+	t := ui.NewTable("KEY", "VALUE")
 	for _, k := range keys {
-		_, _ = fmt.Fprintf(os.Stdout, "  %s = %s\n", k, data[k])
+		t.AddRow(k, data[k])
 	}
-	_, _ = fmt.Fprintln(os.Stdout, "\nRun 'aectl platform install' to apply.")
+	t.Print()
+	fmt.Println()
+	ui.Detail("Run 'aectl platform install' to apply.")
 	return nil
 }
 

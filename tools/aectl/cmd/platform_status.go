@@ -20,9 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"text/tabwriter"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -32,6 +31,7 @@ import (
 
 	"github.com/wso2/aep/aectl/internal/config"
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 var (
@@ -68,28 +68,26 @@ func runPlatformStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("connect to cluster: %w", err)
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-
-	// ── Helm release ─────────────────────────────────────────────────────────
-	fmt.Println("Helm release")
+	// Helm release section
+	ui.Section("Helm Release")
 	releases, err := listHelmReleases(ctx, platformStatusNamespace, platformStatusRelease)
 	if err != nil {
-		fmt.Printf("  (could not query helm: %v)\n", err)
+		ui.Warn(fmt.Sprintf("could not query helm: %v", err))
 	} else if len(releases) == 0 {
-		fmt.Printf("  %s: not installed\n", platformStatusRelease)
+		ui.Detail(platformStatusRelease + ": not installed")
 	} else {
-		_, _ = fmt.Fprintf(w, "  NAME\tSTATUS\tCHART\tUPDATED\n")
+		t := ui.NewTable("NAME", "STATUS", "CHART", "UPDATED")
 		for _, r := range releases {
-			_, _ = fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", r.Name, r.Status, r.Chart, r.Updated)
+			t.AddRow(r.Name, colorHelmStatus(r.Status), r.Chart, r.Updated)
 		}
-		_ = w.Flush()
+		t.Print()
 	}
-	fmt.Println()
 
-	// ── Pods ─────────────────────────────────────────────────────────────────
+	// Pods section
 	pods, err := client.CoreV1().Pods(platformStatusNamespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		fmt.Printf("Pods (%s): (error: %v)\n\n", platformStatusNamespace, err)
+		ui.Section(fmt.Sprintf("Pods (%s)", platformStatusNamespace))
+		ui.Warn(fmt.Sprintf("error listing pods: %v", err))
 	} else {
 		readyPods, total := 0, len(pods.Items)
 		for _, p := range pods.Items {
@@ -97,32 +95,54 @@ func runPlatformStatus(cmd *cobra.Command, args []string) error {
 				readyPods++
 			}
 		}
-		fmt.Printf("Pods (%s)   %d/%d ready\n", platformStatusNamespace, readyPods, total)
+		readyStr := fmt.Sprintf("%d/%d ready", readyPods, total)
+		if readyPods == total && total > 0 {
+			readyStr = ui.Green(readyStr)
+		} else if readyPods < total {
+			readyStr = ui.Yellow(readyStr)
+		}
+		ui.Section(fmt.Sprintf("Pods (%s)  %s", platformStatusNamespace, readyStr))
 		if total > 0 {
-			_, _ = fmt.Fprintf(w, "  NAME\tREADY\tSTATUS\tRESTARTS\tAGE\n")
+			t := ui.NewTable("NAME", "READY", "STATUS", "RESTARTS", "AGE")
 			for _, p := range pods.Items {
 				rc, tc := statusReadyContainers(p.Status.ContainerStatuses)
-				_, _ = fmt.Fprintf(w, "  %s\t%d/%d\t%s\t%d\t%s\n",
-					p.Name, rc, tc, string(p.Status.Phase),
-					statusSumRestarts(p.Status.ContainerStatuses),
-					statusFmtAge(p.CreationTimestamp.Time))
+				restarts := statusSumRestarts(p.Status.ContainerStatuses)
+				readyCells := fmt.Sprintf("%d/%d", rc, tc)
+				if rc < tc {
+					readyCells = ui.Yellow(readyCells)
+				}
+				restartStr := strconv.Itoa(int(restarts))
+				if restarts > 5 {
+					restartStr = ui.Red(restartStr)
+				} else if restarts > 0 {
+					restartStr = ui.Yellow(restartStr)
+				} else {
+					restartStr = ui.Gray(restartStr)
+				}
+				t.AddRow(
+					p.Name,
+					readyCells,
+					colorPodPhase(string(p.Status.Phase)),
+					restartStr,
+					statusFmtAge(p.CreationTimestamp.Time),
+				)
 			}
-			_ = w.Flush()
+			t.Print()
 		}
 	}
-	fmt.Println()
 
-	// ── Config ───────────────────────────────────────────────────────────────
-	fmt.Println("Config")
+	// Config section
+	ui.Section("Config")
 	_, err = client.CoreV1().ConfigMaps(platformStatusNamespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})
 	switch {
 	case err == nil:
-		fmt.Printf("  %s: present\n", config.ConfigMapName)
+		fmt.Printf("  %-36s %s\n", config.ConfigMapName, ui.Green("present"))
 	case apierrors.IsNotFound(err):
-		fmt.Printf("  %s: missing\n", config.ConfigMapName)
+		fmt.Printf("  %-36s %s\n", config.ConfigMapName, ui.Yellow("missing"))
 	default:
-		fmt.Printf("  %s: (error: %v)\n", config.ConfigMapName, err)
+		fmt.Printf("  %-36s %s\n", config.ConfigMapName, ui.Red(fmt.Sprintf("error: %v", err)))
 	}
+	fmt.Println()
 
 	return nil
 }
@@ -142,6 +162,32 @@ func listHelmReleases(ctx context.Context, namespace, filter string) ([]helmRele
 		return nil, err
 	}
 	return releases, nil
+}
+
+func colorHelmStatus(s string) string {
+	switch s {
+	case "deployed":
+		return ui.Green(s)
+	case "failed":
+		return ui.Red(s)
+	case "pending-install", "pending-upgrade", "pending-rollback":
+		return ui.Yellow(s)
+	default:
+		return s
+	}
+}
+
+func colorPodPhase(phase string) string {
+	switch phase {
+	case "Running", "Succeeded":
+		return ui.Green(phase)
+	case "Pending":
+		return ui.Yellow(phase)
+	case "Failed":
+		return ui.Red(phase)
+	default:
+		return phase
+	}
 }
 
 func statusPodReady(p corev1.Pod) bool {

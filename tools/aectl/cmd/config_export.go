@@ -23,12 +23,13 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"gopkg.in/yaml.v3"
 
 	"github.com/wso2/aep/aectl/internal/config"
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 var (
@@ -92,11 +93,11 @@ func runConfigExport(cmd *cobra.Command, args []string) error {
 
 	// Warn and prompt before overwriting an existing file.
 	if _, statErr := os.Stat(configExportOutput); statErr == nil && !configExportOverride {
-		_, _ = fmt.Fprintf(os.Stderr, "warning: %s already exists\n", configExportOutput)
-		fmt.Printf("Overwrite %s? Type \"yes\" to confirm: ", configExportOutput)
+		ui.Warn(fmt.Sprintf("%s already exists", configExportOutput))
+		fmt.Printf("  Overwrite %s? Type \"yes\" to confirm: ", configExportOutput)
 		var answer string
 		if _, err := fmt.Scanln(&answer); err != nil || strings.TrimSpace(answer) != "yes" {
-			fmt.Println("Aborted.")
+			ui.Print("Aborted.")
 			return nil
 		}
 	}
@@ -104,7 +105,7 @@ func runConfigExport(cmd *cobra.Command, args []string) error {
 	if err := os.WriteFile(configExportOutput, out, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", configExportOutput, err)
 	}
-	_, _ = fmt.Fprintf(os.Stdout, "Config exported to %s\n", configExportOutput)
+	ui.Success(fmt.Sprintf("Config exported to %s", configExportOutput))
 	return nil
 }
 

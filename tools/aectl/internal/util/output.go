@@ -14,22 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
+// Package util provides CLI output helpers.
+// Prefer the ui package for styled, user-facing output.
 package util
 
 import (
-	"fmt"
-	"os"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
-func Info(msg string) {
-	_, _ = fmt.Fprintln(os.Stdout, msg)
-}
-
-func Error(msg string) {
-	fmt.Fprintln(os.Stderr, "error:", msg)
-}
-
-func Fatal(msg string) {
-	Error(msg)
-	os.Exit(1)
-}
+func Info(msg string)  { ui.Print(msg) }
+func Error(msg string) { ui.Fail(msg) }
+func Fatal(msg string) { ui.Fatal(msg) }

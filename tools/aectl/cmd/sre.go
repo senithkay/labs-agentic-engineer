@@ -37,6 +37,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 // SRE (RCA) agent install. Brings the OpenChoreo Observability Plane + SRE/RCA
@@ -168,10 +169,10 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 	// 1. Detect + warn.
 	if _, err := client.AppsV1().Deployments(sreObsNamespace).Get(ctx, "observer", metav1.GetOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
-			fmt.Printf("⚠️  Observability plane not found in namespace %q — installing it now.\n", sreObsNamespace)
+			ui.Warn(fmt.Sprintf("Observability plane not found in namespace %q — installing it now.", sreObsNamespace))
 		}
 	} else {
-		fmt.Printf("Observability plane detected in %q — reconciling (idempotent upgrade).\n", sreObsNamespace)
+		ui.Detail(fmt.Sprintf("Observability plane detected in %q — reconciling (idempotent upgrade).", sreObsNamespace))
 	}
 
 	// 2. Namespace + cluster-gateway-ca + secrets via OpenBao->ESO.
@@ -184,7 +185,7 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 	if err := ensureClusterGatewayCA(ctx, client, sreObsNamespace); err != nil {
 		return fmt.Errorf("cluster-gateway-ca: %w", err)
 	}
-	fmt.Println("Applying obs-namespace SecretStore + ExternalSecrets (OpenBao->ESO)...")
+	ui.Step("Applying obs-namespace SecretStore + ExternalSecrets (OpenBao->ESO)")
 	if err := applyTemplate(ctx, applier, "sre-secrets", sreObsNamespace, sreSecretsTmpl, p); err != nil {
 		return fmt.Errorf("apply secrets: %w (did you run `aectl init`?)", err)
 	}
@@ -194,7 +195,7 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("%w\nESO did not sync %q — check the SecretStore/ExternalSecrets and that `aectl init` seeded OpenBao", err, s)
 		}
 	}
-	fmt.Println("✅ Secrets synced")
+	ui.Success("Secrets synced")
 
 	// 3. Helm install the two OpenChoreo charts.
 	if err := helmInstallObsPlane(ctx, p); err != nil {
@@ -212,7 +213,7 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 
 	// 5. Alert->RCA auto-trigger + AEP handoff wiring (post-helm ConfigMap
 	// patches; the charts don't expose all these keys). In-cluster URLs.
-	fmt.Println("Wiring alert->RCA auto-trigger + AEP handoff...")
+	ui.Step("Wiring alert->RCA auto-trigger + AEP handoff")
 	if err := patchConfigMap(ctx, client, sreObsNamespace, "observer-config", map[string]string{
 		"LOGS_ADAPTER_ENABLED":     "true",
 		"RCA_SERVICE_URL":          p.RcaServiceURL,
@@ -232,22 +233,22 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		_ = rolloutRestart(ctx, client, sreObsNamespace, "ai-rca-agent")
-		fmt.Printf("   AE handoff: enabled (auto-dispatch=%t, mcp=%s)\n", sreAEAutoDispatch, p.AEApiURL)
+		ui.Detail(fmt.Sprintf("AE handoff: enabled (auto-dispatch=%t, mcp=%s)", sreAEAutoDispatch, p.AEApiURL))
 	} else {
-		fmt.Println("   AE handoff: disabled (--ae-handoff=false)")
+		ui.Detail("AE handoff: disabled (--ae-handoff=false)")
 	}
 
 	// 6. Authz grants + routes + ClusterObservabilityPlane CR.
-	fmt.Println("Applying authz grants, HTTPRoute, and ClusterObservabilityPlane...")
+	ui.Step("Applying authz grants, HTTPRoute, and ClusterObservabilityPlane")
 	if err := applyTemplate(ctx, applier, "sre-crs", sreObsNamespace, sreCRsTmpl, p); err != nil {
 		return fmt.Errorf("apply CRs: %w", err)
 	}
 
 	// 7. OpenSearch index-template bootstrap (detect + self-heal).
-	fmt.Println("Running OpenSearch index-template bootstrap job...")
+	ui.Step("Running OpenSearch index-template bootstrap job")
 	if err := k8s.RunJob(ctx, client, openSearchBootstrapJob(sreObsNamespace), os.Stdout); err != nil {
-		fmt.Printf("⚠️  index-template bootstrap job did not complete cleanly: %v\n", err)
-		fmt.Println("    Log-based alerts may misbehave until the container-logs template maps log as 'wildcard'.")
+		ui.Warn(fmt.Sprintf("index-template bootstrap job did not complete cleanly: %v", err))
+		ui.Detail("Log-based alerts may misbehave until the container-logs template maps log as 'wildcard'.")
 	}
 
 	printSreCompletion(p)
@@ -255,15 +256,17 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 }
 
 func printSreCompletion(p sreParams) {
-	fmt.Println("\n✅ SRE agent + observability plane installed.")
-	fmt.Println("\nSecurity note:")
-	fmt.Printf("  - Auto-dispatch is %s. A fired alert can drive automated code changes;\n", onOff(p.AEAutoDispatch && p.AEHandoff))
-	fmt.Println("    RCA feeds pod logs to an LLM (prompt-injection surface). Set")
-	fmt.Println("    --ae-auto-dispatch=false for issue-only (human dispatches).")
-	fmt.Println("  - RCA/logs-adapter images are non-WSO2 registries (pin/mirror for prod).")
-	fmt.Println("\nNext (not automatable): create an ObservabilityAlertRule per component you")
-	fmt.Println("want auto-RCA on (component UID + name labels, incident.enabled, triggerAiRca: true).")
-	fmt.Println("Guide: docs/developer-guide/sre-handoff-runbook.md")
+	ui.Success("SRE agent + observability plane installed")
+	ui.Section("Security Note")
+	ui.Detail(fmt.Sprintf("Auto-dispatch is %s. A fired alert can drive automated code changes;", onOff(p.AEAutoDispatch && p.AEHandoff)))
+	ui.Detail("RCA feeds pod logs to an LLM (prompt-injection surface). Set")
+	ui.Detail("--ae-auto-dispatch=false for issue-only (human dispatches).")
+	ui.Detail("RCA/logs-adapter images are non-WSO2 registries (pin/mirror for prod).")
+	ui.Section("Next Steps")
+	ui.Detail("Create an ObservabilityAlertRule per component you want auto-RCA on")
+	ui.Detail("(component UID + name labels, incident.enabled, triggerAiRca: true).")
+	ui.Detail("Guide: docs/developer-guide/sre-handoff-runbook.md")
+	fmt.Println()
 }
 
 func onOff(b bool) string {
@@ -349,16 +352,18 @@ func waitForSecret(ctx context.Context, client *kubernetes.Clientset, ns, name s
 // waitForDeployment is best-effort: it warns on timeout rather than failing,
 // since upstream chart resource names can drift across versions.
 func waitForDeployment(ctx context.Context, client *kubernetes.Clientset, ns, name string, timeout time.Duration) {
-	fmt.Printf("⏳ waiting for deployment/%s...\n", name)
+	sp := ui.NewSpinner(fmt.Sprintf("Waiting for deployment/%s", name))
+	sp.Start()
 	deadline := time.Now().Add(timeout)
 	for {
 		d, err := client.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
 		if err == nil && d.Status.AvailableReplicas >= 1 {
-			fmt.Printf("✅ %s available\n", name)
+			sp.Success(fmt.Sprintf("%s available", name))
 			return
 		}
 		if time.Now().After(deadline) {
-			fmt.Printf("⚠️  %s not Available within %s — continuing (check it manually)\n", name, timeout)
+			sp.Stop()
+			ui.Warn(fmt.Sprintf("%s not Available within %s — continuing (check it manually)", name, timeout))
 			return
 		}
 		time.Sleep(5 * time.Second)
@@ -442,7 +447,7 @@ func helmInstallObsLogs(ctx context.Context, p sreParams) error {
 }
 
 func runHelm(ctx context.Context, label string, args ...string) error {
-	fmt.Printf("Installing %s chart (helm upgrade --install)...\n", label)
+	ui.Step(fmt.Sprintf("Installing %s chart", label))
 	var out bytes.Buffer
 	c := exec.CommandContext(ctx, "helm", args...)
 	c.Stdout = &out
@@ -450,6 +455,7 @@ func runHelm(ctx context.Context, label string, args ...string) error {
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("helm %s: %w\n%s", label, err, out.String())
 	}
+	ui.Success(fmt.Sprintf("%s chart installed", label))
 	return nil
 }
 

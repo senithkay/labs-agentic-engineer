@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 var (
@@ -61,13 +62,13 @@ func init() {
 
 func runSreUninstall(cmd *cobra.Command, args []string) error {
 	if !sreUninstallYes {
-		fmt.Printf("This will permanently remove the SRE observability plane from namespace %q.\n", sreUninstallObsNamespace)
-		fmt.Printf("The AEP platform, OpenBao, and ESO will NOT be affected.\n")
-		fmt.Print("Type \"yes\" to confirm: ")
+		ui.Warn(fmt.Sprintf("This will permanently remove the SRE observability plane from namespace %q.", sreUninstallObsNamespace))
+		ui.Detail("The AEP platform, OpenBao, and ESO will NOT be affected.")
+		fmt.Print("  Type \"yes\" to confirm: ")
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Scan()
 		if strings.TrimSpace(scanner.Text()) != "yes" {
-			fmt.Println("Aborted.")
+			ui.Print("Aborted.")
 			return nil
 		}
 	}
@@ -82,24 +83,21 @@ func runSreUninstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("build applier: %w", err)
 	}
 
-	warn := func(msg string) { fmt.Printf("  warning: %s\n", msg) }
-	step := func(msg string) { fmt.Printf("  %s\n", msg) }
-
 	// 1. Helm uninstall — logs-opensearch first (depends on opensearch).
 	for _, release := range []string{"observability-logs-opensearch", "observability-plane"} {
-		fmt.Printf("helm uninstall %s -n %s...\n", release, sreUninstallObsNamespace)
+		ui.Step(fmt.Sprintf("helm uninstall %s -n %s", release, sreUninstallObsNamespace))
 		out, err := exec.CommandContext(ctx, "helm", "uninstall", release, "-n", sreUninstallObsNamespace).CombinedOutput()
 		if err != nil {
-			warn(fmt.Sprintf("helm uninstall %s: %v — %s", release, err, strings.TrimSpace(string(out))))
+			ui.Warn(fmt.Sprintf("helm uninstall %s: %v — %s", release, err, strings.TrimSpace(string(out))))
 		} else {
-			step(fmt.Sprintf("helm uninstall %s: done", release))
+			ui.Success(fmt.Sprintf("helm uninstall %s: done", release))
 		}
 	}
 
 	// 2. Cluster-scoped CRs — these survive namespace deletion and must be
 	//    removed explicitly. They were created by the sreCRsTmpl apply in
 	//    aep sre install (step 6).
-	fmt.Println("Deleting cluster-scoped CRs...")
+	ui.Step("Deleting cluster-scoped CRs")
 	for _, cr := range []struct{ apiVersion, kind, name string }{
 		{"openchoreo.dev/v1alpha1", "ClusterObservabilityPlane", "default"},
 		{"openchoreo.dev/v1alpha1", "ClusterAuthzRoleBinding", "aep-observer-reader-binding"},
@@ -108,9 +106,9 @@ func runSreUninstall(cmd *cobra.Command, args []string) error {
 		{"openchoreo.dev/v1alpha1", "ClusterAuthzRole", "rca-agent-dispatch"},
 	} {
 		if err := applier.Delete(ctx, cr.apiVersion, cr.kind, "", cr.name); err != nil {
-			warn(fmt.Sprintf("delete %s/%s: %v", cr.kind, cr.name, err))
+			ui.Warn(fmt.Sprintf("delete %s/%s: %v", cr.kind, cr.name, err))
 		} else {
-			step(fmt.Sprintf("deleted %s/%s", cr.kind, cr.name))
+			ui.Detail(fmt.Sprintf("deleted %s/%s", cr.kind, cr.name))
 		}
 	}
 
@@ -118,13 +116,14 @@ func runSreUninstall(cmd *cobra.Command, args []string) error {
 	//    ESO SecretStore + ExternalSecrets, synced Secrets (opensearch-admin-credentials,
 	//    rca-agent-secret, observer-secret), cluster-gateway-ca ConfigMap, ConfigMap
 	//    patches (observer-config, rca-agent-config), HTTPRoute, and any leftover Jobs.
-	fmt.Printf("Deleting namespace %s...\n", sreUninstallObsNamespace)
+	ui.Step(fmt.Sprintf("Deleting namespace %s", sreUninstallObsNamespace))
 	if err := client.CoreV1().Namespaces().Delete(ctx, sreUninstallObsNamespace, metav1.DeleteOptions{}); err != nil {
-		warn(fmt.Sprintf("delete namespace %s: %v", sreUninstallObsNamespace, err))
+		ui.Warn(fmt.Sprintf("delete namespace %s: %v", sreUninstallObsNamespace, err))
 	} else {
-		step(fmt.Sprintf("namespace %s deleted", sreUninstallObsNamespace))
+		ui.Success(fmt.Sprintf("namespace %s deleted", sreUninstallObsNamespace))
 	}
 
-	fmt.Println("\nDone. AEP platform, OpenBao, and the ESO controller are still running.")
+	ui.Success("SRE observability plane removed")
+	ui.Detail("AEP platform, OpenBao, and the ESO controller are still running.")
 	return nil
 }

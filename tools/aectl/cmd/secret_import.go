@@ -26,6 +26,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/wso2/aep/aectl/internal/openbao"
+	"github.com/wso2/aep/aectl/internal/ui"
 )
 
 var (
@@ -104,6 +105,6 @@ func runSecretImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("write secret/data/%s: %w", secretImportPath, err)
 	}
 
-	_, _ = fmt.Printf("wrote secret/data/%s\n", secretImportPath)
+	ui.Success(fmt.Sprintf("Wrote secret/data/%s", secretImportPath))
 	return nil
 }
