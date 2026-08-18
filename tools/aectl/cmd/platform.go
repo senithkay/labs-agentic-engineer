@@ -33,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/wso2/aep/aectl/internal/addons"
 	"github.com/wso2/aep/aectl/internal/bootstrap"
 	"github.com/wso2/aep/aectl/internal/config"
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
@@ -311,6 +312,50 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	ui.Success("Thunder configured")
 
 	ui.Ready(initConsoleURL)
+	return installAddons(ctx, k8sClient)
+}
+
+// installAddons presents the optional addon selector and applies chosen addons.
+func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
+	if len(addons.Available) == 0 {
+		return nil
+	}
+
+	items := make([]ui.SelectItem, len(addons.Available))
+	for i, a := range addons.Available {
+		items[i] = ui.SelectItem{Label: a.Label, Description: a.Description}
+	}
+
+	selected, confirmed := ui.MultiSelect("Optional platform resources", items)
+	if !confirmed {
+		return nil
+	}
+
+	applier, err := k8s.NewApplier(kubeconfig)
+	if err != nil {
+		return fmt.Errorf("build applier: %w", err)
+	}
+
+	any := false
+	for i, a := range addons.Available {
+		if !selected[i] {
+			continue
+		}
+		any = true
+		sp := ui.NewSpinner(fmt.Sprintf("Applying %s", a.Label))
+		sp.Start()
+		for _, manifest := range a.Manifests {
+			if err := applier.ApplyYAML(ctx, "aectl", "", manifest); err != nil {
+				sp.Fail(fmt.Sprintf("Failed to apply %s", a.Label))
+				return fmt.Errorf("apply addon %s: %w", a.ID, err)
+			}
+		}
+		sp.Success(fmt.Sprintf("%s applied", a.Label))
+	}
+
+	if any {
+		fmt.Println()
+	}
 	return nil
 }
 
