@@ -554,6 +554,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   // any inputs the BFF/devflow rejects come back as `failures` — surface the
   // reasons and leave the drawer open so the user can fix them and retry.
   const onContinueBuild = async (inputs: BuildInputItem[]) => {
+    setGateRefusal(null);
     setBuildError(null);
     setBuildPhase("building");
     try {
@@ -570,9 +571,13 @@ export function SpecView({ projectName }: { projectName: string }) {
         params: { projectName },
       });
     } catch (e) {
-      setBuildError(
-        e instanceof Error ? e.message : "Failed to start the build.",
-      );
+      const details = (e as Error & { details?: Array<{ field?: string; message: string }> }).details;
+      if (Array.isArray(details) && details.length > 0) {
+        setDependencyDrawerOpen(false);
+        setGateRefusal(details);
+      } else {
+        setBuildError(e instanceof Error ? e.message : "Failed to start the build.");
+      }
     } finally {
       setBuildPhase(null);
     }
