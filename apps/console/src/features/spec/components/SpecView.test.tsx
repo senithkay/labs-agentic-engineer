@@ -394,6 +394,55 @@ describe("SpecView onBuild routing (#164)", () => {
     expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
+
+  it("drawer Continue with a gate refusal — closes the drawer and surfaces the gate checklist", async () => {
+    mockPreflightRefetch.mockResolvedValue({
+      data: { needsInput: true, items: PREFLIGHT_ITEMS },
+    });
+    const gateError = Object.assign(new Error("spec validation failed"), {
+      details: [
+        { message: "story 1 is in the PRD but no component's design.json lists it in `stories`" },
+        { field: "components/api/design.json", message: "component \"api\" is still the platform scaffold" },
+      ],
+    });
+    mockMutateAsync.mockRejectedValue(gateError);
+
+    render(<SpecView projectName="proj1" />);
+    clickBuild();
+    await waitFor(() =>
+      expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByText("Drawer Continue"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Build refused/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/story 1 is in the PRD/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("drawer Continue with a non-gate error — surfaces the plain error", async () => {
+    mockPreflightRefetch.mockResolvedValue({
+      data: { needsInput: true, items: PREFLIGHT_ITEMS },
+    });
+    mockMutateAsync.mockRejectedValue(new Error("network timeout"));
+
+    render(<SpecView projectName="proj1" />);
+    clickBuild();
+    await waitFor(() =>
+      expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByText("Drawer Continue"));
+
+    await waitFor(() =>
+      expect(screen.getByText("network timeout")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Build refused/i)).not.toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
 });
 
 // --- #252 Task 9: dependency-status wiring ---------------------------------
