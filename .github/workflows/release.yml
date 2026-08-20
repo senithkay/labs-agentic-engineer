@@ -158,11 +158,19 @@ jobs:
 
           helm package /tmp/platform --destination /tmp/charts
 
+      - name: Package thunder-app-operator chart
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cp -r deployments/single-cluster/resource-types/thunder-app/operator/helm /tmp/thunder-app-operator
+          yq -i '.version = strenv(VERSION)' /tmp/thunder-app-operator/Chart.yaml
+          yq -i '.appVersion = strenv(VERSION)' /tmp/thunder-app-operator/Chart.yaml
+          helm package /tmp/thunder-app-operator --destination /tmp/charts
+
       - name: Push charts to GHCR
         run: |
-          for chart in /tmp/charts/*.tgz; do
-            helm push "$chart" oci://${{ env.REGISTRY }}/wso2/aep/charts
-          done
+          helm push /tmp/charts/aep-platform-*.tgz oci://${{ env.REGISTRY }}/wso2/aep/charts
+          helm push /tmp/charts/thunder-app-operator-*.tgz oci://${{ env.REGISTRY }}/wso2
 
   # ─── Platform: create GitHub release ────────────────────────────────────────
   create-platform-release:
