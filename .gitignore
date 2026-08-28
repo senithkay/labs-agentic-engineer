@@ -30,6 +30,7 @@ generated/
 .env
 .env.*
 !.env.example
+skaffold/secrets.yaml
 
 # Dev playground threads (services/agents/playground)
 chat_playground/

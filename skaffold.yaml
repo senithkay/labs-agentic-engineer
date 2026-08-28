@@ -4,19 +4,120 @@ metadata:
   name: aep
 
 build:
-  artifacts: []
+  artifacts:
+    - image: ghcr.io/wso2/aep/aep-api
+      context: services/aep-api
+      docker:
+        dockerfile: Dockerfile
+        cliFlags:
+          - "--build-context=skills=./skills"
+    - image: ghcr.io/wso2/aep/agents
+      context: .
+      docker:
+        dockerfile: services/agents/Dockerfile
+    - image: ghcr.io/wso2/aep/collab
+      context: .
+      docker:
+        dockerfile: services/collab/Dockerfile
+    - image: ghcr.io/wso2/aep/aep-mcp-server
+      context: .
+      docker:
+        dockerfile: services/aep-mcp-server/Dockerfile
+    - image: ghcr.io/wso2/aep/console
+      context: .
+      docker:
+        dockerfile: apps/console/Dockerfile
+    - image: ghcr.io/wso2/aep/remote-worker
+      context: runners/remote-worker
+      docker:
+        dockerfile: Dockerfile
+        cliFlags:
+          - "--build-context=skills=./skills"
+    - image: ghcr.io/wso2/aep/thunder-app-operator
+      context: deployments/single-cluster/resource-types/thunder-app/operator
+      docker:
+        dockerfile: Dockerfile
   local:
     push: false
 
 manifests:
   rawYaml:
     - skaffold/namespace.yaml
-    - skaffold/secrets/secrets.yaml
+    - skaffold/addon-namespaces.yaml
+    - skaffold/secrets.yaml
+    - deployments/single-cluster/resource-types/thunder-app/resourcetype.yaml
+    - deployments/single-cluster/resource-types/thunder-app/rbac.yaml
+    - deployments/single-cluster/resource-types/postgres-cnpg/resourcetype.yaml
+    - deployments/single-cluster/resource-types/postgres-cnpg/rbac.yaml
 
 deploy:
-  kubectl:
+  kubectl: {}
+  helm:
     hooks:
       before:
         - host:
-            command: ["sh", "skaffold/secrets/generate-and-apply.sh"]
+            command: ["sh", "skaffold/generate-and-apply.sh"]
             os: [darwin, linux]
+            dir: "."
+      after:
+        - host:
+            command: ["sh", "skaffold/thunder-setup.sh"]
+            os: [darwin, linux]
+            dir: "."
+    releases:
+      - name: aep-platform
+        chartPath: deployments/helm-charts/platform
+        namespace: wso2-aep
+        createNamespace: true
+        setValueTemplates:
+          aepApi.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_aep_api}}"
+          aepApi.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_aep_api}}"
+          aepAgents.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_agents}}"
+          aepAgents.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_agents}}"
+          collab.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_collab}}"
+          collab.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_collab}}"
+          aepMcpServer.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_aep_mcp_server}}"
+          aepMcpServer.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_aep_mcp_server}}"
+          console.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_console}}"
+          console.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_console}}"
+          codingAgentRunner.image: "{{.IMAGE_REPO_ghcr_io_wso2_aep_remote_worker}}:{{.IMAGE_TAG_ghcr_io_wso2_aep_remote_worker}}"
+        setValues:
+          ### ── Built-in defaults (values.local.yaml — local dev infrastructure, fixed for k3d) ──
+          # Use plain K8s Secrets instead of ESO/OpenBao
+          localSecrets.enabled: "true"
+
+
+          ### ── Overridable defaults (config file — mirrors aectl platform config import) ──
+          # thunder.url
+          thunder.adminURL: "http://thunder-service.thunder.svc.cluster.local:8090"
+          thunder.jwksURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
+          # thunder.public_url
+          console.thunderPublicURL: "http://thunder.openchoreo.localhost:8080"
+          # oc.api_url
+          platformAPI.baseURL: "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080"
+          # codingagent.openbao_direct.enabled
+          codingAgentDispatch.openBaoDirect.enabled: "true"
+          # openbao.addr
+          openbao.addr: "http://openbao.openbao.svc.cluster.local:8200"
+          # webhook.delivery_url
+          webhook.deliveryURL: "https://smee.io/woTo6w45shQo21QQ"
+          # webhook.local_smee.enabled
+          webhook.localSmee.enabled: "true"
+          # oc.local_org_provisioning.enabled
+          localOrgProvisioning.enabled: "true"
+          # oc.org_namespace
+          localOrgProvisioning.orgNamespace: "default"
+          # platform.workspaces.access_mode
+          workspaces.accessMode: "ReadWriteOnce"
+      - name: thunder-app-operator
+        chartPath: deployments/single-cluster/resource-types/thunder-app/operator/helm
+        namespace: thunder-app-operator-system
+        createNamespace: true
+        setValueTemplates:
+          image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_thunder_app_operator}}"
+          image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_thunder_app_operator}}"
+      - name: cnpg
+        remoteChart: oci://ghcr.io/cloudnative-pg/charts/cloudnative-pg
+        version: "0.29.0"
+        namespace: cnpg-system
+        createNamespace: true
