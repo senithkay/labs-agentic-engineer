@@ -69,6 +69,8 @@ deploy:
         chartPath: deployments/helm-charts/platform
         namespace: wso2-aep
         createNamespace: true
+        valuesFiles:
+          - skaffold/helm-values.yaml
         setValueTemplates:
           aepApi.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_aep_api}}"
           aepApi.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_aep_api}}"
@@ -99,10 +101,10 @@ deploy:
           codingAgentDispatch.openBaoDirect.enabled: "true"
           # openbao.addr
           openbao.addr: "http://openbao.openbao.svc.cluster.local:8200"
-          # webhook.delivery_url
-          webhook.deliveryURL: "https://smee.io/woTo6w45shQo21QQ"
-          # webhook.local_smee.enabled
-          webhook.localSmee.enabled: "true"
+          # webhook.delivery_url — set your personal smee.io channel in skaffold/helm-values.yaml
+          webhook.deliveryURL: ""
+          # webhook.local_smee.enabled — enabled per-developer in skaffold/helm-values.yaml
+          webhook.localSmee.enabled: "false"
           # oc.local_org_provisioning.enabled
           localOrgProvisioning.enabled: "true"
           # oc.org_namespace

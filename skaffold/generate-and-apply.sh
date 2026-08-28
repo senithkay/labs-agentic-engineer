@@ -6,6 +6,13 @@ set -e
 
 NAMESPACE=wso2-aep
 
+# Bootstrap per-developer helm-values.yaml from the example if not present.
+# Developers should set their own smee.io channel in this file.
+if [ ! -f skaffold/helm-values.yaml ]; then
+  cp skaffold/helm-values.yaml.example skaffold/helm-values.yaml
+  echo "Created skaffold/helm-values.yaml from example — set your smee.io channel in it"
+fi
+
 kubectl apply -f skaffold/namespace.yaml
 kubectl apply -f skaffold/addon-namespaces.yaml
 kubectl apply -f skaffold/secrets.yaml
