@@ -11,6 +11,13 @@ THUNDER_DEPLOYMENT="${THUNDER_DEPLOYMENT:-thunder-deployment}"
 THUNDER_CONFIG_MAP="${THUNDER_CONFIG_MAP:-thunder-config-map}"
 CONSOLE_URL="${CONSOLE_URL:-http://console.openchoreo.localhost:8080}"
 
+# PyYAML is required for the Thunder CORS config patch.
+# Install it if missing rather than failing mid-hook after OAuth registration.
+if ! python3 -c "import yaml" 2>/dev/null; then
+  echo "PyYAML not found — installing..."
+  pip3 install --quiet pyyaml || { echo "ERROR: could not install PyYAML. Run: pip3 install pyyaml"; exit 1; }
+fi
+
 AEP_THUNDER_SECRETS="aep-thunder-secrets"
 AEP_THUNDER_ADMIN_CREDS="aep-thunder-admin-creds"
 
