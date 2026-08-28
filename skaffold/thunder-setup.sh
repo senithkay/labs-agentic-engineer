@@ -54,7 +54,10 @@ TOKEN_RESP=""
 for i in $(seq 1 30); do
   TOKEN_RESP=$(curl -s -X POST "${THUNDER_URL}/oauth2/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "grant_type=client_credentials&client_id=${THUNDER_ADMIN_CLIENT_ID}&client_secret=${THUNDER_ADMIN_CLIENT_SECRET}&scope=system" 2>/dev/null || true)
+    --data-urlencode "grant_type=client_credentials" \
+    --data-urlencode "client_id=${THUNDER_ADMIN_CLIENT_ID}" \
+    --data-urlencode "client_secret=${THUNDER_ADMIN_CLIENT_SECRET}" \
+    --data-urlencode "scope=system" 2>/dev/null || true)
   BEARER_TOKEN=$(echo "$TOKEN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null || true)
   [ -n "$BEARER_TOKEN" ] && break
   sleep 2
@@ -158,15 +161,21 @@ thunder_upsert_app() {
 
 thunder_confidential() {
   local name="$1" desc="$2" cid="$3" secret="$4"
-  thunder_upsert_app "$cid" "{
-    \"name\":\"$name\",\"description\":\"$desc\",\"ouId\":\"$OU_ID\",
-    \"inboundAuthConfig\":[{\"type\":\"oauth2\",\"config\":{
-      \"clientId\":\"$cid\",\"clientSecret\":\"$secret\",
-      \"grantTypes\":[\"client_credentials\"],
-      \"tokenEndpointAuthMethod\":\"client_secret_post\",
-      \"pkceRequired\":false,\"publicClient\":false,
-      \"token\":{\"accessToken\":{\"validityPeriod\":3600}}
-    }}]}"
+  local payload
+  payload=$(python3 -c "
+import json, sys
+name, desc, ou_id, cid, secret = sys.argv[1:]
+print(json.dumps({
+  'name': name, 'description': desc, 'ouId': ou_id,
+  'inboundAuthConfig': [{'type': 'oauth2', 'config': {
+    'clientId': cid, 'clientSecret': secret,
+    'grantTypes': ['client_credentials'],
+    'tokenEndpointAuthMethod': 'client_secret_post',
+    'pkceRequired': False, 'publicClient': False,
+    'token': {'accessToken': {'validityPeriod': 3600}}
+  }}]
+}))" "$name" "$desc" "$OU_ID" "$cid" "$secret")
+  thunder_upsert_app "$cid" "$payload"
 }
 
 # ── Confidential clients ─────────────────────────────────────────────────────
