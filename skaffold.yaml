@@ -156,10 +156,3 @@ deploy:
         version: "0.29.0"
         namespace: cnpg-system
         createNamespace: true
-
-portForward:
-  - resourceType: Service
-    resourceName: aep-api
-    namespace: wso2-aep
-    port: 9090
-    localPort: 9090

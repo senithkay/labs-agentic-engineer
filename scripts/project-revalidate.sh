@@ -108,4 +108,6 @@ RUN_ID=$(printf '%s' "$JSON" | sed -n 's/.*"runId"[[:space:]]*:[[:space:]]*"\([^
 echo "✅ Started run ${RUN_ID}"
 echo
 echo "   Watch it:  Validation page for ${PROJECT}, or"
-echo "              kubectl -n wso2-aep exec -it deploy/aep-api -- sh -c 'psql \"\$DATABASE_URL\" -c \"select kind, validation_verdict, ended_at is null as open from run_cycles where run_id='\\''${RUN_ID}'\\'';\"'"
+echo "              kubectl -n wso2-aep exec -it deploy/aep-api -- psql \$DATABASE_URL -c \\"
+echo "                \"select kind, validation_verdict, ended_at is null as open\\"
+echo "                   from run_cycles where run_id='${RUN_ID}';\""
