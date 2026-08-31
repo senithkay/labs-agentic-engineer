@@ -92,7 +92,7 @@ deploy:
           console.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_console}}"
           codingAgentRunner.image: "{{.IMAGE_REPO_ghcr_io_wso2_aep_remote_worker}}:{{.IMAGE_TAG_ghcr_io_wso2_aep_remote_worker}}"
         setValues:
-          ### ── Built-in defaults (values.local.yaml — local dev infrastructure, fixed for k3d) ──
+          ### ── Built-in defaults (local dev infrastructure, fixed for k3d) ──
           # Use plain K8s Secrets instead of ESO/OpenBao
           localSecrets.enabled: "true"
 

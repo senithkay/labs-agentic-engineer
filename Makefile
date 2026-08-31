@@ -144,24 +144,15 @@ workflow-skill:
 setup-local:
 	bash deployments/scripts/setup-local.sh
 
-# values.local.dev.yaml holds per-developer chart overrides (git-ignored; copy
-# from values.local.dev.yaml.example). Ensure an empty stub exists so skaffold
-# never fails when a developer hasn't created one or on a fresh checkout.
-LOCAL_DEV_VALUES := deployments/helm-charts/platform/values.local.dev.yaml
-define ensure_local_dev_values
-	@test -f $(LOCAL_DEV_VALUES) || printf '# Per-developer overrides (git-ignored). See values.local.dev.yaml.example.\n{}\n' > $(LOCAL_DEV_VALUES)
-endef
-
 # Inner dev loop: build images, load into k3d, deploy via Helm, watch for changes.
 # Console: http://console.openchoreo.localhost:8080
-# aep-api: http://localhost:9090 (port-forwarded by Skaffold)
+# Per-developer overrides (smee webhook, etc.): copy skaffold/helm-values.yaml.example
+# to skaffold/helm-values.yaml (git-ignored) and fill in your values.
 dev-cluster:
-	$(ensure_local_dev_values)
 	skaffold dev --kube-context k3d-openchoreo -f skaffold.yaml
 
 # One-shot build + deploy (no watch). Useful for CI smoke tests or resetting state.
 deploy-local:
-	$(ensure_local_dev_values)
 	skaffold run --kube-context k3d-openchoreo -f skaffold.yaml
 
 clean:

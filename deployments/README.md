@@ -56,11 +56,11 @@ make setup-local
 
 # 3. Inner dev loop — build images, load into k3d, deploy via Helm, watch
 make dev-cluster
-# Console: http://console.openchoreo.localhost:8080 · aep-api: http://localhost:9090
+# Console: http://console.openchoreo.localhost:8080
 ```
 
 To trigger component builds on PR merge here, copy
-`helm-charts/platform/values.local.dev.yaml.example` to `values.local.dev.yaml`
+`skaffold/helm-values.yaml.example` to `skaffold/helm-values.yaml`
 (git-ignored) and set a smee.io `webhook.deliveryURL` — see that file's comments.
 The Compose flow needs no equivalent: setup provisions a channel into `.env` and
 the stack runs the relay.
@@ -110,7 +110,7 @@ Key wiring:
 | `scripts/setup-aep.sh` | Build ClusterWorkflow + ComponentTypes + Environment + AuthzRoleBindings + `.env` + runner image |
 | `scripts/setup-local.sh` | **(Skaffold)** K8s Secrets + Thunder clients + resource-type catalog + thunder-app operator (`make setup-local`) |
 | `../skaffold.yaml` | **(Skaffold)** in-cluster build/deploy for `make dev-cluster` |
-| `helm-charts/platform/values.local.dev.yaml.example` | **(Skaffold)** per-developer override template (webhook/smee, etc.) |
+| `../skaffold/helm-values.yaml.example` | **(Skaffold)** per-developer override template (webhook/smee, etc.) |
 | `scripts/start.sh` | **(Compose, legacy)** Refresh DNS, seed kubeconfig, `docker compose up` |
 | `scripts/stop.sh` | **(Compose, legacy)** `docker compose down` (cluster stays) |
 | `docker-compose.yml` | **(Compose, legacy)** long-lived host services |
