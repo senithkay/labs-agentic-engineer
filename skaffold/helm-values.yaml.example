@@ -2,8 +2,9 @@
 # Copy this file to skaffold/helm-values.yaml and fill in your values.
 # skaffold/helm-values.yaml is gitignored — never commit it.
 
-# Get a personal smee.io channel at https://smee.io/new
+# Get a personal smee.io channel at https://smee.io/new, then set your URL in
+# deliveryURL and flip localSmee.enabled to true to activate webhook delivery.
 webhook:
   deliveryURL: "https://smee.io/<your-channel-id>"
   localSmee:
-    enabled: true
+    enabled: false

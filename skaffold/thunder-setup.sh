@@ -31,7 +31,7 @@ CONSOLE_URL="${CONSOLE_URL:-http://console.openchoreo.localhost:8080}"
 # Install it if missing rather than failing mid-hook after OAuth registration.
 if ! python3 -c "import yaml" 2>/dev/null; then
   echo "PyYAML not found — installing..."
-  pip3 install --quiet pyyaml || { echo "ERROR: could not install PyYAML. Run: pip3 install pyyaml"; exit 1; }
+  python3 -m pip install --quiet pyyaml || { echo "ERROR: could not install PyYAML. Run: python3 -m pip install pyyaml"; exit 1; }
 fi
 
 AEP_THUNDER_SECRETS="aep-thunder-secrets"
@@ -278,6 +278,9 @@ fi
 echo "AEP Thunder OAuth clients registered"
 
 # ── Thunder CORS patch ────────────────────────────────────────────────────────
+# Outputs "UNCHANGED" when the console URL is already in allowed_origins so
+# we can skip the ConfigMap patch and avoid restarting Thunder unnecessarily.
+# Restarting on every skaffold dev iteration interrupts active sessions.
 echo "Patching Thunder CORS for ${CONSOLE_URL}..."
 
 CURRENT_YAML=$(kubectl get configmap "${THUNDER_CONFIG_MAP}" \
@@ -288,17 +291,23 @@ import sys, yaml
 cfg = yaml.safe_load(sys.stdin.read()) or {}
 origins = cfg.setdefault('cors', {}).setdefault('allowed_origins', [])
 url = '${CONSOLE_URL}'
-if url not in origins:
+if url in origins:
+    print('UNCHANGED')
+else:
     origins.append(url)
-print(yaml.dump(cfg, default_flow_style=False))
+    print(yaml.dump(cfg, default_flow_style=False))
 ")
 
-ESCAPED=$(echo "${PATCHED_YAML}" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))")
-kubectl patch configmap "${THUNDER_CONFIG_MAP}" \
-  -n "${THUNDER_NS}" --type=merge \
-  -p "{\"data\":{\"deployment.yaml\":${ESCAPED}}}"
+if [ "${PATCHED_YAML}" = "UNCHANGED" ]; then
+  echo "Thunder CORS already includes ${CONSOLE_URL} — skipping restart"
+else
+  ESCAPED=$(echo "${PATCHED_YAML}" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))")
+  kubectl patch configmap "${THUNDER_CONFIG_MAP}" \
+    -n "${THUNDER_NS}" --type=merge \
+    -p "{\"data\":{\"deployment.yaml\":${ESCAPED}}}"
 
-kubectl rollout restart deploy/"${THUNDER_DEPLOYMENT}" -n "${THUNDER_NS}"
-kubectl rollout status deploy/"${THUNDER_DEPLOYMENT}" -n "${THUNDER_NS}" --timeout=120s >/dev/null
+  kubectl rollout restart deploy/"${THUNDER_DEPLOYMENT}" -n "${THUNDER_NS}"
+  kubectl rollout status deploy/"${THUNDER_DEPLOYMENT}" -n "${THUNDER_NS}" --timeout=120s >/dev/null
 
-echo "Thunder CORS updated"
+  echo "Thunder CORS updated"
+fi

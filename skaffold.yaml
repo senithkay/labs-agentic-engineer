@@ -33,12 +33,20 @@ build:
         dockerfile: Dockerfile
         cliFlags:
           - "--build-context=skills=./skills"
+      dependencies:
+        paths:
+          - runners/remote-worker/**
+          - skills/**
+        ignore:
+          - runners/remote-worker/node_modules/**
+          - runners/remote-worker/dist/**
     - image: ghcr.io/wso2/aep/thunder-app-operator
       context: deployments/single-cluster/resource-types/thunder-app/operator
       docker:
         dockerfile: Dockerfile
   local:
     push: false
+    useBuildkit: true
 
 manifests:
   rawYaml:
@@ -101,10 +109,6 @@ deploy:
           codingAgentDispatch.openBaoDirect.enabled: "true"
           # openbao.addr
           openbao.addr: "http://openbao.openbao.svc.cluster.local:8200"
-          # webhook.delivery_url — set your personal smee.io channel in skaffold/helm-values.yaml
-          webhook.deliveryURL: ""
-          # webhook.local_smee.enabled — enabled per-developer in skaffold/helm-values.yaml
-          webhook.localSmee.enabled: "false"
           # oc.local_org_provisioning.enabled
           localOrgProvisioning.enabled: "true"
           # oc.org_namespace
