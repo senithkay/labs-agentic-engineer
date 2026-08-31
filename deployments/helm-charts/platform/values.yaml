@@ -221,8 +221,7 @@ temporal:
   namespace: "default"
   # Task queue the in-process worker polls (matches the aep-api code default).
   taskQueue: "aep-devflow"
-  # temporalio/auto-setup pinned to the server version used by
-  # deployments/scripts/setup-temporal.sh (admin-tools 1.29.7).
+  # temporalio/auto-setup pinned to server version (admin-tools 1.29.7).
   image: "temporalio/auto-setup:1.29.7"
   imagePullPolicy: IfNotPresent
   db:

@@ -41,10 +41,8 @@ import (
 )
 
 // SRE (RCA) agent install. Brings the OpenChoreo Observability Plane + SRE/RCA
-// agent up to parity with the local docker-compose path
-// (deployments/scripts/setup-observability.sh), adapted for the in-cluster Helm
-// install: secrets flow OpenBao->ESO (never plaintext), and the RCA->AEP handoff
-// targets in-cluster Service DNS instead of host.k3d.internal.
+// agent up on an existing cluster: secrets flow OpenBao->ESO (never plaintext),
+// and the RCA->AEP handoff targets in-cluster Service DNS.
 //
 // Prerequisite: `aectl init` must have run first (it registers the
 // openchoreo-rca-agent Thunder client and seeds the OpenBao secrets this reads).
@@ -481,9 +479,9 @@ func writeTempValues(prefix, tmpl string, p sreParams) (string, func(), error) {
 	return f.Name(), cleanup, nil
 }
 
-// openSearchBootstrapJob mirrors setup-observability.sh step 6: verify the
-// container-logs index template maps `log` as wildcard and delete any indices
-// created with a wrong mapping so they get recreated correctly.
+// openSearchBootstrapJob verifies the container-logs index template maps `log`
+// as wildcard and deletes any indices created with a wrong mapping so they get
+// recreated correctly.
 func openSearchBootstrapJob(ns string) *batchv1.Job {
 	backoff := int32(5)
 	ttl := int32(600)

@@ -156,7 +156,7 @@ create_plane_cert_resources() {
 register_data_plane() {
     # obs_plane_name defaults to "default" for callers that don't pass one —
     # today there's only ever one ClusterObservabilityPlane (also named
-    # "default", see setup-observability.sh), but this keeps that assumption
+    # "default"), but this keeps that assumption
     # an explicit, overridable parameter rather than baked in, for future
     # multi-plane setups.
     local ca_cert="$1" plane_id="$2" secret_store="$3" obs_plane_name="${4:-default}"
@@ -351,8 +351,8 @@ _cluster_dns_resolves() {
 # k3d-local-config.yaml pins pod DNS to a static resolv.conf so newly created
 # clusters cannot hit this at all. This check covers clusters created before that
 # pin plus any other drift: it probes real resolution and, if it fails, restarts
-# CoreDNS so it re-reads the current resolver. Runs on every start.sh because a
-# Colima restart is exactly when the race fires.
+# CoreDNS so it re-reads the current resolver. A Colima restart is exactly when
+# this race fires, so run this after restarting Colima.
 ensure_cluster_dns_healthy() {
     local probe_image="${AEP_DNS_PROBE_IMAGE:-busybox:1.36}"
     local probe_host="${AEP_DNS_PROBE_HOST:-github.com}"
@@ -464,7 +464,7 @@ EOF
 #       is usable, it is just still collectible
 #   2 — at least one eligible node is missing the image (or there are no eligible
 #       nodes), i.e. the import did not land. `k3d image import` is known to flake
-#       and still exit 0 — see the RCA import in setup-observability.sh — so
+#       and still exit 0 — so
 #       callers should treat this as an import failure, not a pinning failure.
 pin_node_image() {
     local image="$1" nodes eligible=0 found=0 pinned=0 node ref
@@ -505,11 +505,10 @@ pin_node_image() {
 # ----------------------------------------------------------------------------
 # Public URL handling
 # ----------------------------------------------------------------------------
-# .env carries two canonical fields:
+# Two canonical fields used when rendering cluster config:
 #   PUBLIC_THUNDER_URL   — public URL the browser uses to reach Thunder
 #   PUBLIC_CONSOLE_URL   — public URL the browser uses to reach the console
-# Everything that needs these values (Helm values, ConfigMaps, redirect URIs,
-# OIDC issuer) derives from them — edit .env, re-run start.sh, done.
+# Override via env vars or a .env file (load_public_urls reads it if present).
 
 # Load PUBLIC_THUNDER_URL / PUBLIC_CONSOLE_URL from the project .env into the
 # current shell, then derive PUBLIC_THUNDER_HOST / PORT / SCHEME from the URL.

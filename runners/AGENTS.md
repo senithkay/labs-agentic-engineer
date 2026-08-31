@@ -9,8 +9,8 @@ the authoring rules) and **delivered by the BFF, not here either**: a run reads
 the `.claude/skills/` mirror in its own clone. What this package owns is
 consuming that mirror correctly — the always-on workflow, the allowlist, and the
 playground's stand-in for the BFF write. The dev flow bind-mounts the library
-into the runner pod at `/app/skills` for live skill edits (see
-`deployments/scripts/setup-k3d.sh`), which is what the playground mirrors from.
+into the runner pod at `/app/skills` for live skill edits (via the Skaffold
+`hostPath` overlay in the platform Helm chart), which is what the playground mirrors from.
 
 ## Conventions
 
@@ -236,9 +236,8 @@ into the runner pod at `/app/skills` for live skill edits (see
   because Playwright's browsers are glibc-linked; do not reintroduce a second,
   slimmer image without moving the Helm/compose/release/`AGENT_RUNNER_IMAGE`
   consumers with it. Build + k3d-import it locally with `make build-runner`.
-  Full `deployments/scripts/setup.sh` pre-builds it in the background (off the
-  critical path) and imports it in `setup-aep.sh`; `PREBUILD_RUNNER=0` reverts
-  to a serial build. The build is skipped when the tag exists, so use
+  Use `make build-runner` to build and import it. `PREBUILD_RUNNER=0` skips
+  the pre-build. `FORCE=1 make build-runner` forces a rebuild. The build is skipped when the tag exists, so use
   `FORCE=1 make build-runner` after changing the Dockerfile or `src/`.
 - **The imported tag is pinned in containerd** — `build-runner.sh` calls
   `pin_node_image` (`deployments/scripts/utils.sh`) after a successful

@@ -18,8 +18,8 @@ So a skill's path to a coding session runs entirely through the org's library,
 which means an org's edit to one reaches its builds. The playground has no BFF
 and writes the mirror itself (`local_skill_mirror.ts`), applying the same rule.
 
-The library is bind-mounted from the working tree in dev (`setup-k3d.sh` for the
-cluster, `pnpm play` for the playground), so **a skill edit needs no rebuild**.
+The library is bind-mounted from the working tree in dev (via the Skaffold
+`hostPath` overlay for the cluster, `pnpm play` for the playground), so **a skill edit needs no rebuild**.
 
 A **tool** a skill names by command is the exception — it is installed, not
 mounted, so a change to one is NOT live until it is. `evals/ballerina/AGENTS.md`

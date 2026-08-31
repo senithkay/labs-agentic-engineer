@@ -173,7 +173,6 @@ adapter:
 `
 
 // Authz grants + cross-namespace HTTPRoute + ClusterObservabilityPlane CR.
-// Mirrors setup-observability.sh §4/§4b/§5 and setup-aep.sh's rca-agent-dispatch.
 const sreCRsTmpl = `
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -263,10 +262,10 @@ spec:
   rcaAgentURL: http://{{.RcaHost}}:11080
 `
 
-// openSearchBootstrapScript is the detect+self-heal body from
-// setup-observability.sh step 6 (verbatim). It does NOT PUT a template — the
-// chart's own hook owns the container-logs template; this only deletes indices
-// created under a wrong mapping so they get recreated correctly.
+// openSearchBootstrapScript detects and self-heals the container-logs index
+// mapping. It does NOT PUT a template — the chart's own hook owns the
+// container-logs template; this only deletes indices created under a wrong
+// mapping so they get recreated correctly.
 const openSearchBootstrapScript = `
 set -eu
 OS="https://${OS_HOST}:${OS_PORT}"

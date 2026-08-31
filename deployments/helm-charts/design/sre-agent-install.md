@@ -1,8 +1,7 @@
 # SRE (RCA) agent on the aectl/Helm install path
 
 Final-state notes for how the OpenChoreo SRE/RCA agent is brought up on the
-Helm/`aectl` install, at parity with the local docker-compose path
-(`deployments/scripts/setup-observability.sh`).
+Helm/`aectl` install path.
 
 ## What runs where
 
@@ -14,7 +13,7 @@ Helm/`aectl` install, at parity with the local docker-compose path
   enforces org-scoped auth.
 - **Observability plane + RCA agent** — installed on demand by
   `aectl sre install` (the OpenChoreo `openchoreo-observability-plane` and
-  `observability-logs-opensearch` charts). Not part of `aectl init`.
+  `observability-logs-opensearch` charts). Not part of `aectl platform install`.
 
 ## `aectl sre install`
 
@@ -35,7 +34,7 @@ namespace); warns if absent, then installs/upgrades (idempotent). It then:
 
 ### Prerequisite
 
-`aectl init` must run first. It registers the `openchoreo-rca-agent` Thunder
+`aectl platform install` must run first. It registers the `openchoreo-rca-agent` Thunder
 confidential client and seeds OpenBao — including the OpenSearch admin
 credentials (`aep/opensearch-username` / `-password`), which must be written
 while the OpenBao root token is still held (init revokes it at the end).
@@ -48,13 +47,13 @@ SA bound to the `eso-reader` role. That SA serves ExternalSecrets in *any*
 namespace, so the obs-namespace `SecretStore` reads `secret/data/aep/*` directly.
 The `aep-secret-reader` policy already covers the new `aep/opensearch-*` paths.
 
-## In-cluster vs docker-compose
+## Local k3d vs aectl/Helm
 
-| | docker-compose (setup.sh) | aectl/Helm |
+| | local k3d (Skaffold + setup-dev.sh) | aectl/Helm |
 |---|---|---|
 | `AE_API_URL` | `http://host.k3d.internal:3401` | `http://aep-mcp-server.<ns>.svc.cluster.local:3400` |
 | `AEP_API_URL` | `http://host.k3d.internal:9090` | `http://aep-api.<ns>.svc.cluster.local:9090` |
-| RCA/observer/opensearch secrets | `.env` + OpenBao seed | OpenBao → ESO in the obs namespace |
+| RCA/observer/opensearch secrets | k3d cluster + OpenBao seed | OpenBao → ESO in the obs namespace |
 
 ## Local k3d prerequisite: `/etc/machine-id`
 

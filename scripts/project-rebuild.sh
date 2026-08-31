@@ -88,7 +88,7 @@ fi
 
 if ! curl -fsS --max-time 3 "$BFF_URL/healthz" > /dev/null 2>&1; then
     echo "❌ BFF not reachable at $BFF_URL"
-    echo "   Bring the compose stack up first: cd deployments && bash scripts/start.sh"
+    echo "   Ensure aep-api is running ('make dev-cluster') and accessible at $BFF_URL"
     exit 1
 fi
 
@@ -101,7 +101,7 @@ TOKEN=$(curl -sS -X POST "${THUNDER_URL%/}/oauth2/token" \
 
 if [ -z "$TOKEN" ]; then
     echo "❌ Thunder did not return an access_token for '${SEEDER_CLIENT_ID}'."
-    echo "   The client is registered by deployments/scripts/setup-local.sh / start.sh."
+    echo "   The client is registered by deployments/scripts/setup-local.sh."
     exit 1
 fi
 

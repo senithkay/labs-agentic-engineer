@@ -73,73 +73,79 @@ flowchart LR
 
 Skills are how the platform is taught rather than changed.
 
-## Running Locally
+## Running the platform
+
+There are two deployment paths:
+
+| | **Local dev** | **Existing OC cluster** |
+|---|---|---|
+| How | Skaffold + k3d | `aectl platform install` |
+| Entry point | `make dev-cluster` | `aectl platform install` |
+| Who | contributors | platform engineers |
+
+### Local dev (Skaffold)
 
 The whole platform runs on one laptop: a k3d cluster with OpenChoreo, Thunder
-(identity), Temporal, and the AEP services, plus one-shot coding-agent pods. The
-canonical scripts live in [`deployments/`](deployments/README.md).
-
-### Prerequisites
+(identity), Temporal, and the AEP services deployed in-cluster via Helm +
+Skaffold. Coding agents run as ephemeral OC Job Components. Full details in
+[`deployments/`](deployments/README.md).
 
 **Container runtime.** Docker Desktop or Colima, sized generously — the cluster
-runs the OpenChoreo control/data/workflow planes, Thunder and Temporal, with the
-AEP services alongside it as host containers. Colima wants at least
-`--cpu 7 --memory 8`, plus several GB of free disk for the coding-agent runner
-image. Nothing else is needed on the host: every service image builds inside
-Docker, toolchains included.
+runs the OpenChoreo control/data/workflow planes, Thunder, and Temporal alongside
+the AEP services. Colima wants at least `--cpu 7 --memory 8`, plus several GB of
+free disk for the coding-agent runner image.
 
-**CLI tools.** `docker` (with Compose v2 and buildx), `k3d`, `kubectl`, `helm`,
+**CLI tools.** `docker` (with buildx), `k3d`, `kubectl`, `helm`, `skaffold`,
 `jq`, `yq`, `openssl`, `curl`.
 
 **Credentials.** An Anthropic API key and a GitHub PAT (or GitHub App). Neither
 is needed to bring the platform up — you connect both from the console
 afterwards, and they're stored per organization.
 
-**Free ports.** The cluster claims `6550`, `8080`, `8443`, `19080`, `19443`,
-`10081`, `10082` (setup refuses to start if any are taken); the services claim
-`8090`, `9090`, `4000`, `3400`, `3401`, `5433`, `8085`.
+**Free ports.** The cluster's k3d loadbalancer claims `6550`, `8080`, `8443`,
+`19080`, `19443`, `10081`, `10082`. Additional service NodePorts: `9090`
+(aep-api), `4000` (agents), `3401` (aep-mcp-server), `8233` (Temporal Web UI).
 
 ### Bring it up
 
-Two commands, with two different lifecycles — the first is once per machine, the
-second is every time you start the platform:
+Three steps, with different lifecycles:
 
 ```bash
-bash deployments/scripts/setup.sh    # the cluster and everything under it
-bash deployments/scripts/start.sh    # the AEP services
+# Once per machine — creates the k3d cluster with OC, Thunder, Temporal
+bash deployments/scripts/setup-dev.sh
+
+# Once per cluster — registers secrets, Thunder OAuth clients, resource-type catalog
+make setup-local
+
+# Every dev session — builds images, loads into k3d, deploys via Helm, watches for changes
+make dev-cluster
 ```
 
-`setup.sh` creates the k3d cluster, installs the platform underneath
+`setup-dev.sh` creates the k3d cluster, installs the platform underneath
 (cert-manager, External Secrets, kgateway, OpenBao, then OpenChoreo's control,
-data and workflow planes, Thunder for identity, Temporal for the run supervisor),
-registers the AEP workflows and component types with OpenChoreo, builds the
-coding-agent runner image, and writes `deployments/.env`. Expect it to take a
-while on a cold machine — chart installs, image pulls, and a multi-GB runner
-image. It is idempotent, so if a step fails you fix the cause and re-run it.
+data and workflow planes, Thunder for identity, Temporal for the run supervisor).
+Expect it to take a while on a cold machine — chart installs and image pulls.
+It is idempotent, so if a step fails you fix the cause and re-run it.
 
-`start.sh` builds and starts the services as containers (`docker compose up`):
-the console, the BFF, the agents runtime, collab, the MCP server and Postgres.
-It also re-checks the things that drift when your machine restarts — cluster DNS,
-the OpenBao bridge, per-org secrets — which is why it's a script rather than a
-bare `docker compose up`. Stop them again with
-`bash deployments/scripts/stop.sh`; the cluster keeps running.
+`make setup-local` registers Kubernetes secrets, Thunder OAuth clients, and the
+PE resource-type catalog (postgres, thunder-app) that the Helm chart needs.
 
-Coding agents don't run in Compose. Each one is dispatched into the cluster as a
-one-shot pod, as it is in a real deployment.
+`make dev-cluster` (Skaffold) builds the AEP service images, loads them into the
+k3d node, deploys via the platform Helm chart, and watches for file changes to
+rebuild and redeploy. Coding agents run as ephemeral OC Job Components dispatched
+into the cluster, not as long-lived services.
 
-Observability is off by default because it's the heaviest install
-(`ENABLE_OBSERVABILITY=1 bash deployments/scripts/setup.sh` adds OpenSearch,
-Fluent Bit and the RCA agent). It's what the in-UI live progress streaming and
-the [SRE handoff pipeline](docs/developer-guide/sre-handoff-runbook.md) need. The
-RCA agent is platform-level rather than per-org, so it's the one component that
-wants an `ANTHROPIC_API_KEY` in `deployments/.env`.
+Observability is off by default because it's the heaviest install. Add it on top
+of an existing cluster with `aectl sre install` — installs OpenSearch, Fluent Bit,
+and the RCA agent needed for in-UI live progress streaming and the
+[SRE handoff pipeline](docs/developer-guide/sre-handoff-runbook.md).
 
 ### Accessing the portal
 
-The console is at **http://localhost:8090**. Sign in as `admin` / `admin` — the
-Thunder default admin, which setup binds to OpenChoreo's `admin` role. Login
-redirects through `thunder.openchoreo.localhost`, so if your OS doesn't resolve
-`*.localhost`, point that name at `127.0.0.1` in `/etc/hosts`.
+The console is at **http://console.openchoreo.localhost:8080**. Sign in as
+`admin` / `admin` — the Thunder default admin, which setup binds to OpenChoreo's
+`admin` role. Login redirects through `thunder.openchoreo.localhost`, so if your
+OS doesn't resolve `*.localhost`, point those names at `127.0.0.1` in `/etc/hosts`.
 
 Before the first project, connect the organization's credentials in the console —
 both are per-org, which is why bring-up doesn't ask for them:
@@ -150,20 +156,35 @@ both are per-org, which is why bring-up doesn't ask for them:
   is billed to. There is no platform fallback, so nothing generates until it's
   connected.
 
-If you'd rather not click through that on every fresh cluster, put
-`LOCAL_DEV_ADMIN_GITHUB_PAT`, `LOCAL_DEV_ADMIN_GITHUB_OWNER` and
-`ANTHROPIC_API_KEY` in `deployments/.env` and `start.sh` connects them for you.
-
 GitHub webhooks — the ones that drive a merged PR through build and deploy —
-already work: setup provisions a [smee.io](https://smee.io) channel into `.env`
-and the stack runs a relay for it.
+need a smee.io channel configured in the git-ignored
+`deployments/helm-charts/platform/values.local.dev.yaml` override file. See that
+file's comments (copy from `values.local.dev.yaml.example`).
 
 Other surfaces worth knowing: the BFF at `localhost:9090`, the Temporal Web UI at
 `localhost:8233` for the run workflows, and OpenChoreo's Argo UI in the workflow
 plane for build and coding-agent pods.
 
-Tear down the services with `bash deployments/scripts/stop.sh`, or the whole
-cluster with `k3d cluster delete openchoreo`, which drops all OpenChoreo state.
+Tear down the cluster with `bash deployments/scripts/delete-dev.sh`, which drops
+all OpenChoreo and Temporal state.
+
+### Installing on an existing OpenChoreo cluster (aectl)
+
+For platform engineers installing AEP on a cluster that already has OpenChoreo
+running, use the `aectl` CLI:
+
+```bash
+# Build the CLI
+cd tools/aectl && go build -o aectl .
+
+# Install AEP onto the current kubecontext
+aectl platform install
+```
+
+`aectl platform install` installs the AEP Helm chart, provisions OpenBao, and
+registers Thunder OAuth clients — the same outcome as the Skaffold path but
+without the k3d cluster setup or Skaffold watch loop. The CLI source lives in
+[`tools/aectl/`](tools/aectl/AGENTS.md).
 
 ## Where the code lives
 
@@ -179,7 +200,7 @@ cluster with `k3d cluster delete openchoreo`, which drops all OpenChoreo state.
 | [`packages/`](packages/contracts/AGENTS.md) | shared libraries. `packages/contracts` holds the hand-authored OpenAPI every client and server is generated from |
 | [`playground/`](playground/AGENTS.md) | a cluster-free harness that runs the real agents against a plain local directory — how the skills and prompts get tuned |
 | [`evals/spec-agents`](evals/spec-agents/README.md) | scenario evals for the design-time agents. On demand, never in CI |
-| [`deployments/`](deployments/README.md) | the local stack: k3d + OpenChoreo under the AEP services in Compose |
+| [`deployments/`](deployments/README.md) | the local stack: k3d + OpenChoreo + AEP services deployed in-cluster via Skaffold |
 
 
 ## Status and feedback

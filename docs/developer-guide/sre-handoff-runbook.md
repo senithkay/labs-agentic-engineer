@@ -14,7 +14,7 @@ ERROR log → alert rule → observer → ai-rca-agent (RCA → remediation → 
 
 ## Prerequisites
 
-1. Local AEP stack up (`deployments/docker-compose.yml`) and a k3d OpenChoreo with the
+1. Local AEP stack up (`make dev-cluster`) and a k3d OpenChoreo with the
    observability plane (`observer`, `opensearch`, `fluent-bit`, `ai-rca-agent`).
 2. Both sides share one Thunder (`thunder.openchoreo.localhost:8080`).
 3. AEP org connected to GitHub + an Anthropic key in org settings.
@@ -24,12 +24,12 @@ ERROR log → alert rule → observer → ai-rca-agent (RCA → remediation → 
 ## AEP side
 
 ```bash
-# Start the MCP server (the SRE agent's door into AEP)
-cd deployments && docker compose up -d aep-api aep-mcp-server
+# Start the full stack (deploys aep-api, aep-mcp-server, and all AEP services in-cluster)
+make dev-cluster
 curl -s http://localhost:3401/healthz    # {"status":"ok"}
 
-# Verify aep-api accepts the RCA agent's token audience (compose default already does)
-docker logs aep-api 2>&1 | grep "Inbound JWT verifier"
+# Verify aep-api accepts the RCA agent's token audience
+kubectl -n wso2-aep logs deploy/aep-api | grep "Inbound JWT verifier"
 # expect: "audience":"aep-*,openchoreo-rca-agent"
 ```
 
@@ -37,9 +37,8 @@ docker logs aep-api 2>&1 | grep "Inbound JWT verifier"
 
 ```bash
 # Deploy an RCA-agent image that includes the handoff stage.
-# Use the same repo:tag as RCA_IMAGE_TAG in scripts/setup-observability.sh
-# (last verified against tharindulak/openchoreo-sre-agent:handoff-v12) so a later
-# setup-observability.sh re-run picks up this local build instead of pulling.
+# Use the same repo:tag as RCA_IMAGE_TAG used when aectl sre install was last run
+# (last verified against tharindulak/openchoreo-sre-agent:handoff-v12).
 cd <openchoreo-repo>/agents/sre-agent
 docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 .
 k3d image import tharindulak/openchoreo-sre-agent:handoff-v12 -c <cluster>

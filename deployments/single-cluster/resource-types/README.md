@@ -11,12 +11,11 @@ catalog for the local single-cluster dev stack. Each type's directory holds:
 - `operator/` — present only when AEP itself provides the type's backing
   implementation (e.g. `thunder-app`). It is a real Go module (added to the
   root `go.work`, built with the rest of the workspace) with its own Helm
-  chart. The local dev stack installs this chart via `helm` as part of
-  `setup-aep.sh`; a real cluster's PE may reuse this chart or bring its own
-  backing for the same type name.
+  chart. The local dev stack installs this chart via `make setup-local`; a real
+  cluster's PE may reuse this chart or bring its own backing for the same type name.
 
 The `resourcetype.yaml` and `rbac.yaml` are **LOCAL-ONLY samples**, applied by
-`deployments/scripts/setup-aep.sh` acting as the cluster PE. Nothing here is
+`make setup-local` (which acts as the cluster PE). Nothing here is
 installed by the `wso2-ae-platform` or `wso2-agentic-engineer-bundle` charts —
 app-factory's BFF only discovers and references whatever `ClusterResourceType`s
 exist on a cluster; it never authors them. A real cluster's PE curates its own

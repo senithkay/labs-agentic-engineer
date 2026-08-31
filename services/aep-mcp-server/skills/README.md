@@ -29,11 +29,11 @@ runtime. Instead the skill is **materialized at deploy time**:
 3. The agent's `EXTERNAL_SKILLS_DIR=/etc/rca-agent/skills` makes its loader read
    the mounted copy (searched before its built-in `src/skills` library).
 
-This wiring is done by **`deployments/scripts/setup-observability.sh` step 3d**
-(gated on `AE_HANDOFF=true`), which reads this file, renders the ConfigMap, and
-strategic-merge-patches the `ai-rca-agent` Deployment with the volume, mount,
-and `EXTERNAL_SKILLS_DIR`. Edit the skill here, re-run that script (or just
-re-apply the ConfigMap) and restart the agent — no SRE image rebuild.
+This wiring is done by **`aectl sre install`** (gated on `--ae-handoff=true`),
+which reads this file, renders the ConfigMap, and strategic-merge-patches the
+`ai-rca-agent` Deployment with the volume, mount, and `EXTERNAL_SKILLS_DIR`.
+Edit the skill here, re-run `aectl sre install` (or just re-apply the ConfigMap)
+and restart the agent — no SRE image rebuild.
 
 > Edit this file, not any copy on the agent side. There is no committed copy in
 > the SRE repo; the only other instance is the transient ConfigMap.

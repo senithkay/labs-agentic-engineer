@@ -32,11 +32,10 @@
 # `bal library` tool, but only for playground runs — see
 # playground/src/engine/coding-run.ts).
 #
-# SKIP_IMPORT=1 builds without importing — used by setup.sh, which starts this
-# build in the background before the cluster exists and leaves the import to
-# setup-aep.sh so the multi-GB node import runs exactly once.
+# SKIP_IMPORT=1 builds without importing — useful when building before the
+# cluster exists; the caller then imports explicitly once the cluster is ready.
 #
-# Called by setup-aep.sh (build + import at setup) and `make build-runner`.
+# Called by `make build-runner` (build + import).
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
@@ -112,8 +111,7 @@ elif command -v k3d &>/dev/null && k3d cluster list "$CLUSTER_NAME" &>/dev/null;
     # A missing image is a FAILURE, not a warning: this tag is local-only, so a pod
     # that cannot find it has no registry to fall back on and the dispatch is dead.
     # Both callers already expect a non-zero exit here and turn it into their own
-    # message (setup-aep.sh's "dispatch stays disabled until fixed", setup.sh's
-    # background-build branch), so exiting non-zero is what makes those fire.
+    # exiting non-zero signals this failure to callers.
     if k3d image import "$IMAGE" -c "$CLUSTER_NAME"; then
         # A successful import is not durable on its own: an idle local-only tag is
         # collected early by kubelet's image GC, and the next Job then has nothing to
@@ -135,5 +133,5 @@ elif command -v k3d &>/dev/null && k3d cluster list "$CLUSTER_NAME" &>/dev/null;
         exit 1
     fi
 else
-    echo "ℹ️  k3d cluster '$CLUSTER_NAME' not found — built the image only; setup-aep.sh imports it at cluster setup."
+    echo "ℹ️  k3d cluster '$CLUSTER_NAME' not found — built the image only; run 'make build-runner' again once the cluster is up to import it."
 fi
