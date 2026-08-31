@@ -235,7 +235,14 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 	}
 
 	slog.InfoContext(ctx, "anthropic.connected", "ocOrgId", ocOrgID, "keyPrefix", prefix)
-	return projectionFromAnthropicRow(&row), nil
+	// Reload so projectionFromAnthropicRow returns the database's connected_at
+	// rather than the local timestamp — the upsert's ON CONFLICT clause does
+	// not update connected_at, so it retains the original value on key replacement.
+	persisted, err := s.fetchRow(ctx, ocOrgID)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic connect: reload: %w", err)
+	}
+	return projectionFromAnthropicRow(persisted), nil
 }
 
 // ----------------------------------------------------------------------------
@@ -355,7 +362,11 @@ type ApplyWPSecretResult struct {
 func (s *AnthropicCredentialService) ApplyWPSecret(ctx context.Context, ocOrgID string) (*ApplyWPSecretResult, error) {
 	row, err := s.fetchRow(ctx, ocOrgID)
 	if err != nil {
-		return nil, ErrAnthropicKeyRequired
+		var nf *NotFoundError
+		if errors.As(err, &nf) {
+			return nil, ErrAnthropicKeyRequired
+		}
+		return nil, err
 	}
 	if row.Status != "active" {
 		return nil, ErrAnthropicKeyRequired
@@ -535,6 +546,11 @@ func (s *AnthropicCredentialService) validateAnthropicKey(ctx context.Context, k
 		// 200 = key valid; 400 = key recognized but request payload arguable
 		// (e.g. unknown model). Either way the key is authenticated.
 		return nil
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("anthropic rate limited (429): %s", truncateForError(respBody))
+	}
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("anthropic transient error %d: %s", resp.StatusCode, truncateForError(respBody))
 	}
 	return &ValidationError{
 		Code:    "anthropic_unexpected_status",

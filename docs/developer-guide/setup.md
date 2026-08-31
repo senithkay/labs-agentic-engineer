@@ -46,6 +46,7 @@ Temporal; `make setup-local` registers secrets and Thunder OAuth clients; and
 The root README has the full walkthrough; the `deployments/` README documents
 each step.
 
-**Existing OC cluster (aectl):** Build `tools/aectl` and run
-`aectl platform install` — installs the Helm chart, provisions OpenBao, and
+**Existing OC cluster (aectl):** Build `tools/aectl`, run
+`aectl platform config import --config <file>` to write cluster config, then
+`./aectl platform install` — installs the Helm chart, provisions OpenBao, and
 wires Thunder clients onto a cluster that already has OpenChoreo.

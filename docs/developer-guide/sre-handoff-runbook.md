@@ -14,7 +14,7 @@ ERROR log → alert rule → observer → ai-rca-agent (RCA → remediation → 
 
 ## Prerequisites
 
-1. Local AEP stack up (`make dev-cluster`) and a k3d OpenChoreo with the
+1. Local AEP stack up (`make dev-cluster`) and a k3d-based OpenChoreo cluster with the
    observability plane (`observer`, `opensearch`, `fluent-bit`, `ai-rca-agent`).
 2. Both sides share one Thunder (`thunder.openchoreo.localhost:8080`).
 3. AEP org connected to GitHub + an Anthropic key in org settings.

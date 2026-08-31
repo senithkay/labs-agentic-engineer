@@ -262,8 +262,11 @@ func (s *CredentialService) Connect(ctx context.Context, ocOrgID string, req Con
 	if hadRow && existing.Status == "active" && existing.Kind != req.Kind {
 		return nil, &ConflictError{Reason: fmt.Sprintf("active %s connection exists; disconnect before connecting %s", existing.Kind, req.Kind)}
 	}
-	if hadRow && (existing.Status == "disconnecting") {
+	if hadRow && existing.Status == "disconnecting" {
 		return nil, &ConflictError{Reason: "disconnect in progress; retry shortly"}
+	}
+	if hadRow && existing.Status == "suspended" {
+		return nil, &ConflictError{Reason: "connection is suspended; unsuspend the GitHub App installation before reconnecting"}
 	}
 
 	switch req.Kind {
@@ -769,6 +772,9 @@ func (s *CredentialService) GetWebhookSecrets(ctx context.Context, ocOrgID strin
 		return out, nil
 
 	case "app-installation":
+		if s.minter == nil || s.minter.AppID() == 0 {
+			return nil, &ConflictError{Reason: "GitHub App not configured on this deployment"}
+		}
 		// Platform-wide secret list at _platform/github/app/webhook_secret.
 		// Loaded via the platform-key path (which only the seed loads
 		// directly — for the receiver-time read we go through a tiny
@@ -890,15 +896,16 @@ func (s *CredentialService) OrgIDByRepoFullName(ctx context.Context, fullName st
 	// the canonical clone URL — `https://github.com/<owner>/<repo>` or
 	// `...<repo>.git`. We match either shape so a webhook payload's
 	// `<owner>/<repo>` (without `.git`) routes correctly.
+	// Exact equality avoids LIKE wildcard injection if fullName contains % or _.
 	var row struct {
 		OrgID string `gorm:"column:org_id"`
 	}
-	suffix := "%/" + fullName
-	suffixGit := suffix + ".git"
+	url1 := "https://github.com/" + fullName
+	url2 := url1 + ".git"
 	err := s.db.WithContext(ctx).
 		Table("git_repositories").
 		Select("org_id").
-		Where("repo_url LIKE ? OR repo_url LIKE ?", suffix, suffixGit).
+		Where("repo_url = ? OR repo_url = ?", url1, url2).
 		Limit(1).
 		Scan(&row).Error
 	if err != nil {

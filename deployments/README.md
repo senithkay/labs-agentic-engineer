@@ -24,7 +24,7 @@ workloads managed by Skaffold and the platform Helm chart
 (`helm-charts/platform`). Coding agents run as ephemeral OpenChoreo Job
 Components in the project's data-plane namespace.
 
-```
+```text
 ┌──────────────────────── k3d cluster ──────────────────────────┐
 │ OC Control / Data / Workflow planes                           │
 │ Thunder IDP   OpenBao   ESO   kgateway   Temporal             │

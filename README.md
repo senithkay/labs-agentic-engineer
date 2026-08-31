@@ -177,8 +177,11 @@ running, use the `aectl` CLI:
 # Build the CLI
 cd tools/aectl && go build -o aectl .
 
+# Write cluster config to the in-cluster ConfigMap (required before install)
+./aectl platform config import --config ~/my-aectl-config.yaml
+
 # Install AEP onto the current kubecontext
-aectl platform install
+./aectl platform install
 ```
 
 `aectl platform install` installs the AEP Helm chart, provisions OpenBao, and

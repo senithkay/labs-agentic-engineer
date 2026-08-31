@@ -39,6 +39,11 @@ fi
 
 kubectl apply -f skaffold/namespace.yaml
 kubectl apply -f skaffold/addon-namespaces.yaml
+if [ ! -f skaffold/secrets.yaml ]; then
+  echo "Error: skaffold/secrets.yaml not found."
+  echo "Copy skaffold/secrets.yaml.example to skaffold/secrets.yaml, fill in the required values, and re-run."
+  exit 1
+fi
 kubectl apply -f skaffold/secrets.yaml
 
 # Generate the RSA task-signing key on first install only.
@@ -47,10 +52,15 @@ if kubectl get secret aep-task-signing-key -n "$NAMESPACE" >/dev/null 2>&1; then
   echo "aep-task-signing-key already exists — skipping"
 else
   echo "Generating aep-task-signing-key..."
-  RSA_KEY=$(openssl genrsa 2048 2>/dev/null)
+  KEY_FILE=$(mktemp)
+  # shellcheck disable=SC2064
+  trap "rm -f '$KEY_FILE'" EXIT
+  openssl genrsa 2048 2>/dev/null > "$KEY_FILE"
   kubectl create secret generic aep-task-signing-key \
     --namespace="$NAMESPACE" \
-    --from-literal="task-signing.pem=$RSA_KEY"
+    --from-file="task-signing.pem=$KEY_FILE"
+  rm -f "$KEY_FILE"
+  trap - EXIT
   echo "aep-task-signing-key created"
 fi
 
