@@ -1,101 +1,84 @@
-# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
-#
-# WSO2 LLC. licenses this file to you under the Apache License,
-# Version 2.0 (the "License"); you may not use this file except
-# in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-
-# Local dev inner loop: build → load into k3d → deploy via Helm → watch.
-#
-# Prerequisites (run once per cluster):
-#   ./deployments/scripts/setup-k3d.sh   # k3d + OpenChoreo
-#   make setup-local                      # secrets + Thunder clients
-#
-# Usage:
-#   make dev-cluster      # skaffold dev (watch + rebuild on change)
-#   make deploy-local     # skaffold run (one-shot build + deploy)
-
 apiVersion: skaffold/v4beta11
 kind: Config
 metadata:
   name: aep
 
 build:
-  local:
-    # k3d is detected automatically — Skaffold loads images via `k3d image import`
-    # instead of pushing to a registry. TS service images use this path.
-    push: false
-    # Dockerfiles use BuildKit features (--mount); Skaffold's API builder
-    # defaults to the legacy builder even on daemons whose CLI defaults to
-    # BuildKit.
-    useBuildkit: true
   artifacts:
-    # aep-api requires a BuildKit named context for the skills/ directory.
-    # A custom builder passes --build-context so the existing Dockerfile is
-    # unchanged and production CI is unaffected.
     - image: ghcr.io/wso2/aep/aep-api
-      custom:
-        buildCommand: |
-          docker build \
-            --build-context skills=./skills \
-            -f services/aep-api/Dockerfile \
-            -t "$IMAGE" \
-            ./services/aep-api
-          if [ "${PUSH_IMAGE}" = "false" ]; then
-            k3d image import "$IMAGE" --cluster openchoreo
-          fi
-        dependencies:
-          paths:
-            - services/aep-api/**
-            - skills/**
-          ignore:
-            - services/aep-api/bin/**
-
+      context: services/aep-api
+      docker:
+        dockerfile: Dockerfile
+        cliFlags:
+          - "--build-context=skills=./skills"
     - image: ghcr.io/wso2/aep/agents
       context: .
       docker:
         dockerfile: services/agents/Dockerfile
-
     - image: ghcr.io/wso2/aep/collab
       context: .
       docker:
         dockerfile: services/collab/Dockerfile
-
     - image: ghcr.io/wso2/aep/aep-mcp-server
       context: .
       docker:
         dockerfile: services/aep-mcp-server/Dockerfile
-
     - image: ghcr.io/wso2/aep/console
       context: .
       docker:
         dockerfile: apps/console/Dockerfile
+    - image: ghcr.io/wso2/aep/remote-worker
+      context: runners/remote-worker
+      docker:
+        dockerfile: Dockerfile
+        cliFlags:
+          - "--build-context=skills=./skills"
+      dependencies:
+        paths:
+          - runners/remote-worker/**
+          - skills/**
+        ignore:
+          - runners/remote-worker/node_modules/**
+          - runners/remote-worker/dist/**
+    - image: ghcr.io/wso2/aep/thunder-app-operator
+      context: deployments/single-cluster/resource-types/thunder-app/operator
+      docker:
+        dockerfile: Dockerfile
+  local:
+    push: false
+    useBuildkit: true
+
+manifests:
+  rawYaml:
+    - skaffold/namespace.yaml
+    - skaffold/addon-namespaces.yaml
+    - skaffold/secrets.yaml
+    - deployments/single-cluster/resource-types/thunder-app/resourcetype.yaml
+    - deployments/single-cluster/resource-types/thunder-app/rbac.yaml
+    - deployments/single-cluster/resource-types/postgres-cnpg/resourcetype.yaml
+    - deployments/single-cluster/resource-types/postgres-cnpg/rbac.yaml
 
 deploy:
+  kubectl: {}
   helm:
+    hooks:
+      before:
+        - host:
+            command: ["sh", "skaffold/generate-and-apply.sh"]
+            os: [darwin, linux]
+            dir: "."
+      after:
+        - host:
+            command: ["sh", "skaffold/thunder-setup.sh"]
+            os: [darwin, linux]
+            dir: "."
     releases:
       - name: aep-platform
-        namespace: wso2-aep
-        createNamespace: false  # namespace + secrets created by setup-local-secrets.sh
         chartPath: deployments/helm-charts/platform
+        namespace: wso2-aep
+        createNamespace: true
         valuesFiles:
-          - deployments/helm-charts/platform/values.yaml
-          - deployments/helm-charts/platform/values.local.yaml
-          # Per-developer overrides (git-ignored), layered last so it wins. Copy
-          # values.local.dev.yaml.example to values.local.dev.yaml and edit — e.g.
-          # webhook.deliveryURL for local GitHub webhook delivery. The
-          # dev-cluster/deploy-local Make targets create an empty stub if it is
-          # missing, so skaffold never fails on a fresh checkout.
-          - deployments/helm-charts/platform/values.local.dev.yaml
+          - skaffold/helm-values.yaml
         setValueTemplates:
           aepApi.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_aep_api}}"
           aepApi.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_aep_api}}"
@@ -107,10 +90,40 @@ deploy:
           aepMcpServer.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_aep_mcp_server}}"
           console.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_console}}"
           console.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_console}}"
+          codingAgentRunner.image: "{{.IMAGE_REPO_ghcr_io_wso2_aep_remote_worker}}:{{.IMAGE_TAG_ghcr_io_wso2_aep_remote_worker}}"
+        setValues:
+          ### ── Built-in defaults (local dev infrastructure, fixed for k3d) ──
+          # Use plain K8s Secrets instead of ESO/OpenBao
+          localSecrets.enabled: "true"
 
-portForward:
-  - resourceType: service
-    resourceName: aep-api
-    namespace: wso2-aep
-    port: 9090
-    localPort: 9090
+
+          ### ── Overridable defaults (config file — mirrors aectl platform config import) ──
+          # thunder.url
+          thunder.adminURL: "http://thunder-service.thunder.svc.cluster.local:8090"
+          thunder.jwksURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
+          # thunder.public_url
+          console.thunderPublicURL: "http://thunder.openchoreo.localhost:8080"
+          # oc.api_url
+          platformAPI.baseURL: "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080"
+          # codingagent.openbao_direct.enabled
+          codingAgentDispatch.openBaoDirect.enabled: "true"
+          # openbao.addr
+          openbao.addr: "http://openbao.openbao.svc.cluster.local:8200"
+          # oc.local_org_provisioning.enabled
+          localOrgProvisioning.enabled: "true"
+          # oc.org_namespace
+          localOrgProvisioning.orgNamespace: "default"
+          # platform.workspaces.access_mode
+          workspaces.accessMode: "ReadWriteOnce"
+      - name: thunder-app-operator
+        chartPath: deployments/single-cluster/resource-types/thunder-app/operator/helm
+        namespace: thunder-app-operator-system
+        createNamespace: true
+        setValueTemplates:
+          image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_thunder_app_operator}}"
+          image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_thunder_app_operator}}"
+      - name: cnpg
+        remoteChart: oci://ghcr.io/cloudnative-pg/charts/cloudnative-pg
+        version: "0.29.0"
+        namespace: cnpg-system
+        createNamespace: true
