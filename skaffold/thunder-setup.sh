@@ -18,10 +18,17 @@
 # Registers all AEP OAuth clients in Thunder and patches its CORS config.
 # Reads client secrets from the aep-thunder-secrets K8s Secret applied by
 # skaffold/secrets.yaml. Called as a Skaffold post-Helm deploy hook.
-# Idempotent: re-running is safe.
+# Idempotent: re-running is safe. Skips on subsequent Skaffold dev cycles once
+# a sentinel ConfigMap is written — deleted automatically when the cluster resets.
 set -e
 
 PLATFORM_NS="${PLATFORM_NS:-wso2-aep}"
+SENTINEL=aep-thunder-setup-done
+
+if kubectl get configmap "$SENTINEL" -n "$PLATFORM_NS" >/dev/null 2>&1; then
+  echo "Thunder clients already registered — skipping (delete configmap/$SENTINEL to force re-run)"
+  exit 0
+fi
 THUNDER_NS="${THUNDER_NS:-thunder}"
 THUNDER_DEPLOYMENT="${THUNDER_DEPLOYMENT:-thunder-deployment}"
 THUNDER_CONFIG_MAP="${THUNDER_CONFIG_MAP:-thunder-config-map}"
@@ -311,3 +318,5 @@ else
 
   echo "Thunder CORS updated"
 fi
+
+kubectl create configmap "$SENTINEL" -n "$PLATFORM_NS" --from-literal=done=true 2>/dev/null || true

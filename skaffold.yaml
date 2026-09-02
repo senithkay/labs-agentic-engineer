@@ -13,26 +13,59 @@ build:
           - "--build-context=skills=./skills"
     - image: ghcr.io/wso2/aep/agents
       context: .
-      docker:
-        dockerfile: services/agents/Dockerfile
+      custom:
+        buildCommand: docker build -f services/agents/Dockerfile -t $IMAGE .
+        dependencies:
+          paths:
+            - services/agents/**
+            - packages/**
+            - pnpm-workspace.yaml
+            - package.json
+            - pnpm-lock.yaml
+            - tsconfig.base.json
     - image: ghcr.io/wso2/aep/collab
       context: .
-      docker:
-        dockerfile: services/collab/Dockerfile
+      custom:
+        buildCommand: docker build -f services/collab/Dockerfile -t $IMAGE .
+        dependencies:
+          paths:
+            - services/collab/**
+            - packages/**
+            - pnpm-workspace.yaml
+            - package.json
+            - pnpm-lock.yaml
+            - tsconfig.base.json
     - image: ghcr.io/wso2/aep/aep-mcp-server
       context: .
-      docker:
-        dockerfile: services/aep-mcp-server/Dockerfile
+      custom:
+        buildCommand: docker build -f services/aep-mcp-server/Dockerfile -t $IMAGE .
+        dependencies:
+          paths:
+            - services/aep-mcp-server/**
+            - pnpm-workspace.yaml
+            - package.json
+            - pnpm-lock.yaml
+            - tsconfig.base.json
     - image: ghcr.io/wso2/aep/console
       context: .
-      docker:
-        dockerfile: apps/console/Dockerfile
+      custom:
+        buildCommand: docker build -f apps/console/Dockerfile -t $IMAGE .
+        dependencies:
+          paths:
+            - apps/console/**
+            - packages/**
+            - pnpm-workspace.yaml
+            - package.json
+            - pnpm-lock.yaml
+            - tsconfig.base.json
     - image: ghcr.io/wso2/aep/remote-worker
       context: runners/remote-worker
       docker:
         dockerfile: Dockerfile
         cliFlags:
           - "--build-context=skills=./skills"
+          - "--build-context=bal-library-tool=./packages/bal-library-tool"
+          - "--secret=id=packagePAT,env=PACKAGE_PAT"
       dependencies:
         paths:
           - runners/remote-worker/**

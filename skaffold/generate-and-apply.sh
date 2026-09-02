@@ -17,10 +17,18 @@
 
 # Applies platform namespaces and secrets, then generates any one-time secrets
 # that cannot be committed to source control.
-# Idempotent: safe to re-run.
+# Idempotent: safe to re-run. Skips on subsequent Skaffold dev cycles once a
+# sentinel ConfigMap is written to the cluster — deleted automatically when the
+# cluster is reset.
 set -e
 
 NAMESPACE=wso2-aep
+SENTINEL=aep-generate-setup-done
+
+if kubectl get configmap "$SENTINEL" -n "$NAMESPACE" >/dev/null 2>&1; then
+  echo "Secrets already seeded — skipping (delete configmap/$SENTINEL to force re-run)"
+  exit 0
+fi
 
 # Bootstrap per-developer helm-values.yaml from the example if not present.
 # Developers should set their own smee.io channel in this file.
@@ -45,3 +53,5 @@ else
     --from-literal="task-signing.pem=$RSA_KEY"
   echo "aep-task-signing-key created"
 fi
+
+kubectl create configmap "$SENTINEL" -n "$NAMESPACE" --from-literal=done=true 2>/dev/null || true
