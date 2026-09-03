@@ -59,9 +59,9 @@ build:
             - pnpm-lock.yaml
             - tsconfig.base.json
     - image: ghcr.io/wso2/aep/remote-worker
-      context: runners/remote-worker
+      context: .
       custom:
-        buildCommand: docker build -f Dockerfile --build-context skills=../skills --build-context bal-library-tool=../packages/bal-library-tool --secret id=packagePAT,env=PACKAGE_PAT -t $IMAGE .
+        buildCommand: docker build -f runners/remote-worker/Dockerfile --build-context skills=./skills --build-context bal-library-tool=./packages/bal-library-tool --secret id=packagePAT,env=PACKAGE_PAT -t $IMAGE runners/remote-worker
         dependencies:
           paths:
             - runners/remote-worker/**/*
