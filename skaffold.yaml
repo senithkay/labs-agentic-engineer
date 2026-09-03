@@ -17,8 +17,8 @@ build:
         buildCommand: docker build -f services/agents/Dockerfile -t $IMAGE .
         dependencies:
           paths:
-            - services/agents/**
-            - packages/**
+            - services/agents/**/*
+            - packages/**/*
             - pnpm-workspace.yaml
             - package.json
             - pnpm-lock.yaml
@@ -29,8 +29,8 @@ build:
         buildCommand: docker build -f services/collab/Dockerfile -t $IMAGE .
         dependencies:
           paths:
-            - services/collab/**
-            - packages/**
+            - services/collab/**/*
+            - packages/**/*
             - pnpm-workspace.yaml
             - package.json
             - pnpm-lock.yaml
@@ -41,7 +41,7 @@ build:
         buildCommand: docker build -f services/aep-mcp-server/Dockerfile -t $IMAGE .
         dependencies:
           paths:
-            - services/aep-mcp-server/**
+            - services/aep-mcp-server/**/*
             - pnpm-workspace.yaml
             - package.json
             - pnpm-lock.yaml
@@ -52,8 +52,8 @@ build:
         buildCommand: docker build -f apps/console/Dockerfile -t $IMAGE .
         dependencies:
           paths:
-            - apps/console/**
-            - packages/**
+            - apps/console/**/*
+            - packages/**/*
             - pnpm-workspace.yaml
             - package.json
             - pnpm-lock.yaml
@@ -64,11 +64,11 @@ build:
         buildCommand: docker build -f Dockerfile --build-context skills=../skills --build-context bal-library-tool=../packages/bal-library-tool --secret id=packagePAT,env=PACKAGE_PAT -t $IMAGE .
         dependencies:
           paths:
-            - runners/remote-worker/**
-            - skills/**
+            - runners/remote-worker/**/*
+            - skills/**/*
           ignore:
-            - runners/remote-worker/node_modules/**
-            - runners/remote-worker/dist/**
+            - runners/remote-worker/node_modules/**/*
+            - runners/remote-worker/dist/**/*
     - image: ghcr.io/wso2/aep/thunder-app-operator
       context: deployments/single-cluster/resource-types/thunder-app/operator
       docker:
