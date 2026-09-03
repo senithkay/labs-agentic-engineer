@@ -17,7 +17,7 @@
 
 # One-time local dev setup: creates K8s Secrets, registers AEP OAuth clients in
 # Thunder, and installs the PE resource-type catalog (postgres, postgres-cnpg, thunder-app).
-# Run once per cluster, after setup-k3d.sh. Idempotent — safe to re-run.
+# Run once per cluster, after setup-dev.sh. Idempotent — safe to re-run.
 #
 # No Anthropic key is needed here: agents resolve one per turn from the calling
 # org's connected credential (Settings → Anthropic Integration), so there is
@@ -46,7 +46,7 @@ step()    { echo; echo "── $* ──"; }
 # ── Preflight ────────────────────────────────────────────────────────────────
 if ! kubectl --context "${CLUSTER_CONTEXT}" cluster-info &>/dev/null; then
   log_err "Cannot reach cluster (context: ${CLUSTER_CONTEXT})"
-  echo "  Run deployments/scripts/setup-k3d.sh first." >&2
+  echo "  Run deployments/scripts/setup-dev.sh first." >&2
   exit 1
 fi
 
@@ -54,7 +54,7 @@ THUNDER_POD=$(kubectl --context "${CLUSTER_CONTEXT}" get pod -n "${THUNDER_NS}" 
   -l app.kubernetes.io/name=thunder -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
 if [ -z "${THUNDER_POD}" ]; then
   log_err "Thunder pod not found in namespace '${THUNDER_NS}'"
-  echo "  Run deployments/scripts/setup-k3d.sh first." >&2
+  echo "  Run deployments/scripts/setup-dev.sh first." >&2
   exit 1
 fi
 
@@ -473,14 +473,12 @@ kubectl --context "${CLUSTER_CONTEXT}" apply \
   -f "${SCRIPT_DIR}/../single-cluster/resource-types/postgres/resourcetype.yaml"
 log_ok "ClusterResourceType 'postgres'"
 
-# ── Let Helm adopt setup-aep.sh's cluster-scoped resources ───────────────────
-# setup.sh → setup-aep.sh creates these BEFORE the platform Helm chart is
-# installed (they are shared with the Compose flow, which never installs the
-# chart). On the Skaffold flow the chart ALSO defines them, so `helm install`
-# aborts with "invalid ownership metadata ... must be set to Helm" unless the
-# existing objects carry Helm's ownership labels/annotations. Stamp them so the
-# chart adopts (and reconciles) them instead of failing. Idempotent.
-step "Adopting setup-aep resources into the aep-platform Helm release"
+# ── Let Helm adopt any pre-existing cluster-scoped resources ─────────────────
+# If these cluster-scoped resources already exist (e.g. from a prior install
+# that predates the Helm chart), `helm install` aborts with "invalid ownership
+# metadata ... must be set to Helm". Stamp them so the chart adopts (and
+# reconciles) them instead of failing. Idempotent — no-ops when absent.
+step "Adopting cluster-scoped resources into the aep-platform Helm release"
 adopt_for_helm() {
   local rn="$1"
   kubectl --context "${CLUSTER_CONTEXT}" get "$rn" >/dev/null 2>&1 || { return 0; }
@@ -495,7 +493,7 @@ adopt_for_helm clusterauthzrolebinding/aep-api-client-binding
 adopt_for_helm clustertrait/api-configuration
 adopt_for_helm componenttype/web-application
 adopt_for_helm componenttype/service
-log_ok "setup-aep resources adopted"
+log_ok "cluster-scoped resources adopted"
 
 echo
 echo "✅ Local setup complete. Run: make dev-cluster"

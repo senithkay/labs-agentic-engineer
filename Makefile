@@ -133,9 +133,8 @@ deadcode-ts-check:
 	$(PNPM) run deadcode-ts:check
 
 # Local-dev helper (not a uniform verb): build + k3d-import the runner image
-# (one image, both task kinds). setup-aep.sh runs this automatically at setup;
-# use it to force a rebuild after changing runners/remote-worker/Dockerfile or
-# the runner's TS — `make build-runner FORCE=1`.
+# (one image, both task kinds). Use it to force a rebuild after changing
+# runners/remote-worker/Dockerfile or the runner's TS — `make build-runner FORCE=1`.
 build-runner:
 	FORCE=$(FORCE) bash deployments/scripts/build-runner.sh
 
@@ -160,10 +159,9 @@ workflow-skill:
 	@cd runners/remote-worker && npx tsx src/compose_workflow.ts
 
 # ── Local in-cluster dev (Skaffold + k3d) ────────────────────────────────────
-# An alternative to the default docker-compose flow (deployments/scripts/start.sh),
-# which runs the AEP services in-cluster instead of as host containers.
+# Runs the AEP services in-cluster via Helm + Skaffold.
 #
-# Run once per cluster after setup-k3d.sh. Creates K8s Secrets and registers
+# Run once per cluster after setup-dev.sh. Creates K8s Secrets and registers
 # AEP OAuth clients in Thunder. Idempotent. No Anthropic key needed — orgs
 # connect their own from the console and there is no platform fallback.
 setup-local:

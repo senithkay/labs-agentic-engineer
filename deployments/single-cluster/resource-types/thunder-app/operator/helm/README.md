@@ -18,8 +18,7 @@ it, and no dependency-catalog machinery references it.
 
 The thunder-app operator is one reference implementation of the `thunder-app`
 `ClusterResourceType` contract — analogous to how the CNPG operator is one
-reference implementation for `postgres-cnpg`. On the local dev stack, the
-setup scripts (`deployments/scripts/setup-aep.sh`) install it, acting as the
+reference implementation for `postgres-cnpg`. On the local dev stack, `make setup-local` installs it, acting as the
 cluster platform engineer (PE) would. Real clusters are free to install this
 chart themselves, or bring any other backing (a different operator, a managed
 service, a hand-rolled controller) that satisfies the same
@@ -29,8 +28,7 @@ platform.
 ## Install (local stack)
 
 The local stack builds the image, imports it into k3d, and installs this chart
-automatically — see `deployments/scripts/setup-aep.sh` (the block right after
-the postgres-cnpg ClusterResourceType). To do it by hand:
+automatically via `make setup-local`. To do it by hand:
 
 ```sh
 docker build -t thunder-app-operator:local deployments/single-cluster/resource-types/thunder-app/operator

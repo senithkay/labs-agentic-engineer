@@ -143,8 +143,7 @@ bootstrap:
         "AEP API Service|AEP API Service - service-to-service client for OpenChoreo|aep-api-client|aep-api-client-secret"
         "AEP BFF to git-service|BFF outbound Service JWT, audience: git-service|aep-bff-to-git-service|aep-bff-to-git-service-secret"
         "AEP BFF to remote-worker|BFF outbound Service JWT, audience: remote-worker|aep-bff-to-remote-worker|aep-bff-to-remote-worker-secret"
-        "AEP Local Dev Seeder|Local-dev convenience client used by scripts/seed-dev.sh to POST GitHub PAT + Anthropic key to the default org. Not used by any platform code path.|aep-local-dev-seeder|aep-local-dev-seeder-secret"
-        "AEP System Client|System-level Thunder admin client used by the BFF (clients/thundersvc) to mint scope=system tokens for the publisher-app lifecycle (POST /applications). Bound to the Thunder Administrator role by the 60-aep-system-role.sh bootstrap script. See docs/design/api-platform-integration.md §6 Phase 3 (D7).|aep-system-client|aep-system-client-secret"
+"AEP System Client|System-level Thunder admin client used by the BFF (clients/thundersvc) to mint scope=system tokens for the publisher-app lifecycle (POST /applications). Bound to the Thunder Administrator role by the 60-aep-system-role.sh bootstrap script. See docs/design/api-platform-integration.md §6 Phase 3 (D7).|aep-system-client|aep-system-client-secret"
       )
 
       PUBLIC_APPS=(

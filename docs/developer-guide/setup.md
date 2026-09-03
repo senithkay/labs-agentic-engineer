@@ -37,9 +37,16 @@ All driven from the root `Makefile` (the single entry point):
 - **Go:** create the module and add one `use` line to `go.work`. The Makefile
   discovers it dynamically.
 
-## Local stack
+## Running the platform
 
-Two steps, both in `deployments/`: `scripts/setup.sh` installs the k3d cluster and
-everything under it (OpenChoreo, Thunder, Temporal), and `scripts/start.sh` runs
-the AEP services as containers. The root README has the walkthrough; the
-`deployments/` README documents both this and the in-cluster Skaffold flow.
+**Local dev (Skaffold):** Three steps, all in `deployments/`:
+`scripts/setup-dev.sh` creates the k3d cluster with OpenChoreo, Thunder, and
+Temporal; `make setup-local` registers secrets and Thunder OAuth clients; and
+`make dev-cluster` (Skaffold) builds and deploys the AEP services in-cluster.
+The root README has the full walkthrough; the `deployments/` README documents
+each step.
+
+**Existing OC cluster (aectl):** Build `tools/aectl`, run
+`aectl platform config import --config <file>` to write cluster config, then
+`./aectl platform install` — installs the Helm chart, provisions OpenBao, and
+wires Thunder clients onto a cluster that already has OpenChoreo.
