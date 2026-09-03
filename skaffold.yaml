@@ -60,19 +60,15 @@ build:
             - tsconfig.base.json
     - image: ghcr.io/wso2/aep/remote-worker
       context: runners/remote-worker
-      docker:
-        dockerfile: Dockerfile
-        cliFlags:
-          - "--build-context=skills=./skills"
-          - "--build-context=bal-library-tool=./packages/bal-library-tool"
-          - "--secret=id=packagePAT,env=PACKAGE_PAT"
-      dependencies:
-        paths:
-          - runners/remote-worker/**
-          - skills/**
-        ignore:
-          - runners/remote-worker/node_modules/**
-          - runners/remote-worker/dist/**
+      custom:
+        buildCommand: docker build -f Dockerfile --build-context skills=../skills --build-context bal-library-tool=../packages/bal-library-tool --secret id=packagePAT,env=PACKAGE_PAT -t $IMAGE .
+        dependencies:
+          paths:
+            - runners/remote-worker/**
+            - skills/**
+          ignore:
+            - runners/remote-worker/node_modules/**
+            - runners/remote-worker/dist/**
     - image: ghcr.io/wso2/aep/thunder-app-operator
       context: deployments/single-cluster/resource-types/thunder-app/operator
       docker:
