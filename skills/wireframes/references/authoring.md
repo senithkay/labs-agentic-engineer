@@ -9,11 +9,12 @@ file is about deciding what to draw with it.
 
 You have up to three sources in context; read them in this order of priority:
 
-1. **`specs/design/design.md`** — the architecture doc for the whole system.
-   This is your **primary** source for screens: it names the user roles, each
-   component's responsibilities, and the main flows. Derive the screen list from
-   here first. (It may not exist on every turn — if it's absent, promote the
-   requirements to primary.)
+1. **`specs/design/flows/`** and **`specs/design/domain-model.md`** — the
+   flow files name the journeys the screens must serve (one key flow per
+   file, actor first) and the domain model names the entities they display.
+   This is your **primary** source for screens: derive the screen list from
+   the flows first. (They may not exist on every turn — if absent, promote
+   the requirements to primary.)
 2. **`specs/requirements/`** (requirements / user stories) — the **detailed**
    source. Use it to flesh out each screen and to catch tasks the design doc
    only summarized: specific fields, states, rules, and edge cases (out-of-
@@ -58,9 +59,9 @@ different for each*. This is the single most common thing wireframes get wrong:
 they show one generic view and hide the fact that an admin and a regular user
 actually see different screens. Don't do that.
 
-**First, identify the roles.** Read `design.md` for distinct user types —
+**First, identify the roles.** Read the PRD and the design's flow files for distinct user types —
 admin/manager/owner vs. member/employee/developer vs. viewer/customer (the
-design doc usually spells the roles out; the requirements add the detail, and a
+flows usually spell the actors out; the requirements add the detail, and a
 `design.json` auth dependency is a strong hint a signed-in role exists). If the
 app has more than one, roles are in scope even when the prompt doesn't say "per
 role."
@@ -330,7 +331,7 @@ Checklist before finishing a wireframe file:
 - `navbar` is identical across every screen of the app; `sidebar` is scoped
   to each role's destinations, with shared items kept at the same label and
   order across roles.
-- Each role or journey named in `design.md` has its own `flow "<name>"` block,
+- Each role or journey named in the design's `flows/` files has its own `flow "<name>"` block,
   entry screen first, referencing existing screens by name.
 - **Each role flow opens on that role's own screen, and there is no `Login`
   screen when the component has an auth dependency** — the platform's SSO

@@ -189,28 +189,52 @@ function LiveChip({ status }: { status: string }) {
   );
 }
 
-// What a criterion shows while an attempt is IN FLIGHT and no report exists yet.
-//
-// A `manual` criterion gets its final word rather than "Pending": the run will
-// never answer it — that is what the method means — so a chip promising a result
-// would be a claim the eventual report contradicts. Everything else is genuinely
-// waiting on the run, including the legacy `scenario` method and any method this
-// view does not recognise.
-//
-// "Pending" is local rather than a sixth CRITERION_STATE_LABEL entry: that map is
-// report.json's vocabulary, and a criterion with no report has no status to name.
-function AwaitingChip({ method }: { method: string }) {
-  return method === "manual" ? (
-    <StateChip status="manual" />
-  ) : (
-    <Chip size="small" variant="outlined" label="Pending" sx={{ flexShrink: 0 }} />
-  );
+/**
+ * The one chip a criterion's row carries, in precedence order.
+ *
+ * `manual` wins over everything. Such a criterion is answered by a person, so
+ * the run will never answer it — that is what the method means — and any chip
+ * promising a result is a claim the eventual report contradicts. It outranks a
+ * live status as well as a report: a run legitimately reports progress for a
+ * manual criterion (its test plan names every criterion, not only the ones an
+ * agent will work), and rendering that as a run state left the row promising a
+ * result beside a badge saying nobody would produce one.
+ *
+ * Then live over report, and the ordering there is the whole point: a repeat
+ * attempt carries the PREVIOUS attempt's report, so ranking the report higher
+ * would freeze a criterion on the last run's verdict for the entire time the
+ * current run spends re-working it. The report wins again the moment the cycle
+ * settles, because the consumer stops supplying live statuses then.
+ *
+ * `awaiting` last, and only it can yield nothing: the Spec view renders this
+ * same pane with no run attached, where a chip would name a run that does not
+ * exist.
+ */
+function CriterionChip({
+  criterion,
+  report,
+  live,
+  awaiting,
+}: {
+  criterion: Criterion;
+  report: CriterionReport | undefined;
+  live: string | undefined;
+  awaiting: boolean;
+}) {
+  if (criterion.method === "manual") return <StateChip status="manual" />;
+  // pass/fail arrive on the live feed too — report.json's own words, so its chip.
+  if (live) return LIVE_LABEL[live] ? <LiveChip status={live} /> : <StateChip status={live} />;
+  if (report) return <StateChip status={report.status} />;
+  // "Pending" is local rather than a sixth CRITERION_STATE_LABEL entry: that map
+  // is report.json's vocabulary, and a criterion with no report has no status to
+  // name.
+  if (awaiting) return <Chip size="small" variant="outlined" label="Pending" sx={{ flexShrink: 0 }} />;
+  return null;
 }
 
-// One acceptance criterion: method badge, its id, the atomic assertion, and —
-// when a run report is joined in — its run-state chip plus healed/flaky markers
-// and (for a failure) the spec path and failure message beneath. With no report
-// and `awaiting` set, the state chip says what is going to happen to it instead.
+// One acceptance criterion: method badge, its id, the atomic assertion, its
+// status chip (CriterionChip decides which one wins), healed/flaky markers, and
+// — for a failure — the spec path and message beneath.
 function CriterionRow({
   criterion,
   report,
@@ -244,24 +268,12 @@ function CriterionRow({
         {report?.healed && (
           <Chip size="small" variant="outlined" label="healed" sx={{ flexShrink: 0 }} />
         )}
-        {/* Live FIRST, and the ordering is the whole point. A repeat attempt
-            carries the PREVIOUS attempt's report, so ranking the report higher
-            would freeze a criterion on the last run's verdict for the entire
-            two hours the current run spends re-working it. The report wins
-            again the moment the cycle settles, because the consumer stops
-            supplying live statuses once nothing is in flight. */}
-        {live ? (
-          LIVE_LABEL[live] ? (
-            <LiveChip status={live} />
-          ) : (
-            // pass/fail off the feed: report.json's own words, so the same chip.
-            <StateChip status={live} />
-          )
-        ) : report ? (
-          <StateChip status={report.status} />
-        ) : awaiting ? (
-          <AwaitingChip method={criterion.method} />
-        ) : null}
+        <CriterionChip
+          criterion={criterion}
+          report={report}
+          live={live}
+          awaiting={awaiting}
+        />
       </Box>
       {/* Failure detail sits full-width beneath the row (indented past the
           method badge) so a long trace never crowds the assertion. */}

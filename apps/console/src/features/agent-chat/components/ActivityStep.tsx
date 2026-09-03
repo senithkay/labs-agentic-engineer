@@ -73,11 +73,11 @@ function Ring({ spinning }: { spinning: boolean }) {
 }
 
 /**
- * Three states, because two facts arrive at different times (see `ChatMessage`):
- * the body is still streaming, the body has landed but the bundle has not ruled
- * on it, or the verdict is in. The middle one is not cosmetic — a batched step's
- * first file finishes up to a minute before any result flushes, and painting a
- * success tick there would claim a write the write-gates may still reject.
+ * Three states, because two facts arrive on two frames (see `ChatMessage`): the
+ * body is still streaming, the body has landed but the bundle has not ruled on
+ * it, or the verdict is in. The middle one is brief — the agents service settles
+ * each write at its own call — but it is not cosmetic: painting a success tick
+ * there would claim a write the write-gates may still reject.
  */
 function StatusGlyph({
   status,

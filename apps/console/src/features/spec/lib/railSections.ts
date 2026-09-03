@@ -113,7 +113,7 @@ const REQUIREMENTS_MOVED = "The requirements have changed since";
  * Which section a running turn is changing.
  *
  * `start` opens the requirements interview; `settle` and `amend` revise that
- * same document; `design` derives the design — and the acceptance criteria with
+ * same document; `design` derives the design — and the validation criteria with
  * it, but Design is the section named because it is where the work visibly
  * lands and where the user goes to watch it.
  *
@@ -155,7 +155,10 @@ function requirementsReasons(input: RailInput): SectionReason[] {
   if (input.openQuestions > 0) {
     reasons.push({
       key: "open-questions",
-      label: plural(input.openQuestions, "open question", "open questions"),
+      // What the user can do about it, not our name for it: "open question"
+      // is the document's heading, and the fact the user needs is that only
+      // they can answer these.
+      label: plural(input.openQuestions, "question only you can answer", "questions only you can answer"),
       count: input.openQuestions,
       action: "document",
     });
@@ -163,7 +166,9 @@ function requirementsReasons(input: RailInput): SectionReason[] {
   if (input.assumptions > 0) {
     reasons.push({
       key: "assumptions",
-      label: `${plural(input.assumptions, "assumption", "assumptions")} to challenge`,
+      // "marked assumed" points at the pill the user will find on the line;
+      // "to challenge" said what we hoped they would do, not what they see.
+      label: `${plural(input.assumptions, "decision", "decisions")} marked assumed`,
       count: input.assumptions,
       action: "document",
     });
@@ -323,7 +328,7 @@ export function railSections(input: RailInput): RailSection[] {
     section("requirements", "Requirements", requirements),
     // "Design", not "Designs" — one design, written across several documents.
     section("design", "Design", outdatedReason),
-    // The acceptance criteria are written against the same stories the design
+    // The validation criteria are written against the same stories the design
     // is, and the same re-derivation rewrites both — so they go stale together
     // and clear together. Flagging only the design would quietly assert that
     // criteria written against a story you have since rewritten are still fine.

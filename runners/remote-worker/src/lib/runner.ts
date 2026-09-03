@@ -75,10 +75,11 @@ function mirrorDir(workspace: string): string {
 // Agent joins the set for the milestone run loop (docs/design §9.3): a cycle
 // works several issues, and the main agent fans the big, prose-independent,
 // disjoint-App-Path ones out to subagents. The main agent stays the SOLE git
-// writer — subagents Edit/Write only. That split is a SKILL rule, not a tool
-// restriction: the SDK hands a subagent the same allowedTools as its parent,
-// so `aep`'s deny-list is what keeps a subagent off git, and its fan-out
-// section is what keeps small issues inline.
+// writer — subagents Edit/Write, plus the one `gh issue comment` that keeps
+// their own issue's status line current while they work. That split is a SKILL
+// rule, not a tool restriction: the SDK hands a subagent the same allowedTools
+// as its parent, so `aep`'s deny-list is what keeps a subagent off git, and its
+// fan-out section is what keeps small issues inline.
 //
 // The fan-out tool is `Agent`. It was `Task` until the SDK 0.2 → 0.3 bump, and
 // this list still said `Task` afterwards — a name with no tool behind it in
@@ -482,7 +483,7 @@ export async function runClaudeQuery(
   });
 
   // Per-criterion progress — see validation_progress.ts. Validation only: a
-  // coding run has no acceptance criteria to report on, and registering the
+  // coding run has no validation criteria to report on, and registering the
   // matchers anyway would put a hook on every Write, Edit and Bash call of every
   // run to derive nothing.
   const validationProgress =
