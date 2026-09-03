@@ -50,18 +50,16 @@ section every time instead of remembering one, because it differs per
 organization. If that section is absent or empty, pin only the two stack skills.
 Never substitute a design system the organization defaults do not name.
 
-**Pinning the design system is not the same as consulting it.** A web-application
-in this design also means LOADING that design-system skill yourself, now: it owns
-theming, and a theme is settled at design time because the built app is themed at
-its first build. Load it by name the moment the design gains a web-application,
-and do what its design-time section says before you call the design done. Add
-`"api-management"` to any service that sits behind the gateway, and
-`"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
+**Pin the design system; do not consult it.** A design system is built against,
+not designed with — it is the coding run's to load, and its theming is a settled
+organization decision that no design-time question reopens. Never ask the user
+about colors, themes, or look and feel. Add `"api-management"` to any service
+that sits behind the gateway, and `"thunder-authentication"` to **both** sides
+of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
 role. It is a JSON key on the component's design object, so include it when you
-write that `design.json` (addFile/editFile) — do NOT put `skillsPinned` in
-`design.md` frontmatter. Each component carries only the skills its own build
-needs.
+write that `design.json` (addFile/editFile) — `design.json` is its only home.
+Each component carries only the skills its own build needs.
 
 Writing the whole enriched file yourself (removeFile + addFile with every
 field) is equally valid — the scaffold is a safety net, not a required
@@ -132,7 +130,7 @@ violations:
   "appPath": "expense-api",           // repo-relative source dir — the component name
   "entrypoint": "deployment/service", // deploy entry — PAIRS with `type`: "deployment/service" for a service, "deployment/web-application" for a web-application
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
-  "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
+  "dependencies": [ /* see below — every dependency edge touching this component appears here */ ],
   "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
   "stories": [1, 2, 4],               // PRD story numbers THIS component serves — the build gate refuses the tag while any story is claimed by nobody
   "skillsPinned": ["openapi-conventions", "ballerina"], // the skills this component's build needs — see the field above
@@ -166,10 +164,19 @@ into `workload.yaml` and the managed-API gateway binds to. The port lives in
   discarded. `stories` is NOT in this class — it is yours to author, per the
   **stories** field above.
 
-### dependencies — one entry per Interactions arrow
+### dependencies — one entry per design.cell edge
 
-`dependencies` mirrors the Interactions section of design.md and the edges of
-design.cell: every arrow appears here and vice versa — a mismatch is a defect.
+`dependencies` mirrors the DEPENDENCY edges of design.cell: every arrow
+between this component and another node appears here and vice versa — a
+mismatch is a defect. The `north ->` / `west ->` gateway arrows are
+**exposure**, not dependencies: they live in this component's `exposure`
+field and never become entries here. The platform enforces the membership
+half as you write: a dependency whose `name` is not a node the cell declares
+is refused (`UNKNOWN_DEPENDENCY`) with the cell statement to add. A resource
+you discover here — a database, a cache — is a cell node too: `editFile`
+`specs/design/design.cell` to add `component <name> as "…" database` inside
+the cell before the design.json that depends on it, or the diagram will not
+draw what the build provisions.
 Each entry is a `kind` plus a `name`, and you pick the kind by WHAT the target
 is. The kind-only fields below are exhaustive: one of them on another kind is a
 schema violation that both the zod write-gate and the Go fold gate reject.
@@ -194,8 +201,9 @@ type for `resourceType`). This step is done when every `external`,
 `org-service`, and `platform-resource` emitted this turn is taken from this
 turn's matching `list_*` result (exact `name` or `resourceType`), unless this
 turn is a user-asked reconsider. When nothing the catalog returns fills the
-role, leave the dependency unresolved rather than forcing a fit: a name that
-resolves to nothing is worse than an absent one.
+role, omit the entry and list the gap under **Needs your input** rather than
+coining a name: a `resourceType` that was not in this turn's
+`list_platform_resource_types` result fails Build.
 
 ```json
 "dependencies": [
@@ -229,8 +237,10 @@ operations its contract actually exposes:
   list one "for reference".
 - **A role is not a name.** The requirement says "the organization's directory
   service"; the provider is usually called something else (`employee-service`).
-  Look it up — a name coined from the role words matches no provider and
-  hard-fails the build.
+  The same for a `platform-resource`: the PRD names a capability, `resourceType`
+  is the catalog row's `name` from this turn's `list_platform_resource_types`.
+  Copy that `name`. Look it up — a name coined from the role or capability words
+  matches no provider or type and hard-fails the build.
 - **A `platform-resource`'s `name` becomes the env-var prefix** for every one of
   its outputs (`orders-db` → `ORDERS_DB_HOST`, and for a SPA
   `window._env_.ORDERS_DB_*`), so pick a clear one: renaming it later renames the
@@ -341,11 +351,12 @@ which fields are present, first match wins:
 5. `style: "sdk"` with no `package` → `unresolved`/`needs-input`
 6. otherwise → `resolved`
 
-`component` and `platform-resource` are always `resolved` here. An `org-service`
-resolves on catalog visibility, and is `blocked`/`access-required` when the
-provider exists but this project cannot see it. The old `needsSpec` boolean is
-REMOVED from the schema — a draft carrying it fails the write-gate; migrate
-`needsSpec: true` to `style: "rest-api"`.
+`component` is always `resolved` here. A `platform-resource` is too — once
+emitted — so only emit one whose `resourceType` is a `name` from this turn's
+`list_platform_resource_types`. An `org-service` resolves on catalog visibility,
+and is `blocked`/`access-required` when the provider exists but this project
+cannot see it. The old `needsSpec` boolean is REMOVED from the schema — a draft
+carrying it fails the write-gate; migrate `needsSpec: true` to `style: "rest-api"`.
 
 ### Narrating the design turn
 
@@ -402,6 +413,6 @@ integrate correctly.
 
 One component per directory. Every `web-application` gets a `wireframes.dsl`
 (`wireframes` governs it); every `service` gets an `openapi.yaml`
-(`openapi-conventions` governs it), emitted after design.md's ER model.
+(`openapi-conventions` governs it), emitted after domain-model.md's ER model.
 Other kinds (scheduled tasks, workers, …) carry no extra artifact yet — capture
 their behaviour fully in `description` and `dependencies`.

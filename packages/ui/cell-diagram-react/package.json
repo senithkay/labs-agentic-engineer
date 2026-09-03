@@ -6,10 +6,21 @@
   "description": "Cell architecture diagram renderer (React + xyflow) over the cell DSL. Vendored in-house from @kanushka/cell-diagram-react (synced at upstream tag v0.3.0).",
   "main": "src/index.ts",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.ts"
+    },
+    "./compiler": {
+      "types": "./dist/compiler/compileProject.d.ts",
+      "default": "./src/compiler/compileProject.ts"
+    }
+  },
   "sideEffects": [
     "*.css"
   ],
   "scripts": {
+    "dev": "vite",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
@@ -33,7 +44,10 @@
     "@types/react-dom": "19.0.2",
     "@vitejs/plugin-react-swc": "4.2.0",
     "jsdom": "^25.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "typescript": "5.9.3",
+    "vite": "^7.3.6",
     "vitest": "^4.1.10"
   }
 }

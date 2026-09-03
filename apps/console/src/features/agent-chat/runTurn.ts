@@ -275,11 +275,12 @@ export async function attachAndFoldTurn(
         // body, so a closed input stream means nothing more is coming. Stop the
         // spinner now and leave `ok` unset until the result settles it.
         //
-        // Why this event and not `tool-result`: one step can issue several file
-        // writes (the design turn emits five in a batch), and the SDK flushes
-        // every result only after the LAST call in the step. Keying "finished"
-        // off the result made all five cards spin for the whole batch and then
-        // settle together, long after the earlier files were done.
+        // Why this event and not `tool-result`: this one says the BODY is
+        // written, which is a different fact from the bundle having accepted it,
+        // and the two must not share a field. The verdict follows one frame
+        // later — the agents service settles each write at its own call
+        // (write-ledger.ts), so a batched step no longer parks the earlier
+        // files' verdicts behind the last file's body.
         const st = part.id ? inputs.get(part.id) : undefined;
         if (st?.toolName === DRAFT_EXTERNAL_RESOURCE_TOOL) {
           publishDraftFromInput(chatKey, st.buf);

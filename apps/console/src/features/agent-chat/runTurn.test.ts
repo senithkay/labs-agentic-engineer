@@ -185,12 +185,15 @@ describe("attachAndFoldTurn — pre-stream 404 re-attach (#3)", () => {
 });
 
 /**
- * The per-file spinner. One step can carry several file writes, and the SDK
- * flushes every `tool-result` for that step only after its LAST call — so
- * `tool-result` marks the end of the STEP, not of one file. Keying the spinner
- * off it made a batched design turn show five files "loading" for the whole
- * batch and settle them together, long after the first ones had landed.
- * `tool-input-end` is the per-file signal (for a file tool the input IS the body).
+ * The per-file spinner and tick. Two facts, two frames: `tool-input-end` says
+ * the BODY is written (for a file tool the input IS the body), the verdict says
+ * the bundle accepted it — and the card must never conflate them, or a rejected
+ * write would show a success tick.
+ *
+ * Both wire orders are exercised here, because the console has to fold either:
+ *  - verdict per call (what the agents service emits today — write-ledger.ts);
+ *  - every verdict trailing the last call (the raw SDK order, which recorded
+ *    streams and older producers still carry).
  */
 describe("attachAndFoldTurn — a file card settles on its OWN input-end, not the step's results", () => {
   beforeEach(() => {
@@ -201,26 +204,32 @@ describe("attachAndFoldTurn — a file card settles on its OWN input-end, not th
     mockOpenTurnStream.mockResolvedValue(new ReadableStream());
   });
 
-  /** The frames one batched step produces for N files (see services/agents/test/frame-order.test.ts). */
+  const callFrames = (id: string): StreamPart[] =>
+    [
+      { type: "tool-input-start", id, toolName: "addFile" },
+      { type: "tool-input-delta", id, delta: `{"path":"specs/${id}.md","content":"x"}` },
+      { type: "tool-input-end", id },
+      { type: "tool-call", toolCallId: id, toolName: "addFile", input: {} },
+    ] as StreamPart[];
+
+  const resultFrame = (id: string, ok = true): StreamPart =>
+    ({ type: "tool-result", toolCallId: id, toolName: "addFile", result: { ok } }) as StreamPart;
+
+  /** The raw SDK order: every verdict trails the LAST call of the step. */
   const batch = (ids: string[]): StreamPart[] => [
-    ...ids.flatMap(
-      (id) =>
-        [
-          { type: "tool-input-start", id, toolName: "addFile" },
-          { type: "tool-input-delta", id, delta: `{"path":"specs/${id}.md","content":"x"}` },
-          { type: "tool-input-end", id },
-          { type: "tool-call", toolCallId: id, toolName: "addFile", input: {} },
-        ] as StreamPart[],
-    ),
-    // Every result arrives only here, after the last call.
-    ...ids.map((id) => ({ type: "tool-result", toolCallId: id, toolName: "addFile", result: { ok: true } }) as StreamPart),
+    ...ids.flatMap(callFrames),
+    ...ids.map((id) => resultFrame(id)),
   ];
+
+  /** What the agents service emits: each verdict rides its own call. */
+  const batchSettledPerCall = (ids: string[]): StreamPart[] =>
+    ids.flatMap((id) => [...callFrames(id), resultFrame(id)]);
 
   const cardsFor = (id: string) =>
     vi.mocked(upsertToolMessage).mock.calls.map(([, m]) => m).filter((m) => m.toolCallId === id);
 
   it("stops the spinner at tool-input-end, with NO verdict yet", async () => {
-    mockReadToolInputPath.mockReturnValue("specs/design/design.md");
+    mockReadToolInputPath.mockReturnValue("specs/design/domain-model.md");
     queuedParts = batch(["c1"]);
     await attachAndFoldTurn(KEY, "proj1", "t1", new AbortController().signal);
 
@@ -237,7 +246,7 @@ describe("attachAndFoldTurn — a file card settles on its OWN input-end, not th
   });
 
   it("settles the FIRST file before the last file's call — the batch no longer blocks it", async () => {
-    mockReadToolInputPath.mockReturnValue("specs/design/design.md");
+    mockReadToolInputPath.mockReturnValue("specs/design/domain-model.md");
     queuedParts = batch(["c1", "c2", "c3"]);
     await attachAndFoldTurn(KEY, "proj1", "t1", new AbortController().signal);
 
@@ -247,6 +256,21 @@ describe("attachAndFoldTurn — a file card settles on its OWN input-end, not th
     expect(c1Done).toBeGreaterThanOrEqual(0);
     expect(c3Streaming).toBeGreaterThanOrEqual(0);
     expect(c1Done).toBeLessThan(c3Streaming);
+  });
+
+  it("ticks the FIRST file mid-batch when its verdict rides its own call", async () => {
+    mockReadToolInputPath.mockReturnValue("specs/design/domain-model.md");
+    queuedParts = batchSettledPerCall(["c1", "c2", "c3"]);
+    await attachAndFoldTurn(KEY, "proj1", "t1", new AbortController().signal);
+
+    const calls = vi.mocked(upsertToolMessage).mock.calls.map(([, m]) => m);
+    const c1Ticked = calls.findIndex((m) => m.toolCallId === "c1" && m.ok === true);
+    const c3Streaming = calls.findIndex((m) => m.toolCallId === "c3" && m.status === "streaming");
+    expect(c1Ticked).toBeGreaterThanOrEqual(0);
+    // The whole point of the per-call verdict: file 1 carries a tick while file 3
+    // is still being written, instead of a verdict-less ring for the whole batch.
+    expect(c1Ticked).toBeLessThan(c3Streaming);
+    expect(cardsFor("c1").map((c) => c.ok)).toEqual([undefined, undefined, true]);
   });
 
   it("writes no card when the path never resolved (nothing to settle)", async () => {
@@ -293,7 +317,7 @@ describe("attachAndFoldTurn — draftExternalResource publishes a register draft
 
 describe("attachAndFoldTurn — declare_plan folds into the plan store (#576)", () => {
   const CELL = "specs/design/design.cell";
-  const OVERVIEW = "specs/design/design.md";
+  const OVERVIEW = "specs/design/domain-model.md";
   const PORTAL = "specs/design/components/portal/design.json";
 
   beforeEach(() => {
@@ -330,7 +354,7 @@ describe("attachAndFoldTurn — declare_plan folds into the plan store (#576)", 
 
   it("derives writing/done/error from the file frames and keeps the wreckage", async () => {
     mockReadToolInputPath.mockImplementation((buf: string) =>
-      buf.includes("design.cell") ? CELL : buf.includes("design.md") ? OVERVIEW : null,
+      buf.includes("design.cell") ? CELL : buf.includes("domain-model.md") ? OVERVIEW : null,
     );
     queuedParts = [
       {
@@ -351,7 +375,7 @@ describe("attachAndFoldTurn — declare_plan folds into the plan store (#576)", 
         result: { ok: true },
       },
       { type: "tool-input-start", id: "f2", toolName: "addFile" },
-      { type: "tool-input-delta", id: "f2", delta: '{"path":"specs/design/design.md"' },
+      { type: "tool-input-delta", id: "f2", delta: '{"path":"specs/design/domain-model.md"' },
       { type: "turn-failed", message: "died mid-write" },
     ] as StreamPart[];
     await attachAndFoldTurn(KEY, "proj1", "t1", new AbortController().signal);

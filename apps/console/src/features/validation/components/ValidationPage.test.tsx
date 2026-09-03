@@ -1406,3 +1406,58 @@ describe("ValidationPage live note is gated on an open cycle", () => {
     expect(screen.getByText(/category option never appeared/)).toBeInTheDocument();
   });
 });
+
+// A run reports `planned` for EVERY criterion in the test plan, and SKILL.md has
+// the agent write a plan section per criterion — manual ones included. So the
+// feed carries a status for a criterion no agent will ever work, and the row used
+// to render it: the method badge read `manual` while the chip beside it read
+// "Planned", for the whole run, with nothing able to supersede it.
+describe("ValidationPage manual criteria ignore the live feed", () => {
+  it("keeps a manual criterion on Manual when the feed reports it planned", () => {
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockCriteria.data = { content: CRITERIA };
+    // AC-003-b is the `manual` criterion in CRITERIA; AC-001-a is `e2e`.
+    mockLive = { "AC-001-a": "planned", "AC-003-b": "planned" };
+    renderPage(undefined);
+
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    // Only the e2e row may say Planned — the manual one must not.
+    expect(screen.getAllByText("Planned")).toHaveLength(1);
+  });
+
+  it("keeps it on Manual through every live status, not just planned", () => {
+    // Nothing else is reachable for a manual criterion today, but the rule is
+    // about the METHOD rather than about which status happened to arrive.
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockCriteria.data = { content: CRITERIA };
+    mockLive = { "AC-003-b": "running" };
+    renderPage(undefined);
+
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    expect(screen.queryByText("Running…")).not.toBeInTheDocument();
+  });
+
+  it("still says Manual when no report was fetched and nothing is awaiting", () => {
+    // `unreported` settles the run and skips the report read, so `awaiting` is
+    // false and there is no report — the two branches that used to carry a manual
+    // row. Before the guard it fell through to nothing and rendered no chip.
+    mockValidation = "unreported";
+    mockRun = run({
+      validation: { verdict: "unreported" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    mockLive = { "AC-001-a": "authoring" };
+    renderPage(undefined);
+
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    // Asserted negatively too: the method BADGE also carries the word "manual",
+    // so presence alone would still pass if the chip regressed to something else
+    // and only the badge matched. Neither of the two chips it could wrongly show
+    // here may appear on any row.
+    expect(screen.queryByText("Pending")).not.toBeInTheDocument();
+    expect(screen.queryByText("Planned")).not.toBeInTheDocument();
+  });
+});

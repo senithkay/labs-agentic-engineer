@@ -39,7 +39,7 @@ import {
   replaceMessages,
   setPendingSeed,
 } from "../../agent-chat/chatStore";
-import { SpecView } from "./SpecView";
+import { SpecView, designWarningIntro, specTurnGate } from "./SpecView";
 import {
   clearPlan,
   planDeclared,
@@ -152,6 +152,20 @@ mockUseConversationLog.mockReturnValue({
   historyReady: true,
   resync: mockResyncConversation,
 });
+// --- Aiming the agent at a selection (#666): dispatching a turn from the
+// DOCUMENT rather than the chat composer. Stubbed for the same reason as the
+// hooks above — it resolves the project's thread through react-query, and this
+// file renders SpecView without a QueryClientProvider. Its own behavior is
+// covered by useAnchoredTurn.test.tsx; what belongs HERE is that SpecView
+// mounts it for the right (org, project) and hands every markdown file an aim
+// binding, which the test below asserts.
+const mockAnchoredSend = vi.fn().mockResolvedValue(true);
+const mockUseAnchoredTurn = vi.fn();
+mockUseAnchoredTurn.mockReturnValue({ send: mockAnchoredSend, ready: true });
+vi.mock("../../agent-chat/useAnchoredTurn", () => ({
+  useAnchoredTurn: (...args: unknown[]) => mockUseAnchoredTurn(...args),
+}));
+
 vi.mock("../../agent-chat/useConversationLog", () => ({
   useConversationLog: (...args: unknown[]) => mockUseConversationLog(...args),
 }));
@@ -1308,9 +1322,45 @@ describe("SpecView follows the write (#576, ADR-0026)", () => {
 
     // The turn moves on to other writes and back to the cell; a still-following
     // editor would jump to Architecture here. It must not.
-    act(() => planFileWriting(chatKey, "t1", "specs/design/design.md"));
+    act(() => planFileWriting(chatKey, "t1", "specs/design/domain-model.md"));
     act(() => planFileWriting(chatKey, "t1", CELL));
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+  });
+
+  // The default selection is reactive, and it used to key on an agent being in
+  // the room: a reader on the PRD with no click recorded asked a question, the
+  // pane became Architecture for the length of the reply, and came back as a
+  // fresh editor at the top. Reported as "the PRD scrolls when the agent says
+  // something" (#666). The default follows the FLOW: design, and only design.
+  it("keeps the default file when an agent joins for a turn that is not a design turn", () => {
+    mockCollab = { ...soloCollab(), status: "connected", docPaths: [CELL] };
+    const { rerender } = render(<SpecView projectName="proj1" />);
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+
+    // A chat turn: the agent joins, the flow is not design.
+    mockSpecFlow = "";
+    mockCollab = {
+      ...mockCollab,
+      peers: [{ clientId: 1, name: "Agent", color: "#000", kind: "agent" }],
+    };
+    rerender(<SpecView projectName="proj1" />);
+
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+  });
+
+  it("defaults to Architecture while a design turn is in the room — a reload mid-turn", () => {
+    // The rail has to list design.cell for Architecture to be a place to go.
+    mockCollab = {
+      ...soloCollab(),
+      status: "connected",
+      docPaths: [CELL],
+      peers: [{ clientId: 1, name: "Agent", color: "#000", kind: "agent" }],
+    };
+    mockSpecFlow = "design";
+
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
   });
 
   // The window ADR-0026 exists to serve: a write is announced when its tool
@@ -1485,41 +1535,35 @@ describe("SpecView while the agent is waiting on answers", () => {
     });
   });
 
-  it("offers the launchers and Generate design once the questions are answered", () => {
+  // The header carries ONE launcher (#666): "add a feature" moved onto the
+  // document, beside the story list it changes, where every other command
+  // already was. A second copy in the header was two buttons for one act.
+  it("offers Generate design once the questions are answered, and no + Feature", () => {
     render(<SpecView projectName="proj1" />);
 
-    expect(
-      screen.getByRole("button", { name: "+ Feature" }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Feature" })).toBeNull();
     expect(
       screen.getByRole("button", { name: /Generate design/ }),
     ).toBeEnabled();
   });
 
-  it("stands them down while a question form is open", () => {
+  it("stands Generate design down while a question form is open", () => {
     askQuestion();
     render(<SpecView projectName="proj1" />);
 
     expect(screen.getByTestId("spec-question-form")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "+ Feature" })).toBeNull();
     expect(
       screen.getByRole("button", { name: /Generate design/ }),
     ).toBeDisabled();
   });
 
-  // A seeded command does NOT go through the composer: `AgentChatPanel` sends
-  // a pending seed as soon as the conversation is ready, without the
-  // `inputDisabled` guard that stops a user typing mid-turn. So an ungated
-  // launcher delivers `/feature` into a running turn — the thing the composer
-  // beside it refuses.
-  it("stands + Feature down while an agent holds the turn", () => {
+  it("stands Generate design down while an agent holds the turn", () => {
     mockCollab = {
       ...soloCollab(),
       peers: [{ clientId: 1, name: "Agent", color: "#fff", kind: "agent" }],
     };
     render(<SpecView projectName="proj1" />);
 
-    expect(screen.getByRole("button", { name: "+ Feature" })).toBeDisabled();
     expect(
       screen.getByRole("button", { name: /Generate design/ }),
     ).toBeDisabled();
@@ -1586,8 +1630,8 @@ describe("SpecView warns before designing against unsettled requirements", () =>
     render(<SpecView projectName="proj1" />);
     clickGenerate();
 
-    expect(screen.getByText("1 open question")).toBeInTheDocument();
-    expect(screen.getByText("1 assumption to challenge")).toBeInTheDocument();
+    expect(screen.getByText("1 question only you can answer")).toBeInTheDocument();
+    expect(screen.getByText("1 decision marked assumed")).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
@@ -1609,7 +1653,7 @@ describe("SpecView warns before designing against unsettled requirements", () =>
     seed(UNSETTLED);
     render(<SpecView projectName="proj1" />);
     clickGenerate();
-    fireEvent.click(screen.getByRole("button", { name: "Resolve issues" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review them first" }));
 
     await waitFor(() =>
       expect(
@@ -1667,6 +1711,52 @@ describe("SpecView keeps the chat log fed without the chat panel (#606)", () => 
     mockCollab = { ...soloCollab(), status: "connected", peers: [] };
     render(<SpecView projectName="proj1" />);
     expect(mockResyncConversation).not.toHaveBeenCalled();
+  });
+});
+
+// The warning's paragraph follows what is actually unsettled. Seen on the local
+// setup: a project with two assumed decisions and no open questions was told the
+// agent had "left some questions for you".
+// One gate for the lenses and the aim box, in significance order — and it
+// covers the dispatch window `agentBusy` cannot see (CodeRabbit on #670).
+describe("specTurnGate", () => {
+  it("names the agent first, the in-flight dispatch second, the questions third", () => {
+    expect(
+      specTurnGate({ agentBusy: true, localTurnActivity: true, awaitingAnswers: true }),
+    ).toMatch(/agent is still working/);
+    expect(
+      specTurnGate({ agentBusy: false, localTurnActivity: true, awaitingAnswers: true }),
+    ).toMatch(/on its way/);
+    expect(
+      specTurnGate({ agentBusy: false, localTurnActivity: false, awaitingAnswers: true }),
+    ).toMatch(/waiting on your answers/);
+    expect(
+      specTurnGate({ agentBusy: false, localTurnActivity: false, awaitingAnswers: false }),
+    ).toBe("");
+  });
+});
+
+describe("designWarningIntro", () => {
+  it("does not mention questions when there are none", () => {
+    const intro = designWarningIntro([{ key: "assumptions" }]);
+    expect(intro).toContain("marked assumed");
+    expect(intro).not.toMatch(/question/);
+  });
+
+  it("does not mention assumed decisions when there are none", () => {
+    const intro = designWarningIntro([{ key: "open-questions" }]);
+    expect(intro).toContain("only you can answer");
+    expect(intro).not.toMatch(/assumed/);
+  });
+
+  it("names both when both stand", () => {
+    const intro = designWarningIntro([{ key: "open-questions" }, { key: "assumptions" }]);
+    expect(intro).toContain("marked assumed");
+    expect(intro).toContain("only you can answer");
+  });
+
+  it("always says what being wrong costs", () => {
+    expect(designWarningIntro([{ key: "assumptions" }])).toContain("generated again");
   });
 });
 

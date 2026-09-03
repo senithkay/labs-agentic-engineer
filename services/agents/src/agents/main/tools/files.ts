@@ -46,9 +46,11 @@ import {
   type DeclarePlanInput,
   type EditFileInput,
   type Equal,
+  type OpResult,
   type RemoveFileInput,
 } from "@aep/agent-stream";
 import { buildSkillTools } from "./skill-tools.js";
+import { WriteLedger, type WriteOp } from "./write-ledger.js";
 import type { SkillSource } from "../skill-source.js";
 
 export const ADD_FILE = "addFile" as const;
@@ -90,7 +92,7 @@ export const removeFileInputSchema = z.object({
 // Structured multiple-choice questions the agent asks when it needs a human
 // decision. Each tool HAS an execute() returning a RESOLVED placeholder, so the
 // turn ends fully-resolved (no dangling tool_use → no MissingToolResultsError on
-// persist/replay). Registered on the `files` tool set (see buildFileTools) and
+// persist/replay). Registered on the `files` tool set (see buildFileToolSet) and
 // paired with a `hasToolCall` stop condition at the call site
 // (run-conversation-turn.ts) so the turn ENDS at the call; the user's answer
 // arrives as the NEXT turn's plain user message (`buildAnswerInstruction` /
@@ -218,19 +220,48 @@ export const declarePlanTool: Tool = tool({
 });
 
 /**
- * Build the file tool set bound to one bundle for the duration of a turn. When
- * `skills` (a `SkillSource`) is non-empty, also registers the shared skill
- * loaders (ADR-0002). No skills → no `loadSkill` (the catalog is likewise
- * omitted from the prompt), so a skill-free turn is byte-identical.
+ * The write ops the ledger applies, bound to one bundle: the tool's OWN
+ * `inputSchema` is the validator, so a call validated at input-end is validated
+ * exactly as the SDK would validate it — no second copy of the rules.
  */
-export function buildFileTools(bundle: FileBundle, skills?: SkillSource): Record<string, Tool> {
+function buildWriteOps(bundle: FileBundle): Record<string, WriteOp> {
+  /** Tie a schema to its op, so the validated shape IS the applied shape. */
+  const writeOp = <T>(schema: z.ZodType<T>, apply: (input: T) => OpResult): WriteOp => ({
+    validate: (args) => {
+      const parsed = schema.safeParse(args);
+      return parsed.success ? parsed.data : undefined;
+    },
+    apply: (input) => apply(input as T),
+  });
+  return {
+    [ADD_FILE]: writeOp(addFileInputSchema, ({ path, content }) => bundle.addFile(path, content)),
+    [EDIT_FILE]: writeOp(editFileInputSchema, ({ path, oldString, newString }) =>
+      bundle.editFile(path, oldString, newString),
+    ),
+    [REMOVE_FILE]: writeOp(removeFileInputSchema, ({ path }) => bundle.removeFile(path)),
+  };
+}
+
+/**
+ * The `files` tool set plus the turn's write ledger, as ONE object: every file
+ * write goes through the ledger, so a caller that also taps the stream
+ * (`tapWrites`) settles each write at its own `tool-input-end` instead of at the
+ * step's tail, and neither half can drift from the other. A caller with no
+ * stream to tap simply never pre-applies — the ledger's memo stays empty and
+ * `execute()` applies exactly as it always did.
+ */
+export function buildFileToolSet(
+  bundle: FileBundle,
+  skills?: SkillSource,
+): { tools: Record<string, Tool>; writes: WriteLedger } {
+  const writes = new WriteLedger(buildWriteOps(bundle));
   const tools: Record<string, Tool> = {
     [ADD_FILE]: tool({
       description:
         "Create a NEW file. The only tool that emits a whole body — use it for files that do not exist yet, " +
         "or (after removeFile) to replace a file wholesale. Errors with ALREADY_EXISTS if the path is already present.",
       inputSchema: addFileInputSchema,
-      execute: async ({ path, content }) => bundle.addFile(path, content),
+      execute: async (input, { toolCallId }) => writes.apply(toolCallId, ADD_FILE, input),
     }),
 
     [EDIT_FILE]: tool({
@@ -240,15 +271,15 @@ export function buildFileTools(bundle: FileBundle, skills?: SkillSource): Record
         "broaden the anchor with surrounding lines; on NOT_FOUND, re-copy the snippet exactly. Use this for prose AND " +
         "openapi.yaml.",
       inputSchema: editFileInputSchema,
-      execute: async ({ path, oldString, newString }) => bundle.editFile(path, oldString, newString),
+      execute: async (input, { toolCallId }) => writes.apply(toolCallId, EDIT_FILE, input),
     }),
 
     [REMOVE_FILE]: tool({
       description:
         "Delete a file. Idempotent (deleting an absent path is a NOOP success). Refuses to delete the structural roots " +
-        "(prd.md, design.md) with PROTECTED_PATH.",
+        "(prd.md, design.cell) with PROTECTED_PATH.",
       inputSchema: removeFileInputSchema,
-      execute: async ({ path }) => bundle.removeFile(path),
+      execute: async (input, { toolCallId }) => writes.apply(toolCallId, REMOVE_FILE, input),
     }),
 
     // Human-in-the-loop questions (console ADR-0012 / #270). Registered on the
@@ -262,7 +293,7 @@ export function buildFileTools(bundle: FileBundle, skills?: SkillSource): Record
     [DECLARE_PLAN_TOOL]: declarePlanTool,
   };
 
-  return { ...tools, ...buildSkillTools(skills) };
+  return { tools: { ...tools, ...buildSkillTools(skills) }, writes };
 }
 
 export const DRAFT_EXTERNAL_RESOURCE_TOOL = "draftExternalResource" as const;

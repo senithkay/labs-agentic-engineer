@@ -82,8 +82,12 @@ screen you cannot reach from its flow is a broken page, even if it renders.
 
 ## The fidelity checklist
 
-Before the PR, walk the DSL once more and put this in the PR body — one line
-per screen, then one per `flow` — with any gap named beside it:
+The checklist is **evidence, not a claim**. A web application is opened and
+walked in a browser before its work is committed — mock mode, no cluster behind
+it, one verdict per story (`mock-verification`) — so a tick here means the screen
+was rendered and its arrows were clicked, never that the code looks as though it
+would. Write it once the walk has settled, and put it in the PR body — one
+line per screen, then one per `flow` — with any gap named beside it:
 
 ```text
 Wireframe fidelity (specs/design/components/<name>/wireframes.dsl)
@@ -99,9 +103,10 @@ Flows
       blocked on the missing select
 ```
 
-A screen is ticked only when every element in its block exists on the page
-and every arrow it carries navigates. A flow is ticked only when you can walk
-it end to end by clicking, entry screen first — an unwalkable flow strands the
-screens behind it, so the e2e test written against the acceptance criteria
+A screen is ticked only when every element in its block was on the page and
+every arrow it carries navigated when clicked. A flow is ticked only when it was
+walked end to end by clicking, entry screen first — an unwalkable flow strands
+the screens behind it, so the e2e test written against the acceptance criteria
 cannot reach them either. An unticked line with its reason is fine — it tells
-the reviewer exactly where to look.
+the reviewer exactly where to look, and a screen whose story could not be judged
+against a mock says that in the same place.

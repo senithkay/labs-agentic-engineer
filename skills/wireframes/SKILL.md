@@ -131,8 +131,8 @@ The screens say what exists; a **flow** says who walks which ones, in what
 order. The prototype's top-level control is the flow picker, so a wireframe set
 without flows offers the reviewer no way to ask for the admin's journey.
 
-Declare one `flow` block per role or journey named in `design.md` (or in
-`specs/requirements/` when the design doc is absent), listing that
+Declare one `flow` block per role or journey named in the design's `flows/`
+files (or in `specs/requirements/` when they are absent), listing that
 role's screens in walkthrough order, **entry screen first**. Name the flow for
 its **task** ("Approval queue", "Log a risk"), and carry the persona on a
 `role` line — not in the name:

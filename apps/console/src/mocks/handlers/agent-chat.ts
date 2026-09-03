@@ -220,9 +220,25 @@ export const agentChatHandlers = [
     const isMultipart = (request.headers.get("content-type") ?? "").includes("multipart/form-data");
     let instruction = "";
     let attachments: string[] = [];
+    // What the message was aimed at (#666), if anything. Recorded into the
+    // journal so a reload paints the tag again — which is the whole reason the
+    // anchor is journaled rather than being a live-session nicety.
+    let anchor: unknown;
     if (isMultipart) {
       const form = await request.formData();
       instruction = String(form.get("instruction") ?? "");
+      const anchorPart = form.get("anchor");
+      try {
+        if (anchorPart instanceof Blob) anchor = JSON.parse(await anchorPart.text());
+        else if (typeof anchorPart === "string" && anchorPart) anchor = JSON.parse(anchorPart);
+      } catch {
+        // The real server answers a malformed part with its structured 400; a
+        // mock that throws instead fails the request with no response at all.
+        return HttpResponse.json(
+          { code: "invalid_request", message: "anchor must be valid JSON" },
+          { status: 400 },
+        );
+      }
       const files = form.getAll("files").filter((f): f is File => f instanceof File);
       // The server's own guard, mirrored: the console screens first, so a
       // rejection reaching here means a hostile or buggy client. Modelled so the
@@ -233,8 +249,9 @@ export const agentChatHandlers = [
       }
       attachments = files.map((f) => f.name);
     } else {
-      const body = (await request.json()) as { instruction?: string };
+      const body = (await request.json()) as { instruction?: string; anchor?: unknown };
       instruction = body.instruction ?? "";
+      anchor = body.anchor;
     }
     // The real server refuses a blank instruction BEFORE the turn row exists
     // (the shared TurnSpec validator rejects an empty chat turn), so mock mode
@@ -254,6 +271,7 @@ export const agentChatHandlers = [
       role: "user",
       content: instruction,
       ...(attachments.length > 0 ? { attachments } : {}),
+      ...(anchor ? { anchor } : {}),
     });
     return HttpResponse.json({ turnId }, { status: 202 });
   }),
