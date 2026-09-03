@@ -45,16 +45,16 @@ Two paths — choose by context:
 | | Local dev | Existing OC cluster |
 |---|---|---|
 | **Tool** | Skaffold | `aectl` |
-| **Entry point** | `make dev-cluster` | `aectl platform install` |
+| **Entry point** | `skaffold dev` | `aectl platform install` |
 | **Cluster setup** | `bash deployments/scripts/setup-dev.sh` | pre-existing OC cluster |
 | **One-time secrets** | `make setup-local` | handled by `aectl platform install` |
 | **Teardown** | `bash deployments/scripts/delete-dev.sh` | `aectl uninstall` |
 
 **Local dev (Skaffold):** `setup-dev.sh` provisions a k3d cluster with
 OpenChoreo + Thunder + Temporal. `make setup-local` registers K8s Secrets and
-Thunder OAuth clients. `make dev-cluster` runs the Skaffold watch loop — builds
-images, loads them into k3d, deploys via the platform Helm chart, and reloads on
-file changes. Full guide: `deployments/README.md`.
+Thunder OAuth clients. `skaffold dev` runs the watch loop — builds images, loads
+them into k3d, deploys via the platform Helm chart, and reloads on file changes.
+Full guide: `deployments/README.md`.
 
 **Existing cluster (aectl):** For platform engineers installing AEP on a cluster
 that already has OpenChoreo. `aectl platform install` installs the Helm chart,
