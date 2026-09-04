@@ -907,33 +907,37 @@ describe("DeploymentsPage — Test users", () => {
     expect(
       screen.getByText("Test users for agents on this environment"),
     ).toBeInTheDocument();
-    expect(screen.getByText("test-viewer")).toBeInTheDocument();
+    // The card carries the count; the accounts live in the dialog behind it,
+    // so a many-role app cannot grow this card past the ledger beside it.
+    expect(screen.getByText("1 account, one per role")).toBeInTheDocument();
+    expect(screen.queryByText("test-viewer")).not.toBeInTheDocument();
     const thunder = screen.getByRole("link", {
       name: "Open Thunder Console to add or remove real accounts",
     });
     expect(thunder).toHaveAttribute("href", THUNDER_CONSOLE_USERS);
     expect(thunder).toHaveAttribute("target", "_blank");
 
+    fireEvent.click(screen.getByRole("button", { name: "View test users" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("test-viewer")).toBeInTheDocument();
+
     fireEvent.click(
-      screen.getByRole("button", {
+      within(dialog).getByRole("button", {
         name: "Reveal the password for test-viewer",
       }),
     );
     expect(mockReveal).toHaveBeenCalledWith("test-viewer");
     await waitFor(() => {
-      expect(screen.getByText(MOCK_PASSWORD)).toBeInTheDocument();
+      expect(within(dialog).getByText(MOCK_PASSWORD)).toBeInTheDocument();
     });
     fireEvent.click(
-      screen.getByRole("button", { name: "Hide the password for test-viewer" }),
+      within(dialog).getByRole("button", {
+        name: "Hide the password for test-viewer",
+      }),
     );
     expect(screen.queryByText(MOCK_PASSWORD)).not.toBeInTheDocument();
-    // Masked, not gone — the line holds its place on the card.
-    expect(screen.getByText("**********")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", {
-        name: "Reveal the password for test-viewer",
-      }),
-    ).toBeInTheDocument();
+    // Masked, not gone — the row holds its place in the table.
+    expect(within(dialog).getByText("**********")).toBeInTheDocument();
   });
 
   it("keeps Thunder / Test users copy and omits Roles-gate and account actions", () => {

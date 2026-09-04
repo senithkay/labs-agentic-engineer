@@ -19,14 +19,12 @@
 import { useState } from "react";
 import {
   Box,
-  CircularProgress,
-  IconButton,
+  Button,
   Link as MuiLink,
   Stack,
-  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Copy, ExternalLink, Eye, EyeOff } from "@wso2/oxygen-ui-icons-react";
+import { ExternalLink, Users } from "@wso2/oxygen-ui-icons-react";
 import { env } from "../../../config/env";
 import { thunderUsersConsoleHref } from "../../../config/thunderConsole";
 import {
@@ -37,146 +35,7 @@ import {
   publishedTestUsers,
   type PublishedTestUser,
 } from "../lib/publishedTestUsers";
-
-function copyText(value: string): Promise<void> {
-  if (!navigator.clipboard?.writeText) {
-    return Promise.reject(new Error("Clipboard is not available"));
-  }
-  return navigator.clipboard.writeText(value);
-}
-
-/** The password's placeholder while it is hidden. Fixed width, monospace, so
- *  revealing swaps the characters without moving the icons beside them. */
-const MASK = "**********";
-
-function LoginRow({
-  login,
-  revealPassword,
-}: {
-  login: PublishedTestUser;
-  revealPassword: (username: string) => Promise<string>;
-}) {
-  const [password, setPassword] = useState<string | null>(null);
-  const [shown, setShown] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  /**
-   * The password itself, read once and kept for the row's life.
-   *
-   * The eye toggles VISIBILITY, not another read: hiding a revealed password
-   * and showing it again is a decision about this screen, not a reason to ask
-   * the sealed store for a secret a second time. Copy shares the same path, so
-   * a reader can copy a password they never put on screen.
-   */
-  const ensurePassword = async (): Promise<string | null> => {
-    if (password !== null) return password;
-    setBusy(true);
-    setError(null);
-    try {
-      const value = await revealPassword(login.username);
-      setPassword(value);
-      return value;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggle = async () => {
-    if (shown) {
-      setShown(false);
-      return;
-    }
-    if ((await ensurePassword()) !== null) setShown(true);
-  };
-
-  const copy = async () => {
-    const value = await ensurePassword();
-    if (value === null) return;
-    setError(null);
-    try {
-      await copyText(value);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  return (
-    <Box>
-      <Tooltip title={login.coldStart ? `${login.role} · cold start` : login.role}>
-        <Typography
-          variant="body2"
-          sx={{ fontFamily: "monospace", minWidth: 0, width: "fit-content" }}
-        >
-          {login.username}
-        </Typography>
-      </Tooltip>
-      {/* The password line is ALWAYS here, masked until asked for. It used to
-          appear only after a reveal, which made the card grow by a row at the
-          moment of the click and left a reader with no sign that a password
-          existed at all until they had already fetched it. */}
-      <Stack
-        direction="row"
-        spacing={0.5}
-        sx={{ alignItems: "center", mt: 0.25 }}
-      >
-        <Typography
-          variant="body2"
-          aria-live="polite"
-          // The mask is decoration: its ten asterisks would be read out one by
-          // one, and the eye's accessible name already says whether the
-          // password is showing.
-          {...(shown && password !== null ? {} : { "aria-hidden": true })}
-          sx={{ fontFamily: "monospace", color: "text.secondary" }}
-        >
-          {shown && password !== null ? password : MASK}
-        </Typography>
-        <Tooltip title={shown ? "Hide password" : "Reveal password"}>
-          <span>
-            <IconButton
-              size="small"
-              disabled={busy}
-              aria-label={
-                shown
-                  ? `Hide the password for ${login.username}`
-                  : `Reveal the password for ${login.username}`
-              }
-              onClick={() => void toggle()}
-            >
-              {busy ? (
-                <CircularProgress size={12} color="inherit" />
-              ) : shown ? (
-                <EyeOff size={14} />
-              ) : (
-                <Eye size={14} />
-              )}
-            </IconButton>
-          </span>
-        </Tooltip>
-        <Tooltip title="Copy password">
-          <span>
-            <IconButton
-              size="small"
-              disabled={busy}
-              aria-label={`Copy the password for ${login.username}`}
-              onClick={() => void copy()}
-            >
-              <Copy size={14} />
-            </IconButton>
-          </span>
-        </Tooltip>
-      </Stack>
-      {error !== null && (
-        <Typography variant="caption" color="error">
-          {error}
-        </Typography>
-      )}
-    </Box>
-  );
-}
+import { TestUsersDialog } from "./TestUsersDialog";
 
 function ThunderSentence({ thunderUrl }: { thunderUrl: string }) {
   return (
@@ -220,6 +79,7 @@ export function SignInPanel({
   revealPassword: (username: string) => Promise<string>;
   loadState?: "ready" | "pending" | "error";
 }) {
+  const [open, setOpen] = useState(false);
   return (
     <Box>
       {loadState === "pending" && (
@@ -249,15 +109,35 @@ export function SignInPanel({
           >
             Test users for agents on this environment
           </Typography>
-          <Stack spacing={1} sx={{ mt: 1, mb: 1.5 }}>
-            {logins.map((login) => (
-              <LoginRow
-                key={login.username}
-                login={login}
-                revealPassword={revealPassword}
-              />
-            ))}
+          {/* One LINE, whatever the design declares. The accounts used to be
+              listed here, one two-line block per role, so a six-role app grew
+              this card past the ledger beside it (review on #714). The count
+              is the fact the card owes the reader; the accounts themselves are
+              a table, and a table belongs in a dialog. */}
+          <Stack
+            direction="row"
+            spacing={1.5}
+            sx={{ alignItems: "center", mt: 1, mb: 1.5 }}
+          >
+            <Typography variant="body2">
+              {logins.length} account{logins.length === 1 ? "" : "s"}, one per
+              role
+            </Typography>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<Users size={14} aria-hidden />}
+              onClick={() => setOpen(true)}
+            >
+              View test users
+            </Button>
           </Stack>
+          <TestUsersDialog
+            open={open}
+            onClose={() => setOpen(false)}
+            logins={logins}
+            revealPassword={revealPassword}
+          />
         </>
       )}
       <ThunderSentence thunderUrl={thunderUrl} />

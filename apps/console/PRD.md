@@ -297,8 +297,11 @@ here: they're the open `console` + `feature` issues.
   their URLs. Connections keep their Configure surface on a card under the
   ledger. A row is what the environment runs NOW — the platform keeps no
   deployment record, so the design's past deployments, Duration, Redeploy and
-  runtime log wait on a backend read. **No contract change** (ADR-0027,
-  amending ADR-0021)
+  runtime log wait on a backend read. The Development card names how many
+  **test users** the project has, one per role, and opens them in a dialog —
+  a table of username, masked password with reveal and copy, role, and the
+  cold-start account — so the card holds one height whatever the design
+  declares. **No contract change** (ADR-0027, amending ADR-0021)
 - Deployments page — one-story rail + environment panel: Development /
   Validation / Production as one numbered rail (Builds-spine vocabulary,
   ADR-0014) with a side panel (version, rollout, endpoints, production
