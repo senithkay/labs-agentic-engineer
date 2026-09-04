@@ -48,7 +48,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check setup-local dev-cluster deploy-local bal-library-tool
+.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check setup-local run run-watch bal-library-tool
 
 install:
 	$(PNPM) install
@@ -167,16 +167,20 @@ workflow-skill:
 setup-local:
 	bash deployments/scripts/setup-local.sh
 
-# Inner dev loop: build images, load into k3d, deploy via Helm, watch for changes.
+# Inner dev loop: build images, load into k3d, deploy via Helm.
 # Console: http://console.openchoreo.localhost:8080
 # Per-developer overrides (smee webhook, etc.): copy skaffold/helm-values.yaml.example
 # to skaffold/helm-values.yaml (git-ignored) and fill in your values.
-dev-cluster:
-	skaffold dev --kube-context k3d-openchoreo -f skaffold.yaml
+#
+# Default (dev-cluster): manual trigger — builds and deploys once, then waits
+# for Enter before rebuilding.
+# Watch mode (dev-cluster-watch): rebuilds automatically on every file change.
+# Only the artifact whose files changed is rebuilt.
+run:
+	skaffold dev --kube-context k3d-openchoreo --trigger=manual
 
-# One-shot build + deploy (no watch). Useful for CI smoke tests or resetting state.
-deploy-local:
-	skaffold run --kube-context k3d-openchoreo -f skaffold.yaml
+run-watch:
+	skaffold dev --kube-context k3d-openchoreo
 
 clean:
 	$(TURBO) run build --force >/dev/null 2>&1 || true
