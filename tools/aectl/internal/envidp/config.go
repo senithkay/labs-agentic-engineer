@@ -66,8 +66,6 @@ const (
 	// Secret informer and RBAC are restricted to (see its own binding.go),
 	// so the binding Secret must be mirrored there by name.
 	operatorNamespace = "thunder-app-operator-system"
-
-	openBaoMount = "secret"
 )
 
 // Config parameterizes Install. Org and Env are explicit fields, not
