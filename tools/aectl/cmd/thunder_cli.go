@@ -197,7 +197,13 @@ func waitForThunderSecrets(ctx context.Context, k8sClient *kubernetes.Clientset,
 func waitForSecretData(ctx context.Context, k8sClient *kubernetes.Clientset, namespace, secretName string, timeout time.Duration) (map[string]string, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		sec, err := k8sClient.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		// Bounded per attempt: ctx itself may be an undeadlined
+		// context.Background() (see runAEPInit), so without this a single
+		// hung Get would block past the deadline check below instead of
+		// being canceled and retried or reported as a timeout.
+		getCtx, cancel := context.WithTimeout(ctx, timeout)
+		sec, err := k8sClient.CoreV1().Secrets(namespace).Get(getCtx, secretName, metav1.GetOptions{})
+		cancel()
 		if err == nil && len(sec.Data) > 0 {
 			out := make(map[string]string, len(sec.Data))
 			for k, v := range sec.Data {

@@ -1100,6 +1100,31 @@ ESCAPED=$(printf '%s' "$PW" | sed "s/'/''/g")
 printf "ALTER ROLE aep WITH PASSWORD '%s';\n" "$ESCAPED" | psql -U aep -d aep -h /var/run/postgresql
 `
 
+// alterPostgresPasswordRetryWindow bounds how long syncPostgresPassword
+// retries the ALTER once the pod is Running. This chart's postgres
+// StatefulSet defines no readinessProbe, so Kubernetes reports Ready the
+// instant it reports Running — waiting for Ready would gate on nothing. The
+// real gap is the official postgres image's own cold-start sequence
+// (initdb, then a temporary internal server, then the real one) which keeps
+// the container Running throughout while refusing connections on the
+// socket for a few seconds — so the ALTER is retried, not just attempted
+// once, right after waitForPodRunning returns.
+const alterPostgresPasswordRetryWindow = 60 * time.Second
+
+// runAlterPostgresRolePassword execs the ALTER over kubectl. A package
+// variable so syncPostgresPassword's retry loop is unit-testable against a
+// fake outcome (see platform_test.go) without a live cluster or kubectl
+// binary.
+var runAlterPostgresRolePassword = func(ctx context.Context, namespace, podName, password string) ([]byte, error) {
+	args := []string{"exec", "-i", "-n", namespace, podName, "--", "sh", "-c", alterPostgresRolePassword}
+	if kubeconfig != "" {
+		args = append([]string{"--kubeconfig", kubeconfig}, args...)
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.Stdin = strings.NewReader(password)
+	return cmd.CombinedOutput()
+}
+
 // syncPostgresPassword makes the live Postgres role's password match whatever
 // is currently in postgres-secrets.
 //
@@ -1114,7 +1139,20 @@ printf "ALTER ROLE aep WITH PASSWORD '%s';\n" "$ESCAPED" | psql -U aep -d aep -h
 //
 // Idempotent — setting the same password twice is a no-op — so this runs on
 // every install, not just a reinstall.
+//
+// postgresSyncTimeout bounds the whole operation (pod wait + Secret wait +
+// ALTER retries — roughly 2m+60s+60s of internal budgets) under one
+// deadline. ctx itself arrives from runAEPInit as an undeadlined
+// context.Background(), so without this a single hung call anywhere in the
+// chain — including the kubectl exec inside runAlterPostgresRolePassword,
+// which inherits this same ctx — would block indefinitely instead of being
+// canceled.
+const postgresSyncTimeout = 5 * time.Minute
+
 func syncPostgresPassword(ctx context.Context, k8sClient *kubernetes.Clientset, namespace string) error {
+	ctx, cancel := context.WithTimeout(ctx, postgresSyncTimeout)
+	defer cancel()
+
 	sp := ui.NewSpinner("Syncing Postgres password")
 	sp.Start()
 
@@ -1134,19 +1172,38 @@ func syncPostgresPassword(ctx context.Context, k8sClient *kubernetes.Clientset, 
 		return fmt.Errorf("postgres-secrets/%s has no POSTGRES_PASSWORD key", namespace)
 	}
 
-	args := []string{"exec", "-i", "-n", namespace, postgresPod, "--", "sh", "-c", alterPostgresRolePassword}
-	if kubeconfig != "" {
-		args = append([]string{"--kubeconfig", kubeconfig}, args...)
-	}
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	cmd.Stdin = strings.NewReader(password)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	deadline := time.Now().Add(alterPostgresPasswordRetryWindow)
+	if err := retryAlterPostgresRolePassword(ctx, namespace, password, deadline); err != nil {
 		sp.Fail("Postgres password sync failed")
-		return fmt.Errorf("alter postgres role: %w\n%s", err, out)
+		return err
 	}
 	sp.Success("Postgres password synced")
 	return nil
+}
+
+// retryAlterPostgresRolePassword retries runAlterPostgresRolePassword until
+// it succeeds or deadline passes — see alterPostgresPasswordRetryWindow's
+// doc comment for why a single attempt right after waitForPodRunning
+// returns is not reliable.
+func retryAlterPostgresRolePassword(ctx context.Context, namespace, password string, deadline time.Time) error {
+	return pollAlterPostgresRolePassword(ctx, namespace, password, deadline, 3*time.Second)
+}
+
+func pollAlterPostgresRolePassword(ctx context.Context, namespace, password string, deadline time.Time, interval time.Duration) error {
+	for {
+		out, err := runAlterPostgresRolePassword(ctx, namespace, postgresPod, password)
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("alter postgres role: %w\n%s", err, out)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 // waitForSecretsReady polls until all named Secrets exist in namespace or
