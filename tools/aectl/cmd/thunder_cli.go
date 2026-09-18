@@ -187,9 +187,17 @@ func doThunderSetup(
 // waitForThunderSecrets retries reading the aep-thunder-secrets K8s Secret until
 // it exists and is non-empty, or until timeout expires.
 func waitForThunderSecrets(ctx context.Context, k8sClient *kubernetes.Clientset, namespace string, timeout time.Duration) (map[string]string, error) {
+	return waitForSecretData(ctx, k8sClient, namespace, thunderSecretsName, timeout)
+}
+
+// waitForSecretData retries reading an ESO-synced K8s Secret until it exists
+// and is non-empty, or until timeout expires. ESO's first sync of a freshly
+// created ExternalSecret is not instant, so a caller reading the Secret right
+// after the Helm install that created it needs to tolerate a short gap.
+func waitForSecretData(ctx context.Context, k8sClient *kubernetes.Clientset, namespace, secretName string, timeout time.Duration) (map[string]string, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		sec, err := k8sClient.CoreV1().Secrets(namespace).Get(ctx, thunderSecretsName, metav1.GetOptions{})
+		sec, err := k8sClient.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 		if err == nil && len(sec.Data) > 0 {
 			out := make(map[string]string, len(sec.Data))
 			for k, v := range sec.Data {

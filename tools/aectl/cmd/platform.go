@@ -30,6 +30,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/term"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -310,6 +311,10 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("helm install platform: %w\n%s", err, helmOut.String())
 	}
 	helmSp.Success(fmt.Sprintf("%s installed", chartLabel))
+
+	if err := syncPostgresPassword(ctx, k8sClient, initPlatformNamespace); err != nil {
+		return fmt.Errorf("sync postgres password: %w", err)
+	}
 
 	// Thunder registration must happen before waiting for pods: aep-api reads
 	// its own SERVICE_AUTH client secret at boot and cannot become Ready until
@@ -1053,6 +1058,95 @@ func waitForAllPodsReady(ctx context.Context, client *kubernetes.Clientset, name
 		case <-time.After(5 * time.Second):
 		}
 	}
+}
+
+// postgresPod is the chart's fixed StatefulSet pod name — postgres is a plain
+// in-cluster StatefulSet with a single replica, not a configurable release.
+const postgresPod = "postgres-0"
+
+// waitForPodRunning polls until the named pod reaches phase Running, or
+// timeout expires. Running, not Ready: syncPostgresPassword only needs the
+// container process up, not its readiness probe passing.
+func waitForPodRunning(ctx context.Context, k8sClient *kubernetes.Clientset, namespace, podName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		pod, err := k8sClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+		if err == nil && pod.Status.Phase == corev1.PodRunning {
+			return nil
+		}
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get pod %s: %w", podName, err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s waiting for pod %s to start running", timeout, podName)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
+}
+
+// alterPostgresRolePassword reads the new password from STDIN — never argv,
+// which every process on the node can read via ps — then ALTERs the role
+// over Postgres's own local Unix socket, the one connection pg_hba.conf
+// trusts without a password, so this needs no OLD password to authenticate
+// with. The single quote is escaped for the SQL string literal, not the
+// shell: sed runs inside the pod, on the value read from stdin.
+const alterPostgresRolePassword = `
+read -r PW
+ESCAPED=$(printf '%s' "$PW" | sed "s/'/''/g")
+printf "ALTER ROLE aep WITH PASSWORD '%s';\n" "$ESCAPED" | psql -U aep -d aep -h /var/run/postgresql
+`
+
+// syncPostgresPassword makes the live Postgres role's password match whatever
+// is currently in postgres-secrets.
+//
+// Postgres only applies POSTGRES_PASSWORD once, at first init of its data
+// volume. A later install that regenerates the secret (any run without
+// --reuse-secrets, including a retry after a partial failure) never reaches
+// an already-initialized Postgres — so without this, the role's real
+// password silently drifts from what the Secret says, and aep-api and
+// Temporal both fail every connection with "password authentication failed"
+// until someone notices and fixes it by hand. This mirrors doThunderSetup,
+// which does the equivalent push for Thunder's OAuth client secrets.
+//
+// Idempotent — setting the same password twice is a no-op — so this runs on
+// every install, not just a reinstall.
+func syncPostgresPassword(ctx context.Context, k8sClient *kubernetes.Clientset, namespace string) error {
+	sp := ui.NewSpinner("Syncing Postgres password")
+	sp.Start()
+
+	if err := waitForPodRunning(ctx, k8sClient, namespace, postgresPod, 2*time.Minute); err != nil {
+		sp.Fail("Postgres pod never started")
+		return fmt.Errorf("wait for %s: %w", postgresPod, err)
+	}
+
+	secret, err := waitForSecretData(ctx, k8sClient, namespace, "postgres-secrets", 60*time.Second)
+	if err != nil {
+		sp.Fail("postgres-secrets not ready")
+		return fmt.Errorf("read postgres-secrets: %w", err)
+	}
+	password := secret["POSTGRES_PASSWORD"]
+	if password == "" {
+		sp.Fail("postgres-secrets has no POSTGRES_PASSWORD key")
+		return fmt.Errorf("postgres-secrets/%s has no POSTGRES_PASSWORD key", namespace)
+	}
+
+	args := []string{"exec", "-i", "-n", namespace, postgresPod, "--", "sh", "-c", alterPostgresRolePassword}
+	if kubeconfig != "" {
+		args = append([]string{"--kubeconfig", kubeconfig}, args...)
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.Stdin = strings.NewReader(password)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		sp.Fail("Postgres password sync failed")
+		return fmt.Errorf("alter postgres role: %w\n%s", err, out)
+	}
+	sp.Success("Postgres password synced")
+	return nil
 }
 
 // waitForSecretsReady polls until all named Secrets exist in namespace or
