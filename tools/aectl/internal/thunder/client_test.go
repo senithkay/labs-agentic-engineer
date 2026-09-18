@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -450,13 +451,13 @@ func TestAssignAdminRole_RoleExistsMissingApp(t *testing.T) {
 	found := false
 	for _, item := range addedAssignments {
 		m, _ := item.(map[string]any)
-		if m["id"] == appID {
+		if m["id"] == appID && m["type"] == "app" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("assignments/add body should contain app %q, got %v", appID, addedAssignments)
+		t.Errorf("assignments/add body should contain {id: %q, type: \"app\"}, got %v", appID, addedAssignments)
 	}
 }
 
@@ -608,6 +609,9 @@ func TestTokenClaimConfig(t *testing.T) {
 		if cc["validityPeriod"] != tokenValiditySeconds {
 			t.Errorf("clientConfig.validityPeriod = %v, want %v", cc["validityPeriod"], tokenValiditySeconds)
 		}
+		if !reflect.DeepEqual(cc["attributes"], identityUserAttributes) {
+			t.Errorf("clientConfig.attributes = %v, want %v", cc["attributes"], identityUserAttributes)
+		}
 		if _, present := at["userConfig"]; present {
 			t.Errorf("confidential accessToken should not carry userConfig: %v", at)
 		}
@@ -629,12 +633,18 @@ func TestTokenClaimConfig(t *testing.T) {
 		if uc["validityPeriod"] != tokenValiditySeconds {
 			t.Errorf("userConfig.validityPeriod = %v, want %v", uc["validityPeriod"], tokenValiditySeconds)
 		}
+		if !reflect.DeepEqual(uc["attributes"], identityUserAttributes) {
+			t.Errorf("userConfig.attributes = %v, want %v", uc["attributes"], identityUserAttributes)
+		}
 		idToken, ok := cfg["idToken"].(map[string]any)
 		if !ok {
 			t.Fatalf("idToken missing or not a map: %v", cfg)
 		}
-		if _, present := idToken["userAttributes"]; !present {
-			t.Errorf("idToken should carry a flat userAttributes list: %v", idToken)
+		if idToken["validityPeriod"] != tokenValiditySeconds {
+			t.Errorf("idToken.validityPeriod = %v, want %v", idToken["validityPeriod"], tokenValiditySeconds)
+		}
+		if !reflect.DeepEqual(idToken["userAttributes"], identityUserAttributes) {
+			t.Errorf("idToken.userAttributes = %v, want %v", idToken["userAttributes"], identityUserAttributes)
 		}
 	})
 }
