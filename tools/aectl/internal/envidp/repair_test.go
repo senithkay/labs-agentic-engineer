@@ -17,10 +17,19 @@
 package envidp
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func TestAepBootstrapNaming(t *testing.T) {
@@ -52,6 +61,55 @@ func TestAepBootstrapImportChartSpec(t *testing.T) {
 	}
 	if len(spec.SetJSON) != 1 || !strings.HasPrefix(spec.SetJSON[0], "bootstrap.configMap.files=") {
 		t.Errorf("SetJSON = %v, want exactly one bootstrap.configMap.files override", spec.SetJSON)
+	}
+}
+
+// TestWaitForJobDeleted_DelayedDeletion covers the race this polling exists
+// for: the Job is still present on the first Get (as it would be mid
+// Foreground-propagation deletion) and only gone on a later one.
+func TestWaitForJobDeleted_DelayedDeletion(t *testing.T) {
+	client := fake.NewClientset(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "stale-job", Namespace: "ns"},
+	})
+	var calls int
+	client.PrependReactor("get", "jobs", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		calls++
+		if calls < 3 {
+			return false, nil, nil // let the tracker answer with the still-present object
+		}
+		return true, nil, apierrors.NewNotFound(batchv1.Resource("jobs"), "stale-job")
+	})
+	c := clients{k8s: client}
+
+	if err := pollUntilJobDeleted(context.Background(), c, "ns", "stale-job", time.Second, time.Millisecond); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls < 3 {
+		t.Errorf("expected at least 3 Get calls (seeing it present before it clears), got %d", calls)
+	}
+}
+
+func TestWaitForJobDeleted_PropagatesUnexpectedError(t *testing.T) {
+	client := fake.NewClientset()
+	client.PrependReactor("get", "jobs", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewInternalError(errors.New("boom"))
+	})
+	c := clients{k8s: client}
+
+	if err := pollUntilJobDeleted(context.Background(), c, "ns", "stale-job", time.Second, time.Millisecond); err == nil {
+		t.Fatal("expected the unexpected error to be propagated, got nil")
+	}
+}
+
+func TestWaitForJobDeleted_TimesOutWhileStillPresent(t *testing.T) {
+	client := fake.NewClientset(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "stuck-job", Namespace: "ns"},
+	})
+	c := clients{k8s: client}
+
+	err := pollUntilJobDeleted(context.Background(), c, "ns", "stuck-job", 5*time.Millisecond, time.Millisecond)
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
 	}
 }
 

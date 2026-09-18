@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -104,9 +105,16 @@ func repairAepSystemClient(ctx context.Context, c clients, cfg Config, inst *Thu
 
 	// A leftover Job from an earlier, interrupted repair attempt must be
 	// cleared first — the Job's name (and its spec.selector, immutable once
-	// set) cannot be reused by a fresh Create.
+	// set) cannot be reused by a fresh Create. Delete returning success does
+	// not mean the object is already gone: RunJob's own cleanup deletes with
+	// Foreground propagation, which keeps the Job present (deletionTimestamp
+	// set) until its dependent Pod finishes finalizing, so the very next
+	// Create below can otherwise race it and fail with AlreadyExists.
 	if err := c.k8s.BatchV1().Jobs(inst.Namespace).Delete(ctx, job.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete stale bootstrap-import Job %s/%s: %w", inst.Namespace, job.Name, err)
+	}
+	if err := waitForJobDeleted(ctx, c, inst.Namespace, job.Name, 2*time.Minute); err != nil {
+		return fmt.Errorf("wait for stale bootstrap-import Job %s/%s to clear: %w", inst.Namespace, job.Name, err)
 	}
 
 	var out bytes.Buffer
@@ -114,6 +122,34 @@ func repairAepSystemClient(ctx context.Context, c clients, cfg Config, inst *Thu
 		return fmt.Errorf("bootstrap-import Job failed: %w\n%s", err, out.String())
 	}
 	return nil
+}
+
+// waitForJobDeleted polls Get until name is gone from namespace (NotFound) or
+// timeout elapses, propagating any other error immediately. See its caller
+// for why Delete's own success is not sufficient here.
+func waitForJobDeleted(ctx context.Context, c clients, namespace, name string, timeout time.Duration) error {
+	return pollUntilJobDeleted(ctx, c, namespace, name, timeout, 2*time.Second)
+}
+
+func pollUntilJobDeleted(ctx context.Context, c clients, namespace, name string, timeout, interval time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		_, err := c.k8s.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("get job %s/%s: %w", namespace, name, err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s waiting for job %s/%s to be deleted", timeout, namespace, name)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 // aepBootstrapImportChartSpec builds the minimal `helm template` override for
