@@ -100,6 +100,16 @@ func installThunder(ctx context.Context, c clients, cfg Config) (*ThunderInstanc
 		if err := verifyThunderReachable(ctx, c, cfg, inst); err != nil {
 			return nil, fmt.Errorf("verify Thunder %s/%s after repair: %w", namespace, release, err)
 		}
+		// Repair can succeed with a secret resolveSystemClientSecret just
+		// minted (it only reuses one from an existing Secret; it never
+		// creates one) — persist it now so it survives this process exiting,
+		// the same contract createThunder uses. Without this, the credential
+		// would live only in Thunder's own aep-system-client application and
+		// in memory, and the next run would mint yet another one instead of
+		// reusing what is already live.
+		if err := persistSystemClientSecret(ctx, c, inst); err != nil {
+			return nil, fmt.Errorf("persist repaired system client secret %s/%s: %w", namespace, release, err)
+		}
 	}
 	return inst, nil
 }
@@ -159,6 +169,17 @@ func createThunder(ctx context.Context, c clients, cfg Config, inst *ThunderInst
 		return fmt.Errorf("install Thunder chart %s: %w", inst.Release, err)
 	}
 
+	return persistSystemClientSecret(ctx, c, inst)
+}
+
+// persistSystemClientSecret stores inst.SystemClientSecret into the canonical
+// <release>-aep-system-client Secret. Both CREATE (createThunder, above) and a
+// successful BIND-path repair (installThunder) must persist through this same
+// call — resolveSystemClientSecret only ever reuses a value already sitting in
+// this Secret, so any path that mints a new one and never writes it back here
+// leaves the cluster's record of the credential out of sync with what is
+// actually live in Thunder.
+func persistSystemClientSecret(ctx context.Context, c clients, inst *ThunderInstance) error {
 	if _, err := c.k8s.CoreV1().Secrets(inst.Namespace).Apply(ctx,
 		applySecret(inst.Namespace, systemClientSecretName(inst.Release), map[string][]byte{
 			"client-id":     []byte("aep-system-client"),
