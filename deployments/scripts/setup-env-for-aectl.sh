@@ -224,6 +224,7 @@ API_PLATFORM_GATEWAY_CHART_VERSION="1.2.2"
 API_PLATFORM_GATEWAY_IMAGE_VERSION="1.2.1"
 
 API_PLATFORM_VALUES="$(mktemp)"
+BOOTSTRAP_DIR="$(mktemp -d)"
 trap 'rm -rf "$BOOTSTRAP_DIR"; rm -f "$API_PLATFORM_VALUES"' EXIT
 cat > "$API_PLATFORM_VALUES" <<'YAML'
 # Bumped for the Agent Manager convergence (operator 0.6.0 -> 0.11.0, gateway
@@ -352,9 +353,6 @@ EOF
 # ── 3b. ThunderID 1.0.0 (REPLACES the official page's asgardeo/thunder:0.28.0 step) ──
 echo ""
 echo "3️⃣.2  Installing ThunderID ${THUNDER_VERSION} (replaces the official 0.28.0 step)"
-
-BOOTSTRAP_DIR="$(mktemp -d)"
-trap 'rm -rf "$BOOTSTRAP_DIR"; rm -f "$API_PLATFORM_VALUES"' EXIT
 
 # Users + groups. `admin` is left to the chart's OWN built-in bootstrap
 # document (backend/cmd/server/bootstrap/01-default-resources.yaml, id
