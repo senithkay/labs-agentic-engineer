@@ -43,7 +43,10 @@ package envidp
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"strings"
 
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -121,11 +124,31 @@ type Config struct {
 	OpenBaoWriteRole      string
 }
 
+// maxReleaseName is Helm's own release-name limit. releaseName's result also
+// serves as the namespace name (installThunder sets namespace := release),
+// which Kubernetes bounds at 63 — the tighter Helm limit governs.
+const maxReleaseName = 53
+
 // releaseName is this package's fixed naming convention: both the Helm
 // release and its namespace, for a (org, env) pair. See Config's doc comment
 // for why this is not Agent Manager's own naming-library output in general.
+//
+// An (org, env) pair short enough to fit is returned verbatim — every
+// existing install (e.g. "thunder-default-development") is unaffected by the
+// bound below. Only a pair long enough to push the natural name past
+// maxReleaseName gets truncated, with a stable hash of the FULL natural name
+// appended so two long names that happen to share a prefix past the
+// truncation point don't collide on the same release/namespace.
 func releaseName(org, env string) string {
-	return fmt.Sprintf("thunder-%s-%s", org, env)
+	natural := fmt.Sprintf("thunder-%s-%s", org, env)
+	if len(natural) <= maxReleaseName {
+		return natural
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(natural))
+	suffix := fmt.Sprintf("-%08x", h.Sum32()) // 9 chars: '-' + 8 hex
+	head := strings.TrimRight(natural[:maxReleaseName-len(suffix)], "-")
+	return head + suffix
 }
 
 // publicURL is the hostname this package exposes T2 on: an httproute on the
@@ -136,6 +159,23 @@ func releaseName(org, env string) string {
 // Manager routing to depend on.
 func publicURL(env string) string {
 	return fmt.Sprintf("http://%s-idp.openchoreo.localhost:8080", env)
+}
+
+// validReleaseName rejects a releaseName result that is not a legal Helm
+// release name — installThunder also uses it verbatim as a Kubernetes
+// namespace, so it must satisfy the same DNS-1123 label rules a namespace
+// name does. releaseName only bounds length; it does not touch the character
+// set, so a Config.Org/Env sourced from free-form config (see Config's doc
+// comment — neither is validated against a live k8s object before reaching
+// here) can still produce an invalid name, e.g. from uppercase or
+// underscores. Caught here, once, before Install does anything to the
+// cluster, instead of surfacing as a Helm/namespace-create API error deep
+// inside installThunder.
+func validReleaseName(name string) error {
+	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+		return fmt.Errorf("derived name %q is not a valid Helm release/namespace name: %s", name, strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // adminURL is T2's in-cluster Service address — what this package and

@@ -42,6 +42,55 @@ func TestReleaseNameAndURLs(t *testing.T) {
 	}
 }
 
+func TestReleaseName_BoundaryLength(t *testing.T) {
+	// "thunder-" (8) + org + "-" (1) + env == exactly maxReleaseName: still
+	// verbatim, no hash suffix.
+	org := strings.Repeat("o", 22)
+	env := strings.Repeat("e", 22)
+	natural := "thunder-" + org + "-" + env
+	if len(natural) != maxReleaseName {
+		t.Fatalf("test fixture is %d chars, want exactly %d", len(natural), maxReleaseName)
+	}
+	if got := releaseName(org, env); got != natural {
+		t.Errorf("releaseName at exactly the limit = %q, want verbatim %q", got, natural)
+	}
+
+	// One character over: must shrink to the bound and gain a hash suffix.
+	over := releaseName(org, env+"e")
+	if len(over) > maxReleaseName {
+		t.Errorf("releaseName one char over the limit = %q (%d chars), want <= %d", over, len(over), maxReleaseName)
+	}
+	if over == natural {
+		t.Errorf("releaseName one char over the limit did not change from the boundary case")
+	}
+}
+
+func TestReleaseName_NoCollisionOnSharedPrefix(t *testing.T) {
+	// Two long (org, env) pairs sharing every character up to the truncation
+	// point must still produce different release names — the whole point of
+	// hashing the FULL natural name rather than just truncating it.
+	longOrg := strings.Repeat("x", 40)
+	a := releaseName(longOrg, "environment-one")
+	b := releaseName(longOrg, "environment-two")
+	if a == b {
+		t.Errorf("releaseName collided for two different long inputs: both = %q", a)
+	}
+	if len(a) > maxReleaseName || len(b) > maxReleaseName {
+		t.Errorf("releaseName exceeded the limit: %q (%d), %q (%d)", a, len(a), b, len(b))
+	}
+}
+
+func TestValidReleaseName(t *testing.T) {
+	if err := validReleaseName(releaseName("acme", "prod")); err != nil {
+		t.Errorf("valid name rejected: %v", err)
+	}
+	for _, name := range []string{"Acme_Prod", "thunder-default-development-", "-thunder-default"} {
+		if err := validReleaseName(name); err == nil {
+			t.Errorf("validReleaseName(%q) = nil, want an error", name)
+		}
+	}
+}
+
 func TestResolveSystemClientSecret_GeneratesWhenMissing(t *testing.T) {
 	client := fake.NewClientset()
 	c := clients{k8s: client}

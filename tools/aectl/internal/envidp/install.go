@@ -37,6 +37,9 @@ func Install(ctx context.Context, k8sClient kubernetes.Interface, cfg Config) er
 	if cfg.Org == "" || cfg.Env == "" {
 		return fmt.Errorf("envidp: Org and Env must both be set")
 	}
+	if err := validReleaseName(releaseName(cfg.Org, cfg.Env)); err != nil {
+		return fmt.Errorf("envidp: %w", err)
+	}
 	c := clients{k8s: k8sClient, kubeconfig: cfg.Kubeconfig}
 
 	inst, err := installThunder(ctx, c, cfg)
