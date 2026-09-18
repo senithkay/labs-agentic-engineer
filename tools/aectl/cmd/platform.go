@@ -37,6 +37,7 @@ import (
 	"github.com/wso2/aep/aectl/internal/addons"
 	"github.com/wso2/aep/aectl/internal/bootstrap"
 	"github.com/wso2/aep/aectl/internal/config"
+	"github.com/wso2/aep/aectl/internal/envidp"
 	aectlhelm "github.com/wso2/aep/aectl/internal/helm"
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
 	"github.com/wso2/aep/aectl/internal/openbao"
@@ -199,16 +200,6 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 			ui.Success("Anthropic API key (from env)")
 		}
 
-		if openBaoDirect && os.Getenv("AEP_OPENBAO_TOKEN") == "" {
-			obToken, err := readMaskedInput("OpenBao token (Enter = use default \"root\")")
-			if err != nil {
-				return fmt.Errorf("read OpenBao token: %w", err)
-			}
-			if obToken != "" {
-				viper.Set("openbao.token", obToken)
-			}
-		}
-
 		thunderSecret := strings.TrimSpace(os.Getenv("AEP_THUNDER_ADMIN_CLIENT_SECRET"))
 		if thunderSecret == "" {
 			var err error
@@ -233,8 +224,19 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("thunder.admin_client_secret is not set — set it via AEP_THUNDER_ADMIN_CLIENT_SECRET or re-run without --reuse-secrets")
 		}
 
+		// The value aep-api authenticates to OpenBao with at runtime (see
+		// aep-openbao-secrets in the chart). Not interactive: aectl's own
+		// write access to OpenBao (below) goes through the cluster's
+		// Kubernetes-auth login (GetSAToken + KubernetesLogin), never this
+		// value, so there is nothing to prompt for here — only aep-api reads
+		// it, later, from the ESO-synced Secret this seeds.
+		openBaoToken := os.Getenv("AEP_OPENBAO_TOKEN")
+		if openBaoToken == "" {
+			openBaoToken = "root"
+		}
+
 		fmt.Println()
-		if err := provisionOpenBao(ctx, anthropicKey, adminClientID, adminClientSecret); err != nil {
+		if err := provisionOpenBao(ctx, anthropicKey, adminClientID, adminClientSecret, openBaoToken); err != nil {
 			return fmt.Errorf("provision OpenBao: %w", err)
 		}
 	}
@@ -275,8 +277,10 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	helmArgs = append(helmArgs, "--set",
 		fmt.Sprintf("codingAgentDispatch.openBaoDirect.enabled=%t", openBaoDirect))
 	if openBaoDirect {
+		// OPENBAO_TOKEN is NOT set here — aep-api reads it from the
+		// ESO-synced aep-openbao-secrets Secret (provisionOpenBao seeds
+		// aep/openbao-token), never a literal Helm value.
 		helmArgs = append(helmArgs, "--set", "openbao.addr="+viper.GetString("openbao.addr"))
-		helmArgs = append(helmArgs, "--set", "openbao.token="+viper.GetString("openbao.token"))
 	}
 	helmArgs = append(helmArgs, "--set",
 		fmt.Sprintf("webhook.localSmee.enabled=%t", viper.GetBool("webhook.local_smee.enabled")))
@@ -284,10 +288,8 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		helmArgs = append(helmArgs, "--set", "webhook.deliveryURL="+u)
 	}
 	helmArgs = append(helmArgs, "--set",
-		fmt.Sprintf("localOrgProvisioning.enabled=%t", viper.GetBool("oc.local_org_provisioning.enabled")))
-	if ns := viper.GetString("oc.org_namespace"); ns != "" {
-		helmArgs = append(helmArgs, "--set", "localOrgProvisioning.orgNamespace="+ns)
-	}
+		fmt.Sprintf("localOrgProvisioning.enabled=%t", viper.GetBool("oc.local_org_provisioning.enabled")),
+		"--set", "localOrgProvisioning.orgNamespace="+ocOrgNamespace())
 
 	helmSp := ui.NewSpinner(fmt.Sprintf("Installing %s", chartLabel))
 	helmSp.Start()
@@ -301,21 +303,48 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 	helmSp.Success(fmt.Sprintf("%s installed", chartLabel))
 
-	if err := waitForAllPodsReady(ctx, k8sClient, initPlatformNamespace, 10*time.Minute); err != nil {
-		return err
-	}
-
+	// Thunder registration must happen before waiting for pods: aep-api reads
+	// its own SERVICE_AUTH client secret at boot and cannot become Ready until
+	// Thunder has been told that secret (doThunderSetup rotates it on every
+	// run — see aepThunderClients' comment). Waiting for pods first would
+	// deadlock whenever Thunder already has this client registered under a
+	// different secret, e.g. a reinstall against a Thunder that was never
+	// wiped.
 	fmt.Println()
 	ui.Step("Registering Thunder OAuth clients")
 	if err := doThunderSetup(ctx, k8sClient, initPlatformNamespace,
 		viper.GetString("thunder.namespace"),
 		initConsoleURL,
-		viper.GetString("thunder.config_map"),
-		viper.GetString("thunder.deployment"),
 	); err != nil {
 		return err
 	}
 	ui.Success("Thunder configured")
+
+	if err := waitForAllPodsReady(ctx, k8sClient, initPlatformNamespace, 10*time.Minute); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	ui.Step("Installing environment identity provider and gateway")
+	if err := envidp.Install(ctx, k8sClient, envidp.Config{
+		// Org is the Environment CR's NAMESPACE (oc.default_org_namespace via
+		// ocOrgNamespace), Env is its NAME (oc.pipeline_source_environment via
+		// ocPipelineSourceEnvironment) — two different config axes. Both
+		// resolve the same way platform_gateway.go's checkGatewayIngress/
+		// applyGatewayIngressConfig do, so envidp's T2/gateway/binding record
+		// targets the SAME Environment object those functions read and patch.
+		Org: ocOrgNamespace(), Env: ocPipelineSourceEnvironment(),
+		PlatformThunderURL:       thunderURL,
+		PlatformThunderPublicURL: viper.GetString("thunder.public_url"),
+		Kubeconfig:               kubeconfig,
+		OpenBaoNamespace:         ocOpenBaoNamespace,
+		OpenBaoRelease:           ocOpenBaoRelease,
+		OpenBaoServiceAccount:    ocOpenBaoSA,
+		OpenBaoWriteRole:         ocWriteRole,
+	}); err != nil {
+		return fmt.Errorf("install environment identity provider: %w", err)
+	}
+	ui.Success("Environment identity provider and gateway ready")
 
 	platformVersion := initPlatformVersion
 	if platformVersion == "latest" {
@@ -485,10 +514,19 @@ func runAddonInstall(ctx context.Context, platformVersion string, deps addonDeps
 				preSp.Success(fmt.Sprintf("%s prerequisites applied", op.DisplayName))
 			}
 
-			if len(op.WaitForSecrets) > 0 && deps.waitForSecrets != nil {
+			// thunder-app-operator's precondition Secret is named from the
+			// org/env pair (see addons.Available's comment on this addon),
+			// which addons.go cannot know statically — fill in the real name
+			// here rather than duplicating envidp's naming format.
+			waitForSecrets := op.WaitForSecrets
+			if op.ReleaseName == "thunder-app-operator" {
+				waitForSecrets = []string{envidp.BindingName(ocOrgNamespace(), ocPipelineSourceEnvironment())}
+			}
+
+			if len(waitForSecrets) > 0 && deps.waitForSecrets != nil {
 				waitSp := ui.NewSpinner(fmt.Sprintf("Waiting for %s credentials", op.DisplayName))
 				waitSp.Start()
-				if err := deps.waitForSecrets(ctx, op.Namespace, op.WaitForSecrets); err != nil {
+				if err := deps.waitForSecrets(ctx, op.Namespace, waitForSecrets); err != nil {
 					waitSp.Fail(fmt.Sprintf("%s credentials not ready", op.DisplayName))
 					operatorFailed[a.Operator.ReleaseName] = fmt.Errorf("wait for %s secrets: %w", op.ReleaseName, err)
 					continue
@@ -648,6 +686,7 @@ func verifyOpenBaoSecrets(ctx context.Context) error {
 
 	required := []string{
 		"aep/anthropic-api-key",
+		"aep/openbao-token",
 		"aep/postgres-password",
 		"aep/task-signing-key",
 		"aep/oauth-state-key",
@@ -684,7 +723,7 @@ func verifyOpenBaoSecrets(ctx context.Context) error {
 }
 
 // provisionOpenBao seeds all platform secrets into OC's built-in OpenBao instance.
-func provisionOpenBao(ctx context.Context, anthropicKey, thunderAdminClientID, thunderAdminClientSecret string) error {
+func provisionOpenBao(ctx context.Context, anthropicKey, thunderAdminClientID, thunderAdminClientSecret, openBaoToken string) error {
 	sp := ui.NewSpinner("Connecting to OpenBao")
 	sp.Start()
 
@@ -777,6 +816,7 @@ func provisionOpenBao(ctx context.Context, anthropicKey, thunderAdminClientID, t
 
 	secrets := []struct{ path, value string }{
 		{"aep/anthropic-api-key", anthropicKey},
+		{"aep/openbao-token", openBaoToken},
 		{"aep/postgres-password", postgresPassword},
 		{"aep/task-signing-key", signingKey},
 		{"aep/oauth-state-key", oauthStateKey},

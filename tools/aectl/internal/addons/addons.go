@@ -86,10 +86,21 @@ var Available = []Addon{
 			Chart:       "oci://ghcr.io/wso2/thunder-app-operator",
 			Namespace:   "thunder-app-operator-system",
 			DisplayName: "thunder-app-operator",
-			// The platform chart creates an ESO ExternalSecret that syncs to
-			// this Secret. ESO sync is async; wait before Helm install so the
-			// operator Pod starts with credentials already present.
-			WaitForSecrets: []string{"thunder-app-operator-credentials"},
+			// The operator carries no fixed credentials of its own (the
+			// two-tier Thunder change removed the old
+			// thunder-app-operator-credentials Secret this used to name —
+			// see operator-namespace.yaml's own comment). It resolves
+			// Thunder per (org, environment) from that pair's binding
+			// record instead: a Secret named "thunder-binding-<org>-<env>"
+			// (envidp.BindingName) mirrored into this namespace by
+			// internal/envidp's Install step (cmd.runAEPInit runs that step
+			// before this addon installs). The org/env pair is only known at
+			// install time, so WaitForSecrets is left empty here and
+			// installAddons fills in the real name before waiting — see its
+			// own comment. Waiting on it is a regression guard, not dead
+			// weight: it fails loudly if that step is ever skipped or its
+			// naming drifts, rather than leaving the operator running with
+			// no environment it can register apps into.
 		},
 		Manifests: []string{thunderAppResourceType, thunderAppRBAC},
 		VerifyResources: []VerifySpec{
