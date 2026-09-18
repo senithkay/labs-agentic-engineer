@@ -114,6 +114,8 @@ func init() {
 	_ = viper.BindPFlag("oc.api_url", initCmd.Flags().Lookup("oc-api-url"))
 	initCmd.Flags().String("oc-observability-api-url", "", "In-cluster URL of the OpenChoreo Observer, for build logs and coding-cycle log archiving (overrides config; empty leaves the chart default)")
 	_ = viper.BindPFlag("oc.observability_api_url", initCmd.Flags().Lookup("oc-observability-api-url"))
+	initCmd.Flags().Bool("data-plane-gateway-tls", false, "Whether the data-plane gateway terminates TLS (overrides config; false is correct for aectl's own plain-HTTP gateway setup, set true only against a gateway that genuinely fronts TLS)")
+	_ = viper.BindPFlag("oc.data_plane_gateway_tls", initCmd.Flags().Lookup("data-plane-gateway-tls"))
 	initCmd.Flags().String("webhook-delivery-url", "", "Public URL registered on each repo's webhook (overrides config)")
 	_ = viper.BindPFlag("webhook.delivery_url", initCmd.Flags().Lookup("webhook-delivery-url"))
 	initCmd.Flags().BoolVar(&initOpenBaoDirect, "openbao-direct", false, "Enable OpenBao-direct secrets delivery — injects OPENBAO_ADDR/TOKEN into aep-api (required for local/OSS installs)")
@@ -259,6 +261,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		"--set", "thunder.adminURL=" + thunderURL,
 		"--set", "thunder.jwksURL=" + thunderURL + "/oauth2/jwks",
 		"--set", "platformAPI.baseURL=" + viper.GetString("oc.api_url"),
+		"--set", fmt.Sprintf("dataPlaneGateway.tls=%t", viper.GetBool("oc.data_plane_gateway_tls")),
 	}
 	// Chart source: local path takes precedence, otherwise OCI registry.
 	// Must be inserted at index 3: after "upgrade", "--install", <release>.

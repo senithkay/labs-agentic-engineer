@@ -118,6 +118,13 @@ spec:
             - name: OBSERVER_URL
               value: {{ .Values.observer.baseURL | quote }}
             {{- end }}
+            # Without this, aep-api's own default assumes the data-plane
+            # gateway terminates TLS and holds every component with an
+            # external URL at "converging" forever waiting on a certificate
+            # window that does not exist here — see dataPlaneGateway.tls's
+            # comment in values.yaml.
+            - name: DATA_PLANE_GATEWAY_TLS
+              value: {{ .Values.dataPlaneGateway.tls | quote }}
             - name: PLATFORM_API_SERVICE_BASE_URL
               valueFrom: 
                 configMapKeyRef:

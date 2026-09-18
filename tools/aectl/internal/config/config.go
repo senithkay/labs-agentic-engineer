@@ -55,6 +55,7 @@ var ConfigMapKeys = []string{
 	"oc.default_org_namespace",
 	"oc.pipeline_source_environment",
 	"oc.local_org_provisioning.enabled",
+	"oc.data_plane_gateway_tls",
 	"platform.workspaces.access_mode",
 	"codingagent.openbao_direct.enabled",
 	"openbao.addr",
@@ -100,8 +101,17 @@ var keyRegistry = map[string]configKeyMeta{
 	// The single OpenChoreo Environment AEP provisions into and patches gateway
 	// ingress onto. Empty falls back to "default" (see ocPipelineSourceEnvironment in
 	// cmd/platform_gateway.go).
-	"oc.pipeline_source_environment":     {required: false, kind: kindString},
-	"oc.local_org_provisioning.enabled":  {required: false, kind: kindBool},
+	"oc.pipeline_source_environment":    {required: false, kind: kindString},
+	"oc.local_org_provisioning.enabled": {required: false, kind: kindBool},
+	// Whether the data-plane gateway aectl is pointing at terminates TLS.
+	// Unset (false) matches aectl's typical target — its own gateway setup
+	// (envidp's Thunder+gateway install) always advertises plain http:// URLs
+	// with no certificate-issuance step to wait for, so aep-api's
+	// endpoint-reachability wait (gated on this exact flag) would otherwise
+	// hold every web component at "converging" forever probing a URL that can
+	// never answer. Set true only when aectl is installing against a gateway
+	// that genuinely fronts TLS.
+	"oc.data_plane_gateway_tls":          {required: false, kind: kindBool},
 	"platform.workspaces.access_mode":    {required: false, kind: kindEnum, enumValues: []string{"", "ReadWriteOnce", "ReadWriteMany", "ReadOnlyMany"}},
 	"codingagent.openbao_direct.enabled": {required: false, kind: kindBool},
 	"openbao.addr":                       {required: false, kind: kindURL},
