@@ -129,6 +129,23 @@ spec:
                 configMapKeyRef:
                   name: platform-configs
                   key: THUNDER_ISSUER
+            # The platform IdP the coding-agent dispatch mints its own
+            # (PUBLISHER_*) client_credentials token against — same instance
+            # as JWKS_URL/JWT_ISSUER above, read again under the names
+            # config_loader.go's PlatformIDP struct expects. Without these,
+            # PlatformIDP.JWKSURL falls back to a hostname no deployment of
+            # this chart actually has, and every coding-agent dispatch fails
+            # before it mints its first token.
+            - name: PLATFORM_IDP_JWKS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: THUNDER_JWKS_URL
+            - name: PLATFORM_IDP_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: THUNDER_ISSUER
 
             - name: THUNDER_ADMIN_URL
               valueFrom:
@@ -156,12 +173,18 @@ spec:
               value: {{ .Values.codingAgentRunner.image | quote }}
             # OpenBao-direct secrets delivery (local-only). Cloud injects a
             # different SecretsProvider via the overlay; OPENBAO_* must be
-            # absent there.
+            # absent there. OPENBAO_TOKEN comes from the ESO-synced
+            # aep-openbao-secrets Secret, same as every other credential below
+            # — never a literal Helm value (it would otherwise sit in plaintext
+            # in the release's values/history and this Deployment's own spec).
             {{- if .Values.codingAgentDispatch.openBaoDirect.enabled }}
             - name: OPENBAO_ADDR
               value: {{ .Values.openbao.addr | quote }}
             - name: OPENBAO_TOKEN
-              value: {{ .Values.openbao.token | default "root" | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: aep-openbao-secrets
+                  key: OPENBAO_TOKEN
             {{- end }}
             # GitHub webhook delivery URL registered on each repo. Local → smee.io
             # channel (forwarded in-cluster by the smee-client); prod → the real
