@@ -38,14 +38,10 @@ func registerThunderFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.String("thunder-namespace", "", "Kubernetes namespace where Thunder is installed")
 	f.String("thunder-url", "", "In-cluster URL of the Thunder service")
-	f.String("thunder-config-map", "", "Name of Thunder's runtime ConfigMap")
-	f.String("thunder-deployment", "", "Name of Thunder's Deployment")
 	f.String("thunder-public-url", "", "Public URL of Thunder — must match the JWT issuer configured in Thunder")
 
 	_ = viper.BindPFlag("thunder.namespace", f.Lookup("thunder-namespace"))
 	_ = viper.BindPFlag("thunder.url", f.Lookup("thunder-url"))
-	_ = viper.BindPFlag("thunder.config_map", f.Lookup("thunder-config-map"))
-	_ = viper.BindPFlag("thunder.deployment", f.Lookup("thunder-deployment"))
 	_ = viper.BindPFlag("thunder.public_url", f.Lookup("thunder-public-url"))
 }
 
@@ -79,13 +75,15 @@ const (
 	thunderSystemClient = "aep-system-client"
 )
 
-// doThunderSetup registers all AEP OAuth clients in Thunder and patches its CORS
-// configuration. It port-forwards to Thunder directly rather than waiting for the
-// thunder-app-operator to reconcile ThunderApplication CRs.
+// doThunderSetup registers all AEP OAuth clients in Thunder. It port-forwards
+// to Thunder directly rather than waiting for the thunder-app-operator to
+// reconcile ThunderApplication CRs. Thunder's CORS configuration is handled by
+// the aep-platform chart's own TrafficPolicy (templates/thunder/cors-policy.yaml),
+// not by this function.
 func doThunderSetup(
 	ctx context.Context,
 	k8sClient *kubernetes.Clientset,
-	platformNamespace, thunderNamespace, consoleURL, thunderConfigMap, thunderDeployment string,
+	platformNamespace, thunderNamespace, consoleURL string,
 ) error {
 	// 1. Read client secrets from the ESO-synced aep-thunder-secrets K8s Secret.
 	//    ESO may take a few seconds after pod readiness to complete its first sync,
@@ -181,14 +179,6 @@ func doThunderSetup(
 		return fmt.Errorf("assign admin role to %q: %w", thunderSystemClient, err)
 	}
 	sp.Success("System client role assigned")
-
-	// 6. Patch Thunder's CORS config so the console SPA can make browser-side OAuth requests.
-	ui.Step("Patching Thunder CORS configuration")
-	if err := thunder.PatchCORS(ctx, k8sClient, consoleURL, thunderNamespace, thunderConfigMap, thunderDeployment); err != nil {
-		ui.Warn(fmt.Sprintf("CORS patch failed (%v) — add %s manually if needed", err, consoleURL))
-	} else {
-		ui.Detail("Thunder CORS configured")
-	}
 
 	ui.Detail("Thunder setup complete")
 	return nil
