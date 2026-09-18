@@ -50,6 +50,7 @@ var ConfigMapKeys = []string{
 	"thunder.admin_client_id",
 	"thunder.public_url",
 	"oc.api_url",
+	"oc.observability_api_url",
 	"oc.system_namespace",
 	"oc.default_org_namespace",
 	"oc.pipeline_source_environment",
@@ -85,7 +86,11 @@ var keyRegistry = map[string]configKeyMeta{
 	"thunder.admin_client_id": {required: true, kind: kindString},
 	"thunder.public_url":      {required: true, kind: kindURL},
 	"oc.api_url":              {required: true, kind: kindURL},
-	"oc.system_namespace":     {required: true, kind: kindString},
+	// In-cluster URL of the OpenChoreo Observer. Empty leaves the chart's own
+	// default (see values.yaml's observer.baseURL) — build-log reading and
+	// coding-cycle log archiving degrade gracefully when neither is reachable.
+	"oc.observability_api_url": {required: false, kind: kindURL},
+	"oc.system_namespace":      {required: true, kind: kindString},
 	// The k8s namespace of the one org AEP ships with — AEP is single-org
 	// today, so this is that default org's home namespace: where its Project,
 	// Environment(s), DeploymentPipeline, and per-org ComponentTypes

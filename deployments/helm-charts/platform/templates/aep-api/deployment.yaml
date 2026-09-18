@@ -114,6 +114,10 @@ spec:
               value: {{ .Values.observer.clientId | quote }}
             - name: OBSERVER_OAUTH_HOST_HEADER
               value: ""
+            {{- if .Values.observer.baseURL }}
+            - name: OBSERVER_URL
+              value: {{ .Values.observer.baseURL | quote }}
+            {{- end }}
             - name: PLATFORM_API_SERVICE_BASE_URL
               valueFrom: 
                 configMapKeyRef:

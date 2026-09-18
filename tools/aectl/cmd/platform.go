@@ -112,6 +112,8 @@ func init() {
 	initCmd.Flags().BoolVar(&initSkipOCVersionCheck, "skip-oc-version-check", false, "Skip the OpenChoreo minimum version check (not recommended)")
 	initCmd.Flags().String("oc-api-url", "", "In-cluster URL of the OpenChoreo platform API (overrides config)")
 	_ = viper.BindPFlag("oc.api_url", initCmd.Flags().Lookup("oc-api-url"))
+	initCmd.Flags().String("oc-observability-api-url", "", "In-cluster URL of the OpenChoreo Observer, for build logs and coding-cycle log archiving (overrides config; empty leaves the chart default)")
+	_ = viper.BindPFlag("oc.observability_api_url", initCmd.Flags().Lookup("oc-observability-api-url"))
 	initCmd.Flags().String("webhook-delivery-url", "", "Public URL registered on each repo's webhook (overrides config)")
 	_ = viper.BindPFlag("webhook.delivery_url", initCmd.Flags().Lookup("webhook-delivery-url"))
 	initCmd.Flags().BoolVar(&initOpenBaoDirect, "openbao-direct", false, "Enable OpenBao-direct secrets delivery — injects OPENBAO_ADDR/TOKEN into aep-api (required for local/OSS installs)")
@@ -273,6 +275,9 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 	if mode := viper.GetString("platform.workspaces.access_mode"); mode != "" {
 		helmArgs = append(helmArgs, "--set", "workspaces.accessMode="+mode)
+	}
+	if u := viper.GetString("oc.observability_api_url"); u != "" {
+		helmArgs = append(helmArgs, "--set", "observer.baseURL="+u)
 	}
 	helmArgs = append(helmArgs, "--set",
 		fmt.Sprintf("codingAgentDispatch.openBaoDirect.enabled=%t", openBaoDirect))
