@@ -19,6 +19,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -866,8 +867,12 @@ func ensureCredentialEncryptionKey(ctx context.Context, client kubernetes.Interf
 	if err != nil {
 		return fmt.Errorf("check secret %s: %w", credentialEncryptionKeyPath, err)
 	}
-	if status != 404 {
+	switch status {
+	case 200:
 		return nil
+	case 404:
+	default:
+		return fmt.Errorf("check secret %s: OpenBao returned %d", credentialEncryptionKeyPath, status)
 	}
 	key, err := credentialEncryptionKeyFromCluster(ctx, client, initPlatformNamespace)
 	if err != nil {
@@ -887,7 +892,8 @@ func ensureCredentialEncryptionKey(ctx context.Context, client kubernetes.Interf
 }
 
 // credentialEncryptionKeyFromCluster returns the key credentialEncryptionKeySecret
-// holds in namespace, or "" when that Secret or its key is absent.
+// holds in namespace, or "" when that Secret or its key is absent. A value that
+// is not a base64-encoded 32-byte key is an error: aep-api would refuse it.
 func credentialEncryptionKeyFromCluster(ctx context.Context, client kubernetes.Interface, namespace string) (string, error) {
 	s, err := client.CoreV1().Secrets(namespace).Get(ctx, credentialEncryptionKeySecret, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -896,7 +902,14 @@ func credentialEncryptionKeyFromCluster(ctx context.Context, client kubernetes.I
 	if err != nil {
 		return "", fmt.Errorf("read secret %s/%s: %w", namespace, credentialEncryptionKeySecret, err)
 	}
-	return string(s.Data["CREDENTIAL_ENCRYPTION_KEY"]), nil
+	key := string(s.Data["CREDENTIAL_ENCRYPTION_KEY"])
+	if key == "" {
+		return "", nil
+	}
+	if raw, err := base64.StdEncoding.DecodeString(key); err != nil || len(raw) != 32 {
+		return "", fmt.Errorf("secret %s/%s does not hold a base64-encoded 32-byte key", namespace, credentialEncryptionKeySecret)
+	}
+	return key, nil
 }
 
 // provisionOpenBao seeds all platform secrets into OC's built-in OpenBao instance.

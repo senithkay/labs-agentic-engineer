@@ -36,6 +36,7 @@ func TestCredentialEncryptionKeyFromCluster(t *testing.T) {
 		name    string
 		objects []corev1.Secret
 		want    string
+		wantErr bool
 	}{
 		{
 			name: "secret holds the key",
@@ -53,6 +54,24 @@ func TestCredentialEncryptionKeyFromCluster(t *testing.T) {
 			}},
 			want: "",
 		},
+		// A malformed value must stop the run, not be restored into OpenBao
+		// (aep-api would refuse it) or fall through to generating a new key.
+		{
+			name: "not base64",
+			objects: []corev1.Secret{{
+				ObjectMeta: metav1.ObjectMeta{Name: credentialEncryptionKeySecret, Namespace: ns},
+				Data:       map[string][]byte{"CREDENTIAL_ENCRYPTION_KEY": []byte("!!!not-base64!!!")},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "16 bytes, not 32",
+			objects: []corev1.Secret{{
+				ObjectMeta: metav1.ObjectMeta{Name: credentialEncryptionKeySecret, Namespace: ns},
+				Data:       map[string][]byte{"CREDENTIAL_ENCRYPTION_KEY": []byte("MDEyMzQ1Njc4OWFiY2RlZg==")},
+			}},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,6 +82,12 @@ func TestCredentialEncryptionKeyFromCluster(t *testing.T) {
 				}
 			}
 			got, err := credentialEncryptionKeyFromCluster(context.Background(), client, ns)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("got %q, nil; want an error", got)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("credentialEncryptionKeyFromCluster: %v", err)
 			}
